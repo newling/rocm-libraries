@@ -3960,9 +3960,8 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("computeLoadSrd")
     use64bShadowLimit = self.states.use64bShadowLimitMX if tc in ["MXSA", "MXSB"] else self.states.use64bShadowLimit
     isMX = tc in ("MXSA", "MXSB")
-    # UseSubtileImpl uses a tile-boundary fixed Srd+2 for both MX scale and data A/B.
-    # This avoids 32-bit overflow when computing the full tensor2dSize (N*K or M*K > 2^32).
-    useFixedSrd2 = bool(kernel.get("UseSubtileImpl"))
+    isPreShuffled = tc in ("A", "B") and kernel["ProblemType"].get("SwizzleTensor%s" % tc, False)
+    useFixedSrd2 = bool(kernel.get("UseSubtileImpl")) or isPreShuffled
     if isMX:
       tcab = "A" if tc == "MXSA" else "B"
       mxBlock = kernel["ProblemType"]["MXBlock%s"%tcab]
@@ -4160,7 +4159,10 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAddCU32(dst=sgpr(tensor2dSize1), src0=sgpr(tensor2dSize1), src1=sgpr(stmp+1), comment="sum tensor size"))
 
       # skip ShadowLimit and Srd+2 calculation here in useFixedSrd2 case
-      if not useFixedSrd2:
+      if isPreShuffled:
+        module.add(SMovB32(dst=sgpr("Srd%s+2"%tc), src="BufferLimit",
+                           comment="Pre-shuffled %s: disable SRD bounds check" % tc))
+      elif not useFixedSrd2:
         if use64bShadowLimit:
           limitTmp0 = "ShadowLimit%s+0"%tc
           limitTmp1 = "ShadowLimit%s+1"%tc
