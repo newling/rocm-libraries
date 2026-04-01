@@ -88,6 +88,7 @@ namespace TensileLite
             TrigIndCos, // 24
             TrigIndAbsSin, // 25
             TrigIndAbsCos, // 26
+            RandomPlusMinusOne, // 27
             Count
         };
 
@@ -516,6 +517,8 @@ namespace TensileLite
                     return getValue<T, InitMode::DenormMax>();
                 case InitMode::RandomNegPosLimited:
                     return getValue<T, InitMode::RandomNegPosLimited>();
+                case InitMode::RandomPlusMinusOne:
+                    return getValue<T, InitMode::RandomNegPosLimited>();
                 case InitMode::Free:
                     return convertDoubleTo<T>(value);
                 case InitMode::SerialIdx:
@@ -595,6 +598,9 @@ namespace TensileLite
                 case InitMode::DenormMax:
                     initArray<T, InitMode::DenormMax>(array, elements);
                 case InitMode::RandomNegPosLimited:
+                    initArray<T, InitMode::RandomNegPosLimited>(array, elements);
+                    break;
+                case InitMode::RandomPlusMinusOne:
                     initArray<T, InitMode::RandomNegPosLimited>(array, elements);
                     break;
                 case InitMode::SerialIdx:
@@ -707,6 +713,9 @@ namespace TensileLite
                     initArrayTrig<T, true, true>(array, tensor);
                     break;
                 case InitMode::RandomNegPosLimited:
+                    initArray<T, InitMode::RandomNegPosLimited>(array, tensor);
+                    break;
+                case InitMode::RandomPlusMinusOne:
                     initArray<T, InitMode::RandomNegPosLimited>(array, tensor);
                     break;
                 case InitMode::Free:
@@ -3543,8 +3552,10 @@ namespace TensileLite
             return Float4x2(getValueWithUpperLowerBoundFP<float>(),
                             getValueWithUpperLowerBoundFP<float>());
         }
+
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
+
 
         template <>
         inline MXScale DataInitialization::getValue<MXScale, InitMode::RandomNegPosLimited>()

@@ -133,6 +133,8 @@ namespace TensileLite
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
                 return 8;
+            case rocisa::DataType::Float4:
+                return 4;
             default:
                 throw std::runtime_error("unsupported datatype");
             }
@@ -186,6 +188,8 @@ namespace TensileLite
                 return "DenormMax";
             case InitMode::RandomNegPosLimited:
                 return "RandomNegPosLimited";
+            case InitMode::RandomPlusMinusOne:
+                return "RandomPlusMinusOne";
             case InitMode::Free:
                 return "Free";
             case InitMode::TrigIndSin:
@@ -259,6 +263,8 @@ namespace TensileLite
                 mode = InitMode::DenormMax;
             else if(strValue == ToString(InitMode::RandomNegPosLimited))
                 mode = InitMode::RandomNegPosLimited;
+            else if(strValue == ToString(InitMode::RandomPlusMinusOne))
+                mode = InitMode::RandomPlusMinusOne;
             else if(strValue == ToString(InitMode::TrigIndSin))
                 mode = InitMode::TrigIndSin;
             else if(strValue == ToString(InitMode::TrigIndCos))
@@ -373,6 +379,10 @@ namespace TensileLite
             case rocisa::DataType::BFloat8Float8:
                 MiK  = 32;
                 MiKv = 8;
+                break;
+            case rocisa::DataType::Float4:
+                MiK  = 16;
+                MiKv = 16;
                 break;
             default:
                 throw std::runtime_error("unsupported datatype for swizzling");
@@ -1772,6 +1782,26 @@ namespace TensileLite
             }
         }
 
+        static std::string_view initModeToMXMethod(InitMode mode)
+        {
+            switch(mode)
+            {
+            case InitMode::Zero:
+                return "Zeros";
+            case InitMode::One:
+            case InitMode::RandomPlusMinusOne:
+                return "Ones";
+            case InitMode::Identity:
+                return "Identity";
+            case InitMode::SerialIdx:
+            case InitMode::SerialDim0:
+            case InitMode::SerialDim1:
+                return "Sequential";
+            default:
+                return "Bounded";
+            }
+        }
+
         void DataInitialization::initializeMXDataForFP4(ContractionProblemGemm const& problem)
         {
             // Compute preSwizzle parameters from the solution's matrix instruction to rearrange
@@ -1843,6 +1873,27 @@ namespace TensileLite
                                 "Bounded",
                                 -1.0f,
                                 1.0f);
+
+                // RandomPlusMinusOne: MX generator produced all 1.0 data with
+                // scale=127 (via "Ones" method). Set each FP4 value to +1 or -1
+                // based on a deterministic hash of its index. Must be deterministic
+                // (not PRNG-based) because this function may be called multiple
+                // times and both calls must produce the same data.
+                if(initA == InitMode::RandomPlusMinusOne)
+                {
+                    size_t numBytes = (rows * cols + 1) / 2;
+                    auto*  aData    = static_cast<uint8_t*>(pristineA.cpuInput.valid.get());
+                    for(size_t i = 0; i < numBytes; i++)
+                    {
+                        // murmur3 finalizer for uniform bit distribution
+                        uint32_t h = static_cast<uint32_t>(i);
+                        h ^= h >> 16; h *= 0x85ebca6bu; h ^= h >> 13;
+                        h *= 0xc2b2ae35u; h ^= h >> 16;
+                        uint8_t lo = (h & 1) ? 0xa : 0x2;
+                        uint8_t hi = ((h >> 1) & 1) ? 0xa : 0x2;
+                        aData[i]   = (hi << 4) | lo;
+                    }
+                }
             }
 
             if(isMXFP4Tensor(problem.b(), problem.mxBlockB()))
@@ -1872,6 +1923,97 @@ namespace TensileLite
                                 "Bounded",
                                 -1.0f,
                                 1.0f);
+
+                // RandomPlusMinusOne: same as A, with different hash seed.
+                if(initB == InitMode::RandomPlusMinusOne)
+                {
+                    size_t numBytes = (rows * cols + 1) / 2;
+                    auto*  bData    = static_cast<uint8_t*>(pristineB.cpuInput.valid.get());
+                    for(size_t i = 0; i < numBytes; i++)
+                    {
+                        // murmur3 finalizer with different seed from A
+                        uint32_t h = static_cast<uint32_t>(i) + 0x9e3779b9u;
+                        h ^= h >> 16; h *= 0x85ebca6bu; h ^= h >> 13;
+                        h *= 0xc2b2ae35u; h ^= h >> 16;
+                        uint8_t lo = (h & 1) ? 0xa : 0x2;
+                        uint8_t hi = ((h >> 1) & 1) ? 0xa : 0x2;
+                        bData[i]   = (hi << 4) | lo;
+                    }
+                }
+
+                // Optional: zero FP4 elements of B outside a specified row/col range.
+                // Set TENSILE_B_NONZERO_RANGE=KLOW_KHIGH_NLOW_NHIGH to keep only
+                // elements B[k,n] where KLOW <= k < KHIGH && NLOW <= n < NHIGH.
+                // Here rows = sizes[0] = K (fast dim), cols = sizes[1] = N.
+                // Indices are in FP4 elements (not bytes).
+                //
+                // This is useful for debugging pre-shuffle (SwizzleTensorB). The
+                // pre-shuffle tiles B into contiguous 32-K x 16-N FP4 blocks (16x16
+                // bytes).
+                //
+                // When the elements occupy the same byte in both the original and
+                // pre-shuffled layouts, the kernel produces correct results even
+                // without pre-shuffle-aware addressing.
+                //
+                // Experiments with SwizzleTensorB=True, DataInitType=1 (ones),
+                // problem 64x64x256, and no pre-shuffle-aware addressing:
+                //
+                //   Range          Numerical Result
+                //   0_32_0_1       PASS
+                //   0_33_0_1       FAIL
+                //   1_5_16_17      PASS
+                //   1_5_32_33      PASS
+                //   0_32_0_16      FAIL
+                //   29_32_48_49    PASS
+                //   29_33_48_49    FAIL
+                //   29_32_48_50    FAIL
+                //
+                // It is easy to reason through the tiling strategy to see that
+                // the cases which PASS are exactly those where the elements are
+                // in the same positions before and after the shuffling.
+                if(const char* rangeEnv = std::getenv("TENSILE_B_NONZERO_RANGE"))
+                {
+                    std::string rangeStr(rangeEnv);
+                    std::array<size_t, 4> bounds{};
+                    size_t pos = 0;
+                    bool valid = true;
+                    for(size_t i = 0; i < 4 && valid; i++)
+                    {
+                        auto sep = (i < 3) ? rangeStr.find('_', pos) : std::string::npos;
+                        auto token = rangeStr.substr(pos, sep - pos);
+                        if(token.empty() || !std::all_of(token.begin(), token.end(), ::isdigit))
+                            valid = false;
+                        else
+                            bounds[i] = std::stoull(token);
+                        pos = (sep == std::string::npos) ? std::string::npos : sep + 1;
+                    }
+                    valid = valid && (pos == std::string::npos);
+
+                    auto [rowLow, rowHigh, colLow, colHigh] = bounds;
+                    if(!valid || rowLow >= rowHigh || colLow >= colHigh)
+                        throw std::runtime_error(
+                            "TENSILE_B_NONZERO_RANGE must be ROWLOW_ROWHIGH_COLLOW_COLHIGH "
+                            "with ROWLOW < ROWHIGH and COLLOW < COLHIGH, got: " + rangeStr);
+
+                    auto* buf = static_cast<uint8_t*>(pristineB.cpuInput.valid.get());
+                    for(size_t col = 0; col < cols; col++)
+                    {
+                        for(size_t row = 0; row < rows; row++)
+                        {
+                            if(row >= rowLow && row < rowHigh
+                               && col >= colLow && col < colHigh)
+                                continue;
+                            size_t byteIdx = col * (stride / 2) + row / 2;
+                            if(row % 2 == 0)
+                                buf[byteIdx] &= 0xF0;
+                            else
+                                buf[byteIdx] &= 0x0F;
+                        }
+                    }
+                    std::cout << "TENSILE_B_NONZERO_RANGE: zeroed B outside ["
+                              << rowLow << "," << rowHigh << ") x ["
+                              << colLow << "," << colHigh << ")" << std::endl;
+                }
             }
         }
 
@@ -2235,8 +2377,12 @@ namespace TensileLite
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                     calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                    auto                          unrolledSize = desc.sizes()[0];
-                    auto                          tiledSize    = desc.sizes()[1];
+                    auto const& dtInfo       = DataTypeInfo::Get(desc.dataType());
+                    auto        tiledSize    = desc.sizes()[1];
+                    // Convert unrolled dimension from logical elements to bytes.
+                    // For sub-byte types (FP4: packing=2), sizes are in logical
+                    // elements but the Tensor and reshape operate on bytes.
+                    auto        unrolledSize = desc.sizes()[0] * dtInfo.elementSize / dtInfo.packing;
                     ::Tensor::Manipulation::Shape paddedShape{
                         ((tiledSize / MiM_N) + !!(tiledSize % MiM_N)) * MiM_N,
                         (unrolledSize / (MiK * PackK) + !!(unrolledSize % (MiK * PackK))) * MiK

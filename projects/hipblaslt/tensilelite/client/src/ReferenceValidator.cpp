@@ -35,6 +35,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <cstddef>
+#include <fstream>
 
 namespace TensileLite
 {
@@ -712,6 +713,39 @@ namespace TensileLite
                 = reinterpret_cast<ValidType const*>(m_cpuResultBuffer.get());
             ValidType const* resultData      = resultBuffer + elementsBeforeData;
             ValidType const* resultAfterData = resultData + tensor.totalAllocatedElements();
+
+            // Dump reference and device tensors to .npy files if TENSILE_DUMP_VALIDATION
+            // is set to a directory path. Files are written as NumPy arrays.
+            if(const char* dumpDir = std::getenv("TENSILE_DUMP_VALIDATION"))
+            {
+                // Map C++ type size to numpy dtype descriptor
+                const char* descr = (sizeof(ValidType) == 4) ? "<f4"
+                                  : (sizeof(ValidType) == 8) ? "<f8"
+                                                             : "<f4";
+                auto writeNpy = [descr](const char* path, const ValidType* data, size_t n) {
+                    std::string header = std::string("{'descr': '") + descr
+                                       + "', 'fortran_order': False, 'shape': ("
+                                       + std::to_string(n) + ",), }";
+                    // Pad header+preamble to multiple of 64 bytes
+                    size_t padLen = 64 - ((10 + header.size() + 1) % 64);
+                    header += std::string(padLen, ' ');
+                    header += '\n';
+                    uint16_t hdrLen = static_cast<uint16_t>(header.size());
+                    std::ofstream f(path, std::ios::binary);
+                    f.write("\x93NUMPY", 6);
+                    f.write("\x01\x00", 2);
+                    f.write(reinterpret_cast<const char*>(&hdrLen), 2);
+                    f.write(header.data(), header.size());
+                    f.write(reinterpret_cast<const char*>(data), n * sizeof(ValidType));
+                };
+                size_t totalElements = tensor.totalAllocatedElements();
+                std::string dir(dumpDir);
+                writeNpy((dir + "/device.npy").c_str(), resultData, totalElements);
+                writeNpy((dir + "/reference.npy").c_str(), reference, totalElements);
+                std::cout << "TENSILE_DUMP_VALIDATION: wrote " << totalElements
+                          << " elements (" << descr << ") to " << dir
+                          << "/{device,reference}.npy" << std::endl;
+            }
 
             PointwiseComparison<ValidType> compareValid(m_printValids, m_printMax, m_printMax > 0, threshold);
             InvalidComparison<ValidType>   compareInvalid(m_printMax, m_printMax > 0);
