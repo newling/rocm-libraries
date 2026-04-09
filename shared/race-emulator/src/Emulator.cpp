@@ -78,6 +78,14 @@ std::string Emulator::getKernargName(int argNumber) const {
   return parsedAsm->args[argNumber].name;
 }
 
+void Emulator::initKernargSegment() {
+  constexpr int kMaxScalarLoadBytes = 64;
+  constexpr char kPoisonByte = static_cast<char>(0xFF);
+  int paddedSize = parsedAsm->kernargSegmentSize + kMaxScalarLoadBytes;
+  kernargSegment.resize(paddedSize, kPoisonByte);
+  kernargIsSet.resize(parsedAsm->args.size(), false);
+}
+
 Emulator::Emulator(std::string_view a, std::shared_ptr<Architecture> arch)
     : arch(std::move(arch)) {
   parsedAsm = std::make_unique<ParsedAsm>(a);
@@ -93,17 +101,13 @@ Emulator::Emulator(std::string_view a, std::shared_ptr<Architecture> arch)
     }
   }
 
-  // Pad the kernarg segment so that multi-dword scalar loads
-  // (s_load_dwordx4, etc.) that straddle the end don't read out of bounds.
-  // The GPU silently ignores reads past the kernarg size. We fill the padding
-  // with 0xFF so that any code that accidentally uses a padding value will
-  // fail fast: 0xFFFFFFFF is NaN as float and -1/UINT32_MAX as integer.
-  // 64 bytes covers the widest load (s_load_dwordx16).
-  constexpr int kMaxScalarLoadBytes = 64;
-  constexpr char kPoisonByte = static_cast<char>(0xFF);
-  int paddedSize = parsedAsm->kernargSegmentSize + kMaxScalarLoadBytes;
-  kernargSegment.resize(paddedSize, kPoisonByte);
-  kernargIsSet.resize(parsedAsm->args.size(), false);
+  initKernargSegment();
+}
+
+Emulator::Emulator(std::unique_ptr<ParsedAsm> parsed,
+                   std::shared_ptr<Architecture> arch)
+    : arch(std::move(arch)), parsedAsm(std::move(parsed)) {
+  initKernargSegment();
 }
 
 Emulator Emulator::createGfx942(std::string_view assembly) {

@@ -30,6 +30,7 @@ class Emulator {
 
 public:
   Emulator(std::string_view assembly, std::shared_ptr<Architecture> arch);
+  Emulator(std::unique_ptr<ParsedAsm> parsedAsm, std::shared_ptr<Architecture> arch);
 
   static Emulator createGfx942(std::string_view assembly);
   static Emulator createGfx950(std::string_view assembly);
@@ -84,6 +85,7 @@ private:
   /// PC) on an already-constructed Workgroup.
   void initializeWaveState(Workgroup &workgroup, Dim3d wgId, Dim3d blockDim,
                            int nWaves);
+  void initKernargSegment();
   std::shared_ptr<Architecture> arch;
   std::unique_ptr<ParsedAsm> parsedAsm;
   std::vector<char> kernargSegment;

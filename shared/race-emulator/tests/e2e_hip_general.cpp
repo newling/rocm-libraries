@@ -4,6 +4,7 @@
 #include "race-emulator/Arch.h"
 #include "race-emulator/Emulator.h"
 #include "race-emulator/FloatTypes.h"
+#include "race-emulator/Parsing.h"
 #include <filesystem> // Requires C++17
 #include <fstream>
 #include <gtest/gtest.h>
@@ -616,3 +617,104 @@ TEST(Gfx1151, F16Adder) { runF16Adder(kGfx1151); }
 
 TEST(Gfx942, F16RoundTrip) { runF16RoundTrip(kGfx942); }
 TEST(Gfx1151, F16RoundTrip) { runF16RoundTrip(kGfx1151); }
+
+// ============================================================================
+// Disassembly path tests: assemble .s → .o, disassemble, run from disassembly.
+// Requires llvm-mc and llvm-objdump on PATH or at LLVM_BIN_DIR.
+// ============================================================================
+
+std::string findLlvmTool(const std::string &name) {
+  // Check LLVM_BIN_DIR env var first.
+  if (const char *dir = std::getenv("LLVM_BIN_DIR")) {
+    std::string path = std::string(dir) + "/" + name;
+    if (fs::exists(path)) return path;
+  }
+  // Check PATH.
+  std::string cmd = "which " + name + " 2>/dev/null";
+  FILE *pipe = popen(cmd.c_str(), "r");
+  if (!pipe) return "";
+  char buf[512];
+  std::string result;
+  while (fgets(buf, sizeof(buf), pipe)) result += buf;
+  pclose(pipe);
+  if (!result.empty() && result.back() == '\n') result.pop_back();
+  return result;
+}
+
+std::string runCommand(const std::string &cmd) {
+  FILE *pipe = popen(cmd.c_str(), "r");
+  if (!pipe) throw std::runtime_error("popen failed: " + cmd);
+  char buf[4096];
+  std::string result;
+  while (fgets(buf, sizeof(buf), pipe)) result += buf;
+  int status = pclose(pipe);
+  if (status != 0) {
+    throw std::runtime_error("Command failed (status " +
+                             std::to_string(status) + "): " + cmd +
+                             "\nOutput: " + result);
+  }
+  return result;
+}
+
+Emulator loadEmulatorFromDisassembly(const ArchParam &arch,
+                                     const std::string &filename) {
+  std::string llvmMc = findLlvmTool("llvm-mc");
+  std::string llvmObjdump = findLlvmTool("llvm-objdump");
+  if (llvmMc.empty() || llvmObjdump.empty()) {
+    throw std::runtime_error("llvm-mc or llvm-objdump not found. "
+                             "Set LLVM_BIN_DIR or add to PATH.");
+  }
+
+  // Load the .s file and parse it for metadata.
+  std::string path = arch.arch->getName() + "/" + filename;
+  std::string assembly = load_kernel_file(path);
+  ParsedAsm metadataSource(assembly);
+
+  // Assemble.
+  std::string sPath = std::string(TEST_KERNEL_DIR) + "/" + path;
+  std::string mcpu = arch.arch->getName();
+  std::string objPath = "/tmp/race_emu_disasm_test_" + mcpu + ".o";
+  runCommand(llvmMc + " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
+             " -filetype=obj " + sPath + " -o " + objPath);
+
+  // Disassemble.
+  std::string disasm = runCommand(llvmObjdump + " -d " + objPath);
+
+  // Parse the disassembly for instructions, labels, pcTable.
+  auto parsed = std::make_unique<ParsedAsm>(parseDisassembly(disasm));
+
+  // Copy metadata from the .s parse.
+  parsed->name = metadataSource.name;
+  parsed->wavefrontSize = metadataSource.wavefrontSize;
+  parsed->kernargSegmentSize = metadataSource.kernargSegmentSize;
+  parsed->args = metadataSource.args;
+  parsed->amdhsa = metadataSource.amdhsa;
+  parsed->initialRegisterAllocation = metadataSource.initialRegisterAllocation;
+  parsed->kernargPreloadLength = metadataSource.kernargPreloadLength;
+  parsed->kernargPreloadOffset = metadataSource.kernargPreloadOffset;
+
+  return Emulator(std::move(parsed), arch.arch);
+}
+
+void runCopyKernelDisassembly(const ArchParam &arch) {
+  auto emulator = loadEmulatorFromDisassembly(arch, "copy.s");
+
+  int N = 128;
+  std::vector<int> h_in(N);
+  std::iota(h_in.begin(), h_in.end(), 100);
+  std::vector<int> h_out(N, -1);
+
+  int *d_out = h_out.data();
+  const int *d_in = h_in.data();
+  emulator.addKernarg(0, &d_out);
+  emulator.addKernarg(1, &d_in);
+  emulator.run(Dim3d(0), {128, 1, 1}, {.raceChecks = true});
+
+  for (int i = 0; i < N; ++i) {
+    EXPECT_EQ(h_out[i], h_in[i])
+        << "Mismatch at index " << i << " (wave " << i / arch.waveSize
+        << ", lane " << i % arch.waveSize << ")";
+  }
+}
+
+TEST(Gfx1151, CopyKernelDisassembly) { runCopyKernelDisassembly(kGfx1151); }
