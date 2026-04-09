@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -220,9 +221,21 @@ void Emulator::initializeWaveState(Workgroup &workgroup, Dim3d wgId,
 
   auto start = parsedAsm->labels.find(parsedAsm->name);
   if (start == parsedAsm->labels.end()) {
-    throw std::runtime_error(
-        "Kernel start label not found. Expected to find the label '" +
-        parsedAsm->name + "' in labels.");
+    // For disassembly, the kernel entry label may differ from the metadata
+    // name (e.g. "label_ASM_Start" vs the full Tensile kernel name). Use
+    // the label with the lowest token index (earliest in the code).
+    int minIndex = std::numeric_limits<int>::max();
+    for (auto it = parsedAsm->labels.begin(); it != parsedAsm->labels.end(); ++it) {
+      if (it->second < minIndex) {
+        minIndex = it->second;
+        start = it;
+      }
+    }
+    if (minIndex == std::numeric_limits<int>::max()) {
+      throw std::runtime_error(
+          "Kernel start label not found. Expected to find the label '" +
+          parsedAsm->name + "' in labels.");
+    }
   }
 
   int labelIndex = start->second;

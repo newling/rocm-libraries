@@ -220,15 +220,24 @@ Wave::compileLine(const std::string &line,
   const auto &instructions = getInstructions();
 
   std::string name = std::string(partitioned[0]);
-  auto e32Pos = name.find("_e32");
-  if (e32Pos != std::string::npos) {
-    name = name.substr(0, e32Pos);
-  }
-  auto e64Pos = name.find("_e64");
-  if (e64Pos != std::string::npos) {
-    name = name.substr(0, e64Pos);
-  }
   auto found = instructions.find(name);
+
+  // If not found, try stripping encoding/size suffixes that the disassembler
+  // may add (e.g. v_add_f32_e32 → v_add_f32, v_accvgpr_write_b32 →
+  // v_accvgpr_write). Only strip if the full name wasn't found.
+  if (found == instructions.end()) {
+    for (const char *suffix : {"_e32", "_e64", "_b32", "_b64", "_b16"}) {
+      auto pos = name.rfind(suffix);
+      if (pos != std::string::npos && pos + std::strlen(suffix) == name.size()) {
+        std::string stripped = name.substr(0, pos);
+        found = instructions.find(stripped);
+        if (found != instructions.end()) {
+          name = stripped;
+          break;
+        }
+      }
+    }
+  }
 
   if (found != instructions.end()) {
     auto exec = found->second->getExecutor(*this, line);
@@ -424,6 +433,10 @@ CommonRegister Wave::getFirstRegister(std::string_view regStr) const {
   } else if (regStr[0] == 'v' && isDigitOrBracket(regStr[1])) {
     regType = CommonRegister::Type::VGPR;
   } else if (regStr.size() >= 3 && regStr.substr(0, 3) == "acc") {
+    isAcc = true;
+    regType = CommonRegister::Type::VGPR;
+  } else if (regStr[0] == 'a' && isDigitOrBracket(regStr[1])) {
+    // Disassembly format: a0 = acc0
     isAcc = true;
     regType = CommonRegister::Type::VGPR;
   }

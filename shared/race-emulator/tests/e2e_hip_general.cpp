@@ -9,6 +9,7 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <numeric>
+#include <thread>
 #include <random>
 #include <sstream>
 #include <string>
@@ -623,37 +624,39 @@ TEST(Gfx1151, F16RoundTrip) { runF16RoundTrip(kGfx1151); }
 // Requires llvm-mc and llvm-objdump on PATH or at LLVM_BIN_DIR.
 // ============================================================================
 
-std::string findLlvmTool(const std::string &name) {
-  // Check LLVM_BIN_DIR env var first.
-  if (const char *dir = std::getenv("LLVM_BIN_DIR")) {
-    std::string path = std::string(dir) + "/" + name;
-    if (fs::exists(path)) return path;
-  }
-  // Check PATH.
-  std::string cmd = "which " + name + " 2>/dev/null";
-  FILE *pipe = popen(cmd.c_str(), "r");
-  if (!pipe) return "";
-  char buf[512];
-  std::string result;
-  while (fgets(buf, sizeof(buf), pipe)) result += buf;
-  pclose(pipe);
-  if (!result.empty() && result.back() == '\n') result.pop_back();
-  return result;
-}
-
-std::string runCommand(const std::string &cmd) {
-  FILE *pipe = popen(cmd.c_str(), "r");
-  if (!pipe) throw std::runtime_error("popen failed: " + cmd);
-  char buf[4096];
-  std::string result;
-  while (fgets(buf, sizeof(buf), pipe)) result += buf;
-  int status = pclose(pipe);
+std::string captureCommand(const std::string &cmd) {
+  auto tmpPath = fs::temp_directory_path() /
+      ("race_emu_" + std::to_string(std::hash<std::thread::id>{}(
+                         std::this_thread::get_id())) + ".txt");
+  int status = std::system((cmd + " > " + tmpPath.string() + " 2>&1").c_str());
+  std::ifstream ifs(tmpPath);
+  std::string result((std::istreambuf_iterator<char>(ifs)),
+                     std::istreambuf_iterator<char>());
+  fs::remove(tmpPath);
   if (status != 0) {
     throw std::runtime_error("Command failed (status " +
                              std::to_string(status) + "): " + cmd +
                              "\nOutput: " + result);
   }
   return result;
+}
+
+std::string findLlvmTool(const std::string &name) {
+  if (const char *dir = std::getenv("LLVM_BIN_DIR")) {
+    std::string path = std::string(dir) + "/" + name;
+    if (fs::exists(path)) {
+      return path;
+    }
+  }
+  try {
+    std::string result = captureCommand("which " + name + " 2>/dev/null");
+    if (!result.empty() && result.back() == '\n') {
+      result.pop_back();
+    }
+    return result;
+  } catch (...) {
+    return "";
+  }
 }
 
 Emulator loadEmulatorFromDisassembly(const ArchParam &arch,
@@ -676,11 +679,11 @@ Emulator loadEmulatorFromDisassembly(const ArchParam &arch,
   // Use kernel name + arch in temp path to avoid collisions in parallel tests.
   std::string baseName = fs::path(filename).stem().string();
   std::string objPath = "/tmp/race_emu_disasm_" + mcpu + "_" + baseName + ".o";
-  runCommand(llvmMc + " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
+  captureCommand(llvmMc + " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
              " -filetype=obj " + sPath + " -o " + objPath);
 
   // Disassemble.
-  std::string disasm = runCommand(llvmObjdump + " -d " + objPath);
+  std::string disasm = captureCommand(llvmObjdump + " -d --show-all-symbols " + objPath);
 
   // Parse the disassembly for instructions, labels, pcTable.
   auto parsed = std::make_unique<ParsedAsm>(parseDisassembly(disasm));

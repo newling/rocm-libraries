@@ -4,12 +4,14 @@
 #include "race-emulator/Arch.h"
 #include "race-emulator/Emulator.h"
 #include "race-emulator/FloatTypes.h"
+#include "race-emulator/Parsing.h"
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <random>
+#include <thread>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -103,10 +105,12 @@ public:
   TensileGemmRunner(const std::string &kernel_file,
                     std::shared_ptr<Architecture> arch, WaveSize waveSize,
                     bool useF16 = false, bool transposeA = false)
-      : assembly_(loadKernelFile(kernel_file)), arch_(std::move(arch)),
-        waveSize_(waveSize), useF16_(useF16), transposeA_(transposeA) {}
+      : assembly_(loadKernelFile(kernel_file)), kernelFile_(kernel_file),
+        arch_(std::move(arch)), waveSize_(waveSize), useF16_(useF16),
+        transposeA_(transposeA) {}
 
   void enableProfiling(bool enable) { profiling_ = enable; }
+  void setUseDisassembly(bool use) { useDisassembly_ = use; }
 
   std::optional<std::string> run(const GemmDims &dims,
                                  const TensileKernelArgs &kArgs,
@@ -135,7 +139,9 @@ public:
     std::vector<KernelType> dGpu(sizeC, static_cast<KernelType>(0));
 
     // 4. Setup Emulator
-    Emulator emulator(assembly_, arch_);
+    Emulator emulator = useDisassembly_
+        ? buildEmulatorFromDisassembly()
+        : Emulator(assembly_, arch_);
 
     int argIdx = 0;
 
@@ -206,17 +212,81 @@ public:
 
 private:
   std::string assembly_;
+  std::string kernelFile_;
   std::shared_ptr<Architecture> arch_;
   WaveSize waveSize_;
   bool useF16_;
   bool transposeA_;
   bool profiling_ = false;
+  bool useDisassembly_ = false;
   // Storage to keep arg pointers valid
   std::vector<uint32_t> preambleStorage_;
   std::vector<uint32_t> metadataStorage_;
   std::vector<uint32_t> postScalarsStorage_;
   float alphaStorage_;
   float betaStorage_;
+
+  static std::string captureCommand(const std::string &cmd) {
+    auto tmpPath = fs::temp_directory_path() /
+        ("race_emu_" + std::to_string(std::hash<std::thread::id>{}(
+                           std::this_thread::get_id())) + ".txt");
+    int status = std::system((cmd + " > " + tmpPath.string() + " 2>&1").c_str());
+    std::ifstream ifs(tmpPath);
+    std::string result((std::istreambuf_iterator<char>(ifs)),
+                       std::istreambuf_iterator<char>());
+    fs::remove(tmpPath);
+    if (status != 0) {
+      throw std::runtime_error("Command failed (status " +
+                                std::to_string(status) + "): " + cmd +
+                                "\nOutput: " + result);
+    }
+    return result;
+  }
+
+  static std::string findTool(const std::string &name) {
+    if (const char *dir = std::getenv("LLVM_BIN_DIR")) {
+      std::string path = std::string(dir) + "/" + name;
+      if (fs::exists(path)) {
+        return path;
+      }
+    }
+    try {
+      std::string result = captureCommand("which " + name + " 2>/dev/null");
+      if (!result.empty() && result.back() == '\n') {
+        result.pop_back();
+      }
+      return result;
+    } catch (...) {
+      return "";
+    }
+  }
+
+  Emulator buildEmulatorFromDisassembly() {
+    std::string llvmMc = findTool("llvm-mc");
+    std::string llvmObjdump = findTool("llvm-objdump");
+    if (llvmMc.empty() || llvmObjdump.empty())
+      throw std::runtime_error("llvm-mc or llvm-objdump not found");
+
+    ParsedAsm metadataSource(assembly_);
+    std::string sPath = std::string(TEST_KERNEL_DIR) + "/" + kernelFile_;
+    std::string mcpu = arch_->getName();
+    std::string baseName = fs::path(kernelFile_).stem().string();
+    std::string objPath = "/tmp/race_emu_disasm_" + mcpu + "_" + baseName + ".o";
+    captureCommand(llvmMc + " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
+           " -filetype=obj " + sPath + " -o " + objPath);
+    std::string disasm = captureCommand(llvmObjdump + " -d --show-all-symbols " + objPath);
+
+    auto parsed = std::make_unique<ParsedAsm>(parseDisassembly(disasm));
+    parsed->name = metadataSource.name;
+    parsed->wavefrontSize = metadataSource.wavefrontSize;
+    parsed->kernargSegmentSize = metadataSource.kernargSegmentSize;
+    parsed->args = metadataSource.args;
+    parsed->amdhsa = metadataSource.amdhsa;
+    parsed->initialRegisterAllocation = metadataSource.initialRegisterAllocation;
+    parsed->kernargPreloadLength = metadataSource.kernargPreloadLength;
+    parsed->kernargPreloadOffset = metadataSource.kernargPreloadOffset;
+    return Emulator(std::move(parsed), arch_);
+  }
 
   void initializeDataF32(std::vector<float> &data) {
     static std::mt19937 rng(1013);
@@ -1001,3 +1071,65 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_128x128x8192) {
     FAIL() << *optString;
   }
 }
+
+// ============================================================================
+// Disassembly path: same kernels, assembled + disassembled, real byte PCs.
+// ============================================================================
+
+TEST(Gfx1151, MatMul_TensileLite_F32_MAC_Disassembly) {
+  GemmDims dims{16, 16, 16, 1};
+  TensileKernelArgs args;
+  args.preamble = {1, 52428801, 83951617, 1, 16, 16, 1, 16};
+  args.metadata = {16, 256, 16, 256, 16, 256, 16, 256};
+  args.alpha = 1.0f;
+  args.beta = 0.0f;
+
+  TensileGemmRunner<float> runner("gfx1151/tensilelite_mm_f32_mac.s",
+                                  std::make_shared<Gfx1151>(), WaveSize{32});
+  runner.setUseDisassembly(true);
+  auto optString = runner.run(dims, args, 2);
+  if (optString) {
+    FAIL() << *optString;
+  }
+}
+
+TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_Small_Disassembly) {
+  GemmDims dims{16, 16, 16, 1};
+  TensileKernelArgs args;
+  args.preamble = {1, 35651585, 83951617, 1, 16, 16, 1, 16};
+  args.metadata = {16, 256, 16, 256, 16, 256, 16, 256};
+  args.alpha = 1.0f;
+  args.beta = 0.0f;
+
+  TensileGemmRunner<uint16_t> runner(
+      "gfx1151/tensilelite_mm_f16_wmma_tn_small.s",
+      std::make_shared<Gfx1151>(), WaveSize{32}, /*useF16=*/true,
+      /*transposeA=*/true);
+  runner.setUseDisassembly(true);
+  auto optString = runner.run(dims, args, 1);
+  if (optString) {
+    FAIL() << *optString;
+  }
+}
+
+// gfx942 Tensile disassembly tests skipped: gfx942 kernels use s_lshr_b32
+// which is not yet implemented in the emulator (pre-existing gap, affects
+// both .s and disassembly paths).
+
+TEST(Gfx1151, MatMul_TensileLite_F32_MAC_Large_Disassembly) {
+  GemmDims dims{128, 256, 96, 1};
+  TensileKernelArgs args;
+  args.preamble = {1, 35651585, 83951624, 32, 128, 256, 1, 96};
+  args.metadata = {128, 32768, 128, 32768, 128, 12288, 96, 24576};
+  args.alpha = 1.0f;
+  args.beta = 0.0f;
+
+  TensileGemmRunner<float> runner("gfx1151/tensilelite_mm_f32_mac_large.s",
+                                  std::make_shared<Gfx1151>(), WaveSize{32});
+  runner.setUseDisassembly(true);
+  auto optString = runner.run(dims, args, 2, 32);
+  if (optString) {
+    FAIL() << *optString;
+  }
+}
+

@@ -160,7 +160,12 @@ public:
       labelIndex = wave.getTokenIndexFromByteAddress(targetAddr);
     } else {
       const auto &labels = wave.getLabels();
-      labelIndex = labels.at(target);
+      auto it = labels.find(target);
+      if (it == labels.end()) {
+        throw std::runtime_error("Branch target label '" + target +
+                                 "' not found in labels map");
+      }
+      labelIndex = it->second;
     }
     auto operation = this->op;
 
