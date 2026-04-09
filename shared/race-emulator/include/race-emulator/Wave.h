@@ -185,6 +185,33 @@ public:
     return *labels;
   }
 
+  /// Whether real byte-address PCs are available (disassembly path).
+  bool hasPcTable() const { return pcTable != nullptr; }
+
+  /// Return the real byte address for the given token index, or fall back
+  /// to the synthetic 4*index when pcTable is not available.
+  uint64_t getByteAddress(int tokenIndex) const {
+    if (pcTable && tokenIndex >= 0 &&
+        static_cast<size_t>(tokenIndex) < pcTable->size()) {
+      return (*pcTable)[tokenIndex];
+    }
+    return static_cast<uint64_t>(4 * tokenIndex);
+  }
+
+  /// Look up the token index for a byte address. Returns -1 if not found.
+  /// Only works when pcTable is available.
+  int getTokenIndexFromByteAddress(uint64_t addr) const {
+    if (!pcTable) {
+      return static_cast<int>(addr / 4);
+    }
+    for (size_t i = 0; i < pcTable->size(); ++i) {
+      if ((*pcTable)[i] == addr) {
+        return static_cast<int>(i);
+      }
+    }
+    return -1;
+  }
+
   void setDsPreserve(bool preserve) { dsPreserve = preserve; }
   bool getDsPreserve() const { return dsPreserve; }
 
@@ -233,6 +260,9 @@ private:
 
   // Point to the macro map for the assembly.
   const std::map<std::string, Macro> *macros;
+
+  // Token index → byte address. Null when running from .s (line-index PCs).
+  const std::vector<uint64_t> *pcTable = nullptr;
 
   std::vector<std::function<int()>> instructionCache;
 

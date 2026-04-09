@@ -523,13 +523,16 @@ Operand<T> Wave::parseOperand(std::string_view token) const {
   Operand<T> op;
   assert(!token.empty() && "Empty operand token");
   bool looksLikeLiteral =
-      token[0] == '-' || (token[0] >= '0' && token[0] <= '9');
+      token[0] == '-' || (token[0] >= '0' && token[0] <= '9') ||
+      token == "null";
   bool looksLikeLabel = (token.size() > 2 && token[0] == 'l' &&
                          token[1] >= 'a' && token[2] == 'b');
   if (looksLikeLiteral) {
     op.isLiteral = true;
     op.reg = {CommonRegister::Type::UNKNOWN, -1};
-    if constexpr (std::is_floating_point_v<T>) {
+    if (token == "null") {
+      op.literalValue = static_cast<T>(0);
+    } else if constexpr (std::is_floating_point_v<T>) {
       op.literalValue = getFloatFromView<T>(token);
     } else if constexpr (std::is_integral_v<T>) {
       op.literalValue = getIntFromView<T>(token);

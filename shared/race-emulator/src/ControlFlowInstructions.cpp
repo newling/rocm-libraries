@@ -145,9 +145,23 @@ public:
     auto partitioned = getPartitioned(line);
     assert(partitioned.size() == 2);
 
-    auto label = partitioned[1];
-    const auto &labels = wave.getLabels();
-    auto labelIndex = labels.at(std::string(label));
+    auto target = std::string(partitioned[1]);
+    int labelIndex;
+
+    // Check if the target is a label name or a numeric offset.
+    bool isNumeric = !target.empty() &&
+                     (std::isdigit(static_cast<unsigned char>(target[0])) ||
+                      target[0] == '-');
+    if (isNumeric && wave.hasPcTable()) {
+      // Numeric offset: dwords from PC+4. Resolve to byte address, look up.
+      int offset = std::stoi(target);
+      uint64_t currentPc = wave.getByteAddress(wave.getPc());
+      uint64_t targetAddr = currentPc + 4 + static_cast<uint64_t>(offset) * 4;
+      labelIndex = wave.getTokenIndexFromByteAddress(targetAddr);
+    } else {
+      const auto &labels = wave.getLabels();
+      labelIndex = labels.at(target);
+    }
     auto operation = this->op;
 
     return [&wave, operation, labelIndex]() {
@@ -168,11 +182,10 @@ public:
     auto dst = partitioned[1];
 
     return [&wave, dst]() {
-      uint64_t currentPc = static_cast<uint64_t>(wave.getPc());
       auto dstReg = wave.getFirstRegister(dst);
       assert(dstReg.type == CommonRegister::Type::SGPR);
 
-      wave.setSgpr64(dstReg.index, 4 * (currentPc + 1));
+      wave.setSgpr64(dstReg.index, wave.getByteAddress(wave.getPc() + 1));
       return wave.getPc() + 1;
     };
   }
@@ -188,8 +201,8 @@ public:
     return [&wave, src]() {
       auto srcReg = wave.getFirstRegister(src);
       assert(srcReg.type == CommonRegister::Type::SGPR);
-      uint64_t targetPc = wave.getSgpr64(srcReg.index);
-      return static_cast<int>(targetPc / 4);
+      uint64_t targetAddr = wave.getSgpr64(srcReg.index);
+      return wave.getTokenIndexFromByteAddress(targetAddr);
     };
   }
 };
@@ -286,36 +299,44 @@ struct RegisterFactory {
 // s_swappc_b64: on real HW this saves PC+4 (return address) to the
 // destination SGPR pair and jumps to the byte address in the source pair.
 //
-// Currently emulated as a no-op (advance PC by 1, no register writes).
-// This is correct only when the activation function is identity
-// (activationType=0), because the subroutine body is never executed and
-// the value in the activation I/O register (e.g. v12) survives untouched.
-//
-// TODO(newling) To support non-identity activations (ReLU, sigmoid, etc.)
-// we need a real byte-offset-to-line-index mapping. The problem: assembly
-// files that have been through disassembly and reassembly contain literal
-// byte offsets (e.g. 0x1b40) in the s_getpc_b64 + s_add_u32 pattern that
-// computes the subroutine address. These byte offsets reflect the actual
-// encoded instruction sizes (4 or 8+ bytes per instruction), but the
-// emulator's s_getpc_b64 returns a synthetic address (4 * lineIndex).
-// The two address spaces are incompatible, so the computed target is wrong.
-// Fix: during assembly parsing, track cumulative byte offsets per line
-// (each instruction is 4 bytes, or 8+ with a literal constant), and build
-// a byte-address-to-line-index lookup table. Then s_getpc_b64 can return
-// real byte addresses, and s_swappc_b64 / s_setpc_b64 can resolve them
-// back to line indices.
+// When pcTable is available (disassembly path), this is fully functional:
+// saves the return address (next instruction) to dst and jumps to the
+// byte address in src. When pcTable is not available (.s path), falls back
+// to no-op behaviour (correct only for activationType=0).
 class SOPP_SwapPc : public Instruction {
 public:
   std::function<int()> getExecutor(Wave &wave,
-                                   std::string_view /*line*/) const final {
-    return [&wave]() {
-      static bool warned = false;
-      if (!warned) {
-        fprintf(stderr, "WARNING: s_swappc_b64 emulated as no-op. "
-                        "Only correct for activationType=0 (identity).\n");
-        warned = true;
+                                   std::string_view line) const final {
+    auto partitioned = getPartitioned(line);
+    assert(partitioned.size() == 3);
+    auto dst = partitioned[1];
+    auto src = partitioned[2];
+
+    return [&wave, dst, src]() {
+      // Without pcTable, byte addresses are synthetic (4 * lineIndex) and
+      // s_getpc + s_add_u32 patterns produce wrong targets. Fall back to
+      // no-op, which is correct for activationType=0 (identity).
+      if (!wave.hasPcTable()) {
+        return wave.getPc() + 1;
       }
-      return wave.getPc() + 1;
+
+      auto dstReg = wave.getFirstRegister(dst);
+      auto srcReg = wave.getFirstRegister(src);
+      assert(dstReg.type == CommonRegister::Type::SGPR);
+      assert(srcReg.type == CommonRegister::Type::SGPR);
+
+      uint64_t targetAddr = wave.getSgpr64(srcReg.index);
+      int targetIndex = wave.getTokenIndexFromByteAddress(targetAddr);
+
+      if (targetIndex < 0) {
+        fprintf(stderr, "WARNING: s_swappc_b64 target address 0x%lx not found "
+                        "in pcTable, emulating as no-op.\n", targetAddr);
+        return wave.getPc() + 1;
+      }
+
+      // Save return address (next instruction after this one).
+      wave.setSgpr64(dstReg.index, wave.getByteAddress(wave.getPc() + 1));
+      return targetIndex;
     };
   }
 };
@@ -329,6 +350,7 @@ const Register<SOPP_NoOp> s_setprio("s_setprio");
 const Register<SOPP_EndPgm> s_endpgm("s_endpgm");
 const Register<SOPP_NoOp> s_clause("s_clause");
 const Register<SOPP_NoOp> s_delay_alu("s_delay_alu");
+const Register<SOPP_NoOp> s_code_end("s_code_end");
 const Register<SOPP_NoOp> s_sendmsg("s_sendmsg");
 // Cache invalidation -- no semantic effect in the emulator.
 const Register<SOPP_NoOp> buffer_gl0_inv("buffer_gl0_inv");

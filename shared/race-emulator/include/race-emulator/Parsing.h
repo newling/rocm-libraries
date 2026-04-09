@@ -91,9 +91,19 @@ struct ParsedAsm {
   /// Macro name -> line range and argument names.
   std::map<std::string, Macro> macros;
 
+  /// Token index -> byte address. Populated by parseDisassembly, empty for
+  /// .s-parsed assemblies. When non-empty, s_getpc/s_setpc/s_swappc use
+  /// real byte addresses instead of the synthetic 4*lineIndex scheme.
+  std::vector<uint64_t> pcTable;
+
   void appendStr(std::ostream &os) const;
   std::string str() const;
   void appendTokensStr(std::ostream &os) const;
 };
+
+/// Parse llvm-objdump -d output into a ParsedAsm. Populates tokens, labels,
+/// and pcTable. Metadata fields (name, wavefrontSize, args, amdhsa, etc.)
+/// are NOT populated — they must be set by the caller from the code object.
+ParsedAsm parseDisassembly(std::string_view disassemblyText);
 
 } // namespace raceemulator

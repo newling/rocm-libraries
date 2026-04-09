@@ -491,4 +491,93 @@ std::string ParsedAsm::str() const {
   return oss.str();
 }
 
+ParsedAsm parseDisassembly(std::string_view disassemblyText) {
+  // Create a ParsedAsm without invoking the .s parser constructor.
+  // We populate tokens, labels, and pcTable directly.
+  ParsedAsm result("");
+
+  // Clear tokens from the empty-string parse.
+  result.tokens.clear();
+  result.labels.clear();
+  result.macros.clear();
+
+  std::string disasmStr{disassemblyText};
+  std::istringstream stream{disasmStr};
+  std::string line;
+  std::map<std::string, uint32_t> emptySymbolTable;
+
+  while (std::getline(stream, line)) {
+    // Skip empty lines and the file format header.
+    if (line.empty() || line.find("file format") != std::string::npos ||
+        line.find("Disassembly of section") != std::string::npos) {
+      continue;
+    }
+
+    // Label line: "0000000000000068 <label_LoadArgsEnd>:"
+    if (!line.empty() && std::isxdigit(static_cast<unsigned char>(line[0]))) {
+      auto openAngle = line.find('<');
+      auto closeAngle = line.find('>');
+      if (openAngle != std::string::npos && closeAngle != std::string::npos) {
+        std::string labelName =
+            line.substr(openAngle + 1, closeAngle - openAngle - 1);
+        int tokenIndex = static_cast<int>(result.tokens.size());
+
+        // Create a label ParsedLine (skipped by compileLine as a no-op).
+        ParsedLine token(line, labelName + ":", tokenIndex,
+                         ParserState::Root, emptySymbolTable);
+        token.isLabel = true;
+        token.key = labelName;
+        result.tokens.push_back(std::move(token));
+        result.labels[labelName] = tokenIndex;
+
+        // Parse the hex address.
+        uint64_t addr = std::stoull(line.substr(0, openAngle), nullptr, 16);
+        result.pcTable.push_back(addr);
+      }
+      continue;
+    }
+
+    // Instruction line: "\tmnemonic operands  // ADDR: HEX"
+    // Strip leading whitespace.
+    auto firstNonSpace = line.find_first_not_of(" \t");
+    if (firstNonSpace == std::string::npos) {
+      continue;
+    }
+    std::string trimmed = line.substr(firstNonSpace);
+
+    // Extract PC from trailing "// ADDR: HEX" comment.
+    uint64_t pc = 0;
+    auto commentPos = trimmed.find("//");
+    std::string instructionText = trimmed;
+    if (commentPos != std::string::npos) {
+      // Parse address from "// 000000001600: F40009C0"
+      std::string comment = trimmed.substr(commentPos + 3);
+      auto colonPos = comment.find(':');
+      if (colonPos != std::string::npos) {
+        std::string addrStr = comment.substr(0, colonPos);
+        // Trim whitespace from address string.
+        auto addrStart = addrStr.find_first_not_of(" \t");
+        if (addrStart != std::string::npos) {
+          addrStr = addrStr.substr(addrStart);
+        }
+        pc = std::stoull(addrStr, nullptr, 16);
+      }
+      // Remove trailing comment and whitespace from instruction text.
+      instructionText = trimmed.substr(0, commentPos);
+      auto lastNonSpace = instructionText.find_last_not_of(" \t");
+      if (lastNonSpace != std::string::npos) {
+        instructionText = instructionText.substr(0, lastNonSpace + 1);
+      }
+    }
+
+    int tokenIndex = static_cast<int>(result.tokens.size());
+    ParsedLine token(line, instructionText, tokenIndex, ParserState::Root,
+                     emptySymbolTable);
+    result.tokens.push_back(std::move(token));
+    result.pcTable.push_back(pc);
+  }
+
+  return result;
+}
+
 } // namespace raceemulator

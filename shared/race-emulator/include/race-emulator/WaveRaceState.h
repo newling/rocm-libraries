@@ -96,6 +96,7 @@ public:
     return waveCompleteMemoryEvents;
   }
 
+  WaveId getWaveId() const { return waveId; }
   RaceDetector *getDetector() { return detector; }
   const RaceDetector *getDetector() const { return detector; }
 
