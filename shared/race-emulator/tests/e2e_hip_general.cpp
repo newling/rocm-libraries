@@ -673,7 +673,9 @@ Emulator loadEmulatorFromDisassembly(const ArchParam &arch,
   // Assemble.
   std::string sPath = std::string(TEST_KERNEL_DIR) + "/" + path;
   std::string mcpu = arch.arch->getName();
-  std::string objPath = "/tmp/race_emu_disasm_test_" + mcpu + ".o";
+  // Use kernel name + arch in temp path to avoid collisions in parallel tests.
+  std::string baseName = fs::path(filename).stem().string();
+  std::string objPath = "/tmp/race_emu_disasm_" + mcpu + "_" + baseName + ".o";
   runCommand(llvmMc + " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
              " -filetype=obj " + sPath + " -o " + objPath);
 
@@ -760,3 +762,32 @@ void runLdsReverseDisassembly(const ArchParam &arch) {
 }
 
 TEST(Gfx1151, LdsReverseDisassembly) { runLdsReverseDisassembly(kGfx1151); }
+
+void runFloatAdderDisassembly(const ArchParam &arch) {
+  auto emulator = loadEmulatorFromDisassembly(arch, "simple_adder_2.s");
+
+  int N0 = 1235;
+  int N1 = 210;
+
+  std::vector<float> h_c(N0, -1);
+  std::iota(h_c.begin(), h_c.end(), 0.0);
+  float *d_c = h_c.data();
+  float toAdd = 3.5f;
+
+  emulator.addKernarg(0, &d_c);
+  emulator.addKernarg(1, &toAdd);
+  emulator.addKernarg(2, &N1);
+  emulator.run(Dim3d(1), {192, 1, 1}, {.raceChecks = true});
+
+  for (int i = 1 * 3 * 64; i < 2 * 3 * 64; ++i) {
+    float actual = h_c[i];
+    float expected = i < N1 ? i + toAdd : static_cast<float>(i);
+    EXPECT_EQ(actual, expected) << "at index " << i;
+  }
+}
+
+TEST(Gfx942, CopyKernelDisassembly) { runCopyKernelDisassembly(kGfx942); }
+TEST(Gfx942, CopyIndexedDisassembly) { runCopyIndexedDisassembly(kGfx942); }
+TEST(Gfx942, LdsReverseDisassembly) { runLdsReverseDisassembly(kGfx942); }
+TEST(Gfx942, FloatAdderDisassembly) { runFloatAdderDisassembly(kGfx942); }
+TEST(Gfx1151, FloatAdderDisassembly) { runFloatAdderDisassembly(kGfx1151); }
