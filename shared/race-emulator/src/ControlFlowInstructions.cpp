@@ -60,6 +60,8 @@ public:
         // s_waitcnt 0: wait for all counters to reach 0
         vmcnt = 0;
         lgkmcnt = 0;
+      } else if (token.find("expcnt(") == 0 || token.find("vscnt(") == 0) {
+        // expcnt and vscnt are not modelled by the emulator — ignore.
       } else {
         throw std::runtime_error("Unsupported s_waitcnt counter: " +
                                  std::string(token));
@@ -153,10 +155,12 @@ public:
                      (std::isdigit(static_cast<unsigned char>(target[0])) ||
                       target[0] == '-');
     if (isNumeric && wave.hasPcTable()) {
-      // Numeric offset: dwords from PC+4. Resolve to byte address, look up.
-      int offset = std::stoi(target);
+      // Numeric offset: signed 16-bit dword count from PC+4. Large unsigned
+      // values (e.g. 65520 = 0xFFF0) are negative offsets (backward jumps).
+      int raw = std::stoi(target);
+      int16_t offset = static_cast<int16_t>(raw & 0xFFFF);
       uint64_t currentPc = wave.getByteAddress(wave.getPc());
-      uint64_t targetAddr = currentPc + 4 + static_cast<uint64_t>(offset) * 4;
+      uint64_t targetAddr = currentPc + 4 + static_cast<int64_t>(offset) * 4;
       labelIndex = wave.getTokenIndexFromByteAddress(targetAddr);
     } else {
       const auto &labels = wave.getLabels();

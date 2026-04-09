@@ -137,8 +137,12 @@ public:
     std::vector<KernelType> cGpu = convertToKernel(cF32);
     std::vector<KernelType> dGpu(sizeC, static_cast<KernelType>(0));
 
-    // 4. Setup Emulator
-    Emulator emulator(assembly_, arch_);
+    // 4. Setup Emulator — use disassembly path when LLVM tools available.
+    std::string llvmMc = findTool("llvm-mc");
+    std::string llvmObjdump = findTool("llvm-objdump");
+    Emulator emulator = (!llvmMc.empty() && !llvmObjdump.empty())
+        ? buildEmulatorFromDisassembly()
+        : Emulator(assembly_, arch_);
 
     int argIdx = 0;
 

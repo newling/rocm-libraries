@@ -87,6 +87,34 @@ Emulator loadEmulator(const ArchParam &arch, const std::string &filename) {
   std::string path = arch.arch->getName() + "/" + filename;
   std::string assembly = load_kernel_file(path);
 
+  // Use the disassembly path when LLVM tools are available.
+  std::string llvmMc = findLlvmTool("llvm-mc");
+  std::string llvmObjdump = findLlvmTool("llvm-objdump");
+  if (!llvmMc.empty() && !llvmObjdump.empty()) {
+    ParsedAsm metadataSource(assembly);
+    std::string sPath = std::string(TEST_KERNEL_DIR) + "/" + path;
+    std::string mcpu = arch.arch->getName();
+    std::string baseName = fs::path(filename).stem().string();
+    std::string objPath =
+        "/tmp/race_emu_disasm_" + mcpu + "_" + baseName + ".o";
+    captureCommand(llvmMc + " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
+                   " -filetype=obj " + sPath + " -o " + objPath);
+    std::string disasm = captureCommand(llvmObjdump +
+                                        " -d --show-all-symbols " + objPath);
+    auto parsed = std::make_unique<ParsedAsm>(parseDisassembly(disasm));
+    parsed->name = metadataSource.name;
+    parsed->wavefrontSize = metadataSource.wavefrontSize;
+    parsed->kernargSegmentSize = metadataSource.kernargSegmentSize;
+    parsed->args = metadataSource.args;
+    parsed->amdhsa = metadataSource.amdhsa;
+    parsed->initialRegisterAllocation =
+        metadataSource.initialRegisterAllocation;
+    parsed->kernargPreloadLength = metadataSource.kernargPreloadLength;
+    parsed->kernargPreloadOffset = metadataSource.kernargPreloadOffset;
+    return Emulator(std::move(parsed), arch.arch);
+  }
+
+  // Fallback: .s parser (no LLVM tools available).
   return Emulator(assembly, arch.arch);
 }
 
