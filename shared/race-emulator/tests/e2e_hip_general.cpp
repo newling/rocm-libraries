@@ -718,3 +718,45 @@ void runCopyKernelDisassembly(const ArchParam &arch) {
 }
 
 TEST(Gfx1151, CopyKernelDisassembly) { runCopyKernelDisassembly(kGfx1151); }
+
+void runCopyIndexedDisassembly(const ArchParam &arch) {
+  auto emulator = loadEmulatorFromDisassembly(arch, "copy_indexed.s");
+
+  int N = 128;
+  std::vector<int> h_in(N);
+  std::iota(h_in.begin(), h_in.end(), 0);
+  std::vector<int> h_out(N, -1);
+
+  int *d_out = h_out.data();
+  const int *d_in = h_in.data();
+  emulator.addKernarg(0, &d_out);
+  emulator.addKernarg(1, &d_in);
+  // 2 workgroups of 64 threads each.
+  emulator.run({{0, 0, 0}, {1, 0, 0}}, {64, 1, 1}, {.raceChecks = true});
+
+  for (int i = 0; i < N; ++i) {
+    EXPECT_EQ(h_out[i], h_in[i])
+        << "Mismatch at index " << i;
+  }
+}
+
+TEST(Gfx1151, CopyIndexedDisassembly) { runCopyIndexedDisassembly(kGfx1151); }
+
+void runLdsReverseDisassembly(const ArchParam &arch) {
+  auto emulator = loadEmulatorFromDisassembly(arch, "lds_reverse_2.s");
+
+  int N = 256;
+  std::vector<int> h_data(N);
+  std::iota(h_data.begin(), h_data.end(), 0);
+  int *d_data = h_data.data();
+
+  emulator.addKernarg(0, &d_data);
+  emulator.run(Dim3d(0), {256, 1, 1}, {.raceChecks = true});
+
+  for (int i = 0; i < N; ++i) {
+    EXPECT_EQ(h_data[i], N - 1 - i)
+        << "Mismatch at index " << i;
+  }
+}
+
+TEST(Gfx1151, LdsReverseDisassembly) { runLdsReverseDisassembly(kGfx1151); }
