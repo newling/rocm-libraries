@@ -13,7 +13,6 @@ namespace raceemulator {
 
 namespace {
 const std::map<std::string, int> emptyLabels = {};
-const std::map<std::string, Macro> emptyMacros = {};
 } // namespace
 
 Workgroup::~Workgroup() = default;
@@ -39,11 +38,10 @@ Workgroup::Workgroup(const WorkgroupConfig &config)
 
   int agprOffset = config.agprOffset < 0 ? config.vgprCount : config.agprOffset;
   const auto *labels = config.labels ? config.labels : &emptyLabels;
-  const auto *macros = config.macros ? config.macros : &emptyMacros;
 
   for (int i = 0; i < config.nWaves; ++i) {
     waves.push_back(Wave(config.vgprCount, agprOffset, config.sgprCount,
-                         config.waveSize, WaveId{i}, *this, labels, macros));
+                         config.waveSize, WaveId{i}, *this, labels));
     if (config.pcTable) {
       waves.back().pcTable = config.pcTable;
     }

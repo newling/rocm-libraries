@@ -101,12 +101,11 @@ TEST(Instructions, S_SENDMSG) {
 // PC revisits it.
 TEST(Instructions, InstructionCaching) {
   std::map<std::string, int> labels = {{"loop", 0}};
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 4,
                 .sgprCount = 4,
                 .waveSize = WaveSize{1},
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // A 3-instruction loop: set v0, set v1, branch back to start.
@@ -133,12 +132,11 @@ TEST(Instructions, InstructionCaching) {
 // Verify that without caching, instructions are recompiled each time.
 TEST(Instructions, NoCachingRecompiles) {
   std::map<std::string, int> labels = {{"loop", 0}};
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 4,
                 .sgprCount = 4,
                 .waveSize = WaveSize{1},
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   std::vector<std::string> program = {

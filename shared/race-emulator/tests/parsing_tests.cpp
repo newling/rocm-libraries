@@ -334,6 +334,4 @@ Disassembly of section .text:
   EXPECT_EQ(result.tokens[3].commentFreeLine, "v_add_f32_e32 v0, s0, v0");
   EXPECT_EQ(result.tokens[4].commentFreeLine, "s_cbranch_scc0 done");
 
-  // Check macros are empty.
-  EXPECT_TRUE(result.macros.empty());
 }

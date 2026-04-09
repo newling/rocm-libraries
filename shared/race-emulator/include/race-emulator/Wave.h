@@ -23,25 +23,6 @@ namespace raceemulator {
 class Workgroup;
 class WaveRaceState;
 
-/// An assembly macro (.macro / .endm) with its line range and argument names.
-class Macro {
-public:
-  Macro() = default;
-  Macro(int startLine, int endLine, const std::vector<std::string> &argNames)
-      : startLine(startLine), endLine(endLine), argNames(argNames) {}
-
-  int getStartLine() const { return startLine; }
-  int getEndLine() const { return endLine; }
-  const std::vector<std::string> &getArgNames() const { return argNames; }
-
-  std::string str() const;
-
-private:
-  int startLine;
-  int endLine;
-  std::vector<std::string> argNames;
-};
-
 /// A parsed instruction operand: either a literal value or a register
 /// reference.
 template <typename T> struct Operand {
@@ -58,7 +39,6 @@ template <typename T> struct Operand {
   }
 };
 
-class Macro;
 
 /// A single SIMD wave. Manages VGPRs, SGPRs, exec mask, program counter,
 /// and delegates race detection to WaveRaceState (if race checks enabled).
@@ -221,11 +201,6 @@ public:
   bool isWaiting() const { return waiting; }
 
 private:
-  // When a macro is called, its arguments are stored here.
-  std::map<std::string, uint32_t> macroArguments;
-
-  // When inside a macro, this is the program counter (PC) to return to.
-  int macroReturnPc;
 
   // The current program counter (the current line in the assembly).
   int pc{0};
@@ -258,9 +233,6 @@ private:
   // Pointer to the label map for the assembly.
   const std::map<std::string, int> *labels;
 
-  // Point to the macro map for the assembly.
-  const std::map<std::string, Macro> *macros;
-
   // Token index → byte address. Null when running from .s (line-index PCs).
   const std::vector<uint64_t> *pcTable = nullptr;
 
@@ -278,11 +250,9 @@ private:
   std::optional<PendingWaitCount> pendingWaitCount;
 
   Wave(int vgprCount, int agprOffset, int sgprCount, WaveSize, WaveId,
-       Workgroup &workgroup, const std::map<std::string, int> *labels,
-       const std::map<std::string, Macro> *macros);
+       Workgroup &workgroup, const std::map<std::string, int> *labels);
 
-  std::function<int()> compileLine(const std::string &line,
-                                   const std::map<std::string, Macro> &macros);
+  std::function<int()> compileLine(const std::string &line);
 
 public:
   template <typename F> void runExecConditionedForLanes(F func) {

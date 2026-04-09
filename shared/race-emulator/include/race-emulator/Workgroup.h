@@ -35,7 +35,6 @@ struct WorkgroupConfig {
   std::function<void(RaceViolation)> raceHandler = {};
   Profiler *profiler = nullptr;
   const std::map<std::string, int> *labels = nullptr;
-  const std::map<std::string, Macro> *macros = nullptr;
   /// Token index → byte address. Non-null when running from disassembly.
   const std::vector<uint64_t> *pcTable = nullptr;
 };

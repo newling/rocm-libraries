@@ -165,7 +165,6 @@ WorkgroupConfig Emulator::buildWorkgroupConfig(int nWaves,
   wgConfig.completeEmulation = config.completeEmulation;
   wgConfig.waveSchedule = config.waveSchedule;
   wgConfig.labels = &parsedAsm->labels;
-  wgConfig.macros = &parsedAsm->macros;
   if (!parsedAsm->pcTable.empty()) {
     wgConfig.pcTable = &parsedAsm->pcTable;
   }

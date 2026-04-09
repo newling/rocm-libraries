@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "Wave.h"
+#include "Types.h"
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -16,7 +16,7 @@
 namespace raceemulator {
 
 /// Tracks which section of the assembly file the parser is currently in.
-enum class ParserState { Root, Amdhsa, Kernels, Args, Macro };
+enum class ParserState { Root, Amdhsa, Kernels, Args };
 
 /// A single line of assembly after parsing: comments stripped, symbols
 /// resolved, labels and key-value pairs identified.
@@ -87,9 +87,6 @@ struct ParsedAsm {
 
   /// Label name -> line index.
   std::map<std::string, int> labels;
-
-  /// Macro name -> line range and argument names.
-  std::map<std::string, Macro> macros;
 
   /// Token index -> byte address. Populated by parseDisassembly, empty for
   /// .s-parsed assemblies. When non-empty, s_getpc/s_setpc/s_swappc use

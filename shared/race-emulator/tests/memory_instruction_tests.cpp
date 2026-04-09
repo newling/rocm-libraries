@@ -122,13 +122,12 @@ TEST(Instructions, GlobalLoadStore_WithInstructionOffsets) {
 TEST(Instructions, DS_Write_B32_Direct) {
   // 1. Setup LDS Storage (Simulating 1KB of Shared Memory)
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 4,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // 3. Setup Operand State
@@ -155,13 +154,12 @@ TEST(Instructions, DS_Write_B32_Direct) {
 TEST(Instructions, DS_Write_AllVariants_Combined) {
   // 1. Setup (One-time cost)
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 16,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros}); // Need enough VGPRs for b128
+                }); // Need enough VGPRs for b128
   auto &wave = wg.getWave(0);
 
   // --- Test Case A: ds_write_b8 (Truncation) ---
@@ -249,13 +247,12 @@ TEST(Instructions, DS_Write_AllVariants_Combined) {
 
 TEST(Instructions, DS_Read_Variants) {
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 10,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // Setup Memory
@@ -487,13 +484,12 @@ TEST(Instructions, BufferLoad_OutOfBounds_ReturnsZero) {
 
 TEST(Instructions, DS_Write_B8_D16_HI) {
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 16,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // --- Test Case: ds_write_b8_d16_hi ---
@@ -522,13 +518,12 @@ TEST(Instructions, DS_Write_B8_D16_HI) {
 TEST(Instructions, DS_Write_Extended_Features) {
   // Setup
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 16,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // --- Test Case E: ds_write_b16_d16_hi ---
@@ -572,13 +567,12 @@ TEST(Instructions, DS_Write_Extended_Features) {
 
 TEST(Instructions, DS_Read_AllVariants_Extended) {
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 10,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
   wave.setDsPreserve(true); // Test d16 preserve behavior
 
@@ -651,13 +645,12 @@ TEST(Instructions, DS_Read_AllVariants_Extended) {
 
 TEST(Instructions, DS_Write2_B64) {
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 16,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // ds_write2_b64 vaddr, v[data0:data0+1], v[data1:data1+1] offset0:N offset1:M
@@ -684,13 +677,12 @@ TEST(Instructions, DS_Write2_B64) {
 
 TEST(Instructions, DS_Write2_B64_DefaultOffset0) {
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 16,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // When offset0 is omitted, it defaults to 0.
@@ -712,13 +704,12 @@ TEST(Instructions, DS_Write2_B64_DefaultOffset0) {
 
 TEST(Instructions, DS_Read2_B64) {
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 16,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // ds_read2_b64 v[dst:dst+3], vaddr offset0:N offset1:M
@@ -744,13 +735,12 @@ TEST(Instructions, DS_Read2_B64) {
 
 TEST(Instructions, DS_Read2_Write2_B64_Roundtrip) {
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 16,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // Write via ds_write2_b64, then read back via ds_read2_b64
@@ -773,13 +763,12 @@ TEST(Instructions, DS_Read2_Write2_B64_Roundtrip) {
 
 TEST(Instructions, DS_Store_Load_2addr_B64_RdnaAliases) {
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 16,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // RDNA aliases: ds_store_2addr_b64 = ds_write2_b64
@@ -930,13 +919,12 @@ TEST(Instructions, BufferLoadD16) {
 // and ds_write_b16_d16_hi respectively.
 TEST(Instructions, DsStoreB16_RDNA3Rename) {
   std::map<std::string, int> labels;
-  std::map<std::string, Macro> macros;
   Workgroup wg({.vgprCount = 16,
                 .sgprCount = 0,
                 .waveSize = WaveSize{1},
                 .ldsSize = 1024,
                 .labels = &labels,
-                .macros = &macros});
+                });
   auto &wave = wg.getWave(0);
 
   // ds_store_b16: writes low 16 bits of data VGPR.

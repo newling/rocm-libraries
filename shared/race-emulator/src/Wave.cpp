@@ -41,14 +41,12 @@ using LabelMap = std::map<std::string, int>;
 
 Wave::Wave(int vgprCount, int agprOffset, int sgprCount, WaveSize waveSize,
            WaveId waveId, Workgroup &workgroup,
-           const std::map<std::string, int> *labels,
-           const std::map<std::string, Macro> *macros)
+           const std::map<std::string, int> *labels)
     : agprOffset(agprOffset), sgprCount(sgprCount), waveSize(waveSize),
       dsPreserve(waveSize == 32), waveId(waveId), workgroup(&workgroup),
-      labels(labels), macros(macros) {
+      labels(labels) {
 
   assert(labels != nullptr && "Labels map cannot be null");
-  assert(macros != nullptr && "Macros map cannot be null");
 
   int avgprCount = vgprCount;
 
@@ -164,8 +162,7 @@ void Wave::setVgpr64(int id, int lane, uint64_t value) {
 }
 
 std::function<int()>
-Wave::compileLine(const std::string &line,
-                  const std::map<std::string, Macro> &macros) {
+Wave::compileLine(const std::string &line) {
 
   auto currentPc = pc;
   auto nullOpt = [currentPc]() -> int { return currentPc + 1; };
@@ -174,14 +171,14 @@ Wave::compileLine(const std::string &line,
     return nullOpt;
   }
 
+  // Skip label lines.
   if (labels) {
     const auto &labelMap = *labels;
     auto firstNonSpace = line.find_first_not_of(" \t");
     auto firstColon = line.find(':', firstNonSpace);
     if (firstColon != std::string::npos && firstColon > firstNonSpace) {
       auto labelName = line.substr(firstNonSpace, firstColon);
-      auto foundLabel = labelMap.find(labelName);
-      if (foundLabel != labelMap.end()) {
+      if (labelMap.find(labelName) != labelMap.end()) {
         return nullOpt;
       }
     }
@@ -190,30 +187,9 @@ Wave::compileLine(const std::string &line,
   auto partitioned = getPartitioned(line);
   assert(!partitioned.empty() && "Empty partitioned line");
 
-  if (partitioned[0] == ".macro") {
-    auto found = macros.find(std::string(partitioned[1]));
-    if (found == macros.end()) {
-      throw std::runtime_error("Macro not found: " +
-                               std::string(partitioned[1]));
-    }
-    int mendLine = found->second.getEndLine();
-    return [mendLine]() -> int { return mendLine + 1; };
-  }
-
-  if (partitioned[0] == ".endm") {
-    return [this]() -> int {
-      macroArguments.clear();
-      auto currentPc = macroReturnPc;
-      macroReturnPc = -1;
-      return currentPc;
-    };
-  }
-
-  if (partitioned[0] == ".set") {
-    return nullOpt;
-  }
-
-  if (partitioned[0] == ".align") {
+  // Skip directives.
+  if (partitioned[0] == ".set" || partitioned[0] == ".align" ||
+      partitioned[0] == ".macro" || partitioned[0] == ".endm") {
     return nullOpt;
   }
 
@@ -240,21 +216,13 @@ Wave::compileLine(const std::string &line,
   }
 
   if (found != instructions.end()) {
-    auto exec = found->second->getExecutor(*this, line);
-    return exec;
+    return found->second->getExecutor(*this, line);
   }
 
   return nullptr;
 }
 
-void Wave::tryExecute(const std::string &line_, bool enableLineCaching) {
-
-  // Apply macro argument substitution if inside a macro expansion.
-  std::string macroReducedLine;
-  if (!macroArguments.empty()) {
-    macroReducedLine = getSymbolReducedLine(line_, macroArguments);
-  }
-  const std::string &line = macroArguments.empty() ? line_ : macroReducedLine;
+void Wave::tryExecute(const std::string &line, bool enableLineCaching) {
 
   // Fast path: use cached executor if available.
   if (pc < static_cast<int>(instructionCache.size()) &&
@@ -268,7 +236,7 @@ void Wave::tryExecute(const std::string &line_, bool enableLineCaching) {
   auto dualPos = line.find("::");
   if (dualPos != std::string::npos) {
     auto compileOrThrow = [&](const std::string &s) {
-      auto f = compileLine(s, *macros);
+      auto f = compileLine(s);
       if (!f) {
         throw std::runtime_error("Unimplemented instruction: " + s);
       }
@@ -286,28 +254,7 @@ void Wave::tryExecute(const std::string &line_, bool enableLineCaching) {
 
   // Try compiling as a regular instruction.
   if (!executor) {
-    executor = compileLine(line, *macros);
-  }
-
-  // Try interpreting as a macro call.
-  if (!executor) {
-    auto partitioned = getPartitioned(line);
-    auto iter = macros->find(std::string(partitioned[0]));
-    if (iter != macros->end()) {
-      auto macroStart = iter->second.getStartLine();
-      const auto &argNames = iter->second.getArgNames();
-      macroReturnPc = pc + 1;
-      for (size_t i = 0; i < argNames.size(); ++i) {
-        uint32_t value = 0;
-        if (!parseNumber(partitioned[i + 1], value)) {
-          throw std::runtime_error("Error parsing macro argument: " +
-                                   std::string(partitioned[i + 1]));
-        }
-        macroArguments.insert({"\\" + argNames[i], value});
-      }
-      setPc(macroStart + 1);
-      return;
-    }
+    executor = compileLine(line);
   }
 
   if (!executor) {
@@ -317,7 +264,7 @@ void Wave::tryExecute(const std::string &line_, bool enableLineCaching) {
   compileCount++;
 
   // Cache the executor for future calls at this PC.
-  if (enableLineCaching && macroArguments.empty()) {
+  if (enableLineCaching) {
     if (pc >= static_cast<int>(instructionCache.size())) {
       instructionCache.resize(pc + 16, nullptr);
     }
@@ -452,9 +399,12 @@ CommonRegister Wave::getFirstRegister(std::string_view regStr) const {
 
   if (openBracket != std::string_view::npos) {
     auto colon = regStr.find(':', openBracket);
-    assert(colon != std::string_view::npos);
+    auto closeBracket = regStr.find(']', openBracket);
     numStart = regStr.data() + openBracket + 1;
-    numEnd = regStr.data() + colon;
+    // s[0:1] → parse up to colon; s[0] → parse up to bracket.
+    numEnd = (colon != std::string_view::npos)
+                 ? regStr.data() + colon
+                 : regStr.data() + closeBracket;
   } else {
     auto firstDigit = regStr.find_first_of("0123456789");
     assert(firstDigit != std::string_view::npos && "flipit");
@@ -473,19 +423,6 @@ CommonRegister Wave::getFirstRegister(std::string_view regStr) const {
   return cr;
 }
 
-std::string Macro::str() const {
-  std::ostringstream oss;
-  oss << "Macro(startLine=" << startLine << ", endLine=" << endLine
-      << ", argNames=[";
-  for (size_t i = 0; i < argNames.size(); ++i) {
-    oss << argNames[i];
-    if (i + 1 < argNames.size()) {
-      oss << ", ";
-    }
-  }
-  oss << "])";
-  return oss.str();
-}
 
 // VGPR or SGPR or Literal
 template <typename T>

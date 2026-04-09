@@ -64,8 +64,6 @@ std::string parserStateStr(ParserState state) {
     return "Kernels";
   case ParserState::Args:
     return "Args";
-  case ParserState::Macro:
-    return "Macro";
   default:
     return "Unknown";
   }
@@ -168,13 +166,11 @@ ParsedLine::ParsedLine(std::string_view originalLineIn,
                        const std::map<std::string, uint32_t> &symbolTable)
     : originalLine(originalLineIn), lineNumber(n), precedingParserState(state) {
 
-  // Start from the comment-free line. In Root and Macro states, also replace
-  // .set symbols (e.g. sgprKernArgAddress -> 0) so that instruction executors
-  // see numeric values. The pre-substitution version is used for structural
-  // parsing below (indent, labels, key-value) because symbol names can
-  // contain colons that would confuse key-value detection.
+  // Start from the comment-free line. In Root state, also replace .set
+  // symbols (e.g. sgprKernArgAddress -> 0) so that instruction executors
+  // see numeric values.
   commentFreeLine = std::string(commentFreeLineIn);
-  if (state == ParserState::Root || state == ParserState::Macro) {
+  if (state == ParserState::Root) {
     commentFreeLine = getSymbolReducedLine(commentFreeLine, symbolTable);
   }
 
@@ -269,17 +265,6 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
       state = ParserState::Root;
     }
 
-    if (state == ParserState::Root &&
-        token.originalLine.find(".macro", 0) == 0) {
-      state = ParserState::Macro;
-    }
-
-    if (state == ParserState::Macro) {
-      auto trimmedLine = trim(token.commentFreeLine);
-      if (trimmedLine == ".endm") {
-        state = ParserState::Root;
-      }
-    }
   };
 
   auto processInKernel = [&](ParsedLine token) {
@@ -333,52 +318,6 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
     amdhsa.push_back({token.key, std::stoi(token.value)});
   };
 
-  auto processInMacro = [&](ParsedLine token) {
-    if (token.originalLine.find(".macro") == 0) {
-      std::istringstream iss(token.commentFreeLine);
-      std::string directive, macroName;
-      iss >> directive >> macroName;
-
-      int startLine = token.lineNumber;
-      int endLine = -1;
-      for (size_t i = token.lineNumber + 1; i < assemblyLines.size(); ++i) {
-        if (assemblyLines[i].find(".endm") == 0) {
-          endLine = i;
-          break;
-        }
-      }
-      assert(endLine != -1 &&
-             "parser error: missing .endm for macro definition");
-
-      std::vector<std::string> argumentNames;
-      size_t currentPos = token.commentFreeLine.find(macroName);
-      assert(currentPos != std::string::npos);
-      currentPos += macroName.length();
-
-      while (currentPos != std::string::npos) {
-        size_t start =
-            token.commentFreeLine.find_first_not_of(" \t,", currentPos);
-        if (start == std::string::npos) {
-          break;
-        }
-
-        size_t colon = token.commentFreeLine.find(':', start);
-        assert(colon != std::string::npos &&
-               "malformed macro argument, missing ':'");
-
-        argumentNames.push_back(
-            token.commentFreeLine.substr(start, colon - start));
-
-        size_t comma = token.commentFreeLine.find(',', colon);
-        currentPos =
-            (comma == std::string::npos) ? std::string::npos : comma + 1;
-      }
-
-      Macro macro(startLine, endLine, argumentNames);
-      macros.insert({macroName, macro});
-    }
-  };
-
   auto process = [&](ParsedLine token,
                      std::map<std::string, uint32_t> &symbolTable) {
     if (state == ParserState::Root) {
@@ -391,8 +330,6 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
       processInKernel(token);
     } else if (state == ParserState::Args) {
       processInArgs(token);
-    } else if (state == ParserState::Macro) {
-      processInMacro(token);
     }
   };
 
@@ -468,7 +405,6 @@ void ParsedAsm::appendStr(std::ostream &os) const {
     os << "  " << label.second << ": line " << label.first << "\n";
   }
 
-  // TODO(newling) print macros.
 
   os << "AMDHSA Metadata:\n";
   for (const auto &amdhsa : amdhsa) {
@@ -499,7 +435,6 @@ ParsedAsm parseDisassembly(std::string_view disassemblyText) {
   // Clear tokens from the empty-string parse.
   result.tokens.clear();
   result.labels.clear();
-  result.macros.clear();
 
   std::string disasmStr{disassemblyText};
   std::istringstream stream{disasmStr};
