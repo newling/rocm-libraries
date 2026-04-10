@@ -33,10 +33,27 @@ add_executable(race-emulator-tests
     float_types_tests.cpp
 )
 
-# RELEASE_BUILD is used by tests that are too slow for debug builds.
-# Tests check `#ifndef RELEASE_BUILD` and call GTEST_SKIP() when absent.
+# Find LLVM tools required for assembling and disassembling test kernels.
+find_program(LLVM_MC llvm-mc
+    HINTS ENV LLVM_BIN_DIR
+    DOC "Path to llvm-mc (required for race-emulator tests)")
+find_program(LLVM_OBJDUMP llvm-objdump
+    HINTS ENV LLVM_BIN_DIR
+    DOC "Path to llvm-objdump (required for race-emulator tests)")
+
+if(NOT LLVM_MC OR NOT LLVM_OBJDUMP)
+    message(FATAL_ERROR
+        "llvm-mc and llvm-objdump are required for race-emulator tests.\n"
+        "Set -DLLVM_MC=/path/to/llvm-mc -DLLVM_OBJDUMP=/path/to/llvm-objdump\n"
+        "or add them to PATH or set LLVM_BIN_DIR environment variable.")
+endif()
+message(STATUS "race-emulator tests: llvm-mc=${LLVM_MC}")
+message(STATUS "race-emulator tests: llvm-objdump=${LLVM_OBJDUMP}")
+
 target_compile_definitions(race-emulator-tests PRIVATE
     TEST_KERNEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/asm"
+    LLVM_MC_PATH="${LLVM_MC}"
+    LLVM_OBJDUMP_PATH="${LLVM_OBJDUMP}"
     $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:RELEASE_BUILD>
 )
 
@@ -116,6 +133,8 @@ if(RACE_EMULATOR_BUILD_HW_TESTING)
     target_compile_definitions(race-emulator-hw-tests PRIVATE
         TEST_CO_DIR="${CMAKE_CURRENT_BINARY_DIR}"
         TEST_KERNEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/asm"
+        LLVM_MC_PATH="${LLVM_MC}"
+        LLVM_OBJDUMP_PATH="${LLVM_OBJDUMP}"
     )
     target_link_libraries(race-emulator-hw-tests PRIVATE
         race-emulator GTest::gtest_main hip::device)

@@ -6,7 +6,6 @@
 #include "race-emulator/Arch.h"
 #include "race-emulator/CodeObject.h"
 #include "race-emulator/Emulator.h"
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -36,34 +35,10 @@ inline std::string captureCommand(const std::string &cmd) {
   return result;
 }
 
-/// Find an LLVM tool by name (checks LLVM_BIN_DIR env, then PATH).
-inline std::string findLlvmTool(const std::string &name) {
-  if (const char *dir = std::getenv("LLVM_BIN_DIR")) {
-    std::string path = std::string(dir) + "/" + name;
-    if (fs::exists(path)) {
-      return path;
-    }
-  }
-  try {
-    std::string result = captureCommand("which " + name + " 2>/dev/null");
-    if (!result.empty() && result.back() == '\n') {
-      result.pop_back();
-    }
-    return result;
-  } catch (...) {
-    return "";
-  }
-}
-
 /// Assemble a .s string into a code object using llvm-mc.
-/// Returns the .co bytes. Throws if llvm-mc is not found or assembly fails.
+/// LLVM_MC_PATH is set by CMake at configure time.
 inline std::vector<uint8_t> assembleToCodeObject(std::string_view assembly,
                                                   const std::string &mcpu) {
-  std::string llvmMc = findLlvmTool("llvm-mc");
-  if (llvmMc.empty()) {
-    throw std::runtime_error("llvm-mc not found. Set LLVM_BIN_DIR or PATH.");
-  }
-
   auto tid = std::to_string(
       std::hash<std::thread::id>{}(std::this_thread::get_id()));
   auto sPath = fs::temp_directory_path() / ("race_emu_asm_" + tid + ".s");
@@ -72,7 +47,8 @@ inline std::vector<uint8_t> assembleToCodeObject(std::string_view assembly,
     std::ofstream ofs(sPath);
     ofs << assembly;
   }
-  captureCommand(llvmMc + " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
+  captureCommand(std::string(LLVM_MC_PATH) +
+                 " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
                  " -filetype=obj " + sPath.string() + " -o " + objPath.string());
 
   std::ifstream ifs(objPath, std::ios::binary | std::ios::ate);
@@ -100,12 +76,8 @@ inline std::string loadKernelFile(const std::string &filename) {
 }
 
 /// Disassemble a code object using llvm-objdump.
+/// LLVM_OBJDUMP_PATH is set by CMake at configure time.
 inline std::string disassembleCodeObject(const std::vector<uint8_t> &co) {
-  std::string llvmObjdump = findLlvmTool("llvm-objdump");
-  if (llvmObjdump.empty()) {
-    throw std::runtime_error(
-        "llvm-objdump not found. Set LLVM_BIN_DIR or PATH.");
-  }
   auto tid = std::to_string(
       std::hash<std::thread::id>{}(std::this_thread::get_id()));
   auto coPath = fs::temp_directory_path() / ("race_emu_co_" + tid + ".o");
@@ -114,7 +86,8 @@ inline std::string disassembleCodeObject(const std::vector<uint8_t> &co) {
     ofs.write(reinterpret_cast<const char *>(co.data()), co.size());
   }
   std::string disasm = captureCommand(
-      llvmObjdump + " -d --show-all-symbols " + coPath.string());
+      std::string(LLVM_OBJDUMP_PATH) + " -d --show-all-symbols " +
+      coPath.string());
   fs::remove(coPath);
   return disasm;
 }
