@@ -407,11 +407,16 @@ CodeObjectResult parseCodeObjectMetadata(const uint8_t *elfData, size_t elfSize,
       const uint8_t *kd = elfData + kdOff;
 
       uint32_t rsrc1, rsrc2, rsrc3;
-      uint16_t kcp;
+      uint16_t kcp, preloadSpec;
       std::memcpy(&rsrc3, kd + 44, 4);
       std::memcpy(&rsrc1, kd + 48, 4);
       std::memcpy(&rsrc2, kd + 52, 4);
       std::memcpy(&kcp, kd + 56, 2);
+      std::memcpy(&preloadSpec, kd + 58, 2);
+
+      // Extract kernarg preload from kernarg_preload_spec (offset 58).
+      result.kernargPreloadLength = preloadSpec & 0x3F;
+      result.kernargPreloadOffset = (preloadSpec >> 6) & 0x3F;
 
       // Extract VGPR/SGPR counts from compute_pgm_rsrc1.
       uint32_t vgprGran = (rsrc1 & 0x3F) + 1;
@@ -464,13 +469,18 @@ CodeObjectResult parseCodeObjectMetadata(const uint8_t *elfData, size_t elfSize,
         result.amdhsa.emplace_back(".amdhsa_system_sgpr_workgroup_id_z", 1);
       }
 
-      // Build initial register allocation.
+      // Build initial register allocation. User SGPRs come first (kernarg
+      // pointer at s[0:1]), then system SGPRs (workgroup IDs) start after
+      // all user SGPRs. The user_sgpr_count from compute_pgm_rsrc2 gives
+      // the total number of user SGPRs including preloaded kernargs.
+      uint32_t userSgprCount = (rsrc2 >> 1) & 0x1F;
       int currentSgpr = 0;
       if (kernargPtr) {
         result.initialRegisterAllocation
             .registers[".amdhsa_user_sgpr_kernarg_segment_ptr"] = {
             currentSgpr, 2};
-        currentSgpr += 2;
+        // System SGPRs start after ALL user SGPRs, not after the pointer.
+        currentSgpr = static_cast<int>(userSgprCount);
       }
       if (wgIdX) {
         result.initialRegisterAllocation

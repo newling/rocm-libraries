@@ -643,6 +643,50 @@ TEST(Gfx1151, CopyKernelFromCodeObject) {
   }
 }
 
+// ============================================================================
+// Mutation tests: modify real kernels and verify race detection + diagnostics.
+// ============================================================================
+
+/// Apply a mutation to assembly source: comment out the nth occurrence of a
+/// pattern (0-indexed). Returns the mutated string.
+std::string commentOutNth(const std::string &assembly,
+                          const std::string &pattern, int n) {
+  std::string result = assembly;
+  size_t pos = 0;
+  for (int i = 0; i <= n; ++i) {
+    pos = result.find(pattern, pos);
+    if (pos == std::string::npos) {
+      return result;
+    }
+    if (i == n) {
+      result.replace(pos, pattern.size(), std::string(pattern.size(), ' '));
+      return result;
+    }
+    pos += pattern.size();
+  }
+  return result;
+}
+
+/// Run a kernel expecting a race, return true if detected.
+bool detectsRace(const std::string &assembly,
+                 std::shared_ptr<Architecture> arch, int nThreads,
+                 int nGlobalBytes, std::string *diagnosticOut = nullptr) {
+  auto co = test::assembleToCodeObject(assembly, arch->getName());
+  Emulator emulator(co.data(), co.size(), arch, assembly);
+  std::vector<int> h_data(nGlobalBytes / 4 + 1, 0);
+  int *d_data = h_data.data();
+  emulator.addKernarg(0, &d_data);
+  try {
+    emulator.run(Dim3d(0), {nThreads, 1, 1}, {.raceChecks = true});
+    return false;
+  } catch (const RaceConditionException &e) {
+    if (diagnosticOut) {
+      *diagnosticOut = e.what();
+    }
+    return true;
+  }
+}
+
 // Mutation test: remove a barrier from a real kernel, verify the race
 // detector catches it and the diagnostic points to the correct .s lines.
 TEST(Gfx942, MutationTest_RemoveBarrier_DetectsRace) {
@@ -687,3 +731,6 @@ TEST(Gfx942, MutationTest_RemoveBarrier_DetectsRace) {
             msg.c_str());
   }
 }
+
+// Tensile mutation test is in e2e_tensilelite.cpp where TensileGemmRunner
+// provides the full kernarg setup needed by Tensile kernels.
