@@ -134,7 +134,13 @@ void RaceDetector::adjustByteCounts(const IntervalSet &ivs,
 std::string RaceDetector::decorateException(
     const RaceViolation &e, int wavePc, WaveRaceState *waveRaceState,
     int numSourceLines,
-    std::function<std::string_view(int)> getSourceLine) const {
+    std::function<std::string_view(int)> getSourceLine,
+    std::function<int(int)> pcMapper) const {
+
+  // Apply PC mapping if available (translates token indices to source lines).
+  auto mapPc = [&](int pc) -> int {
+    return pcMapper ? pcMapper(pc) : pc;
+  };
 
   auto printCodeBlock = [&](std::ostringstream &oss, int startLine, int endLine,
                             std::span<const int> arrowLines) {
@@ -182,16 +188,17 @@ std::string RaceDetector::decorateException(
   };
 
   if (e.space == RaceViolation::Space::VGPR) {
+    int mappedPc = mapPc(wavePc);
     std::ostringstream oss;
-    oss << "\nVGPR race detected on line " << wavePc << " (wave " << e.wave
+    oss << "\nVGPR race detected on line " << mappedPc << " (wave " << e.wave
         << ", lane " << e.lane << ") in workgroup (" << workgroupId.x << ","
         << workgroupId.y << "," << workgroupId.z
         << "). Conflicting events:\n\n";
 
-    std::vector<int> eventPcs{wavePc};
+    std::vector<int> eventPcs{mappedPc};
     if (waveRaceState) {
       for (EventId evtId : waveRaceState->getVgprMemoryEvents(e.index)) {
-        eventPcs.push_back(getEventPc(evtId));
+        eventPcs.push_back(mapPc(getEventPc(evtId)));
       }
     }
     printCodeBlocks(oss, std::move(eventPcs));
@@ -199,18 +206,19 @@ std::string RaceDetector::decorateException(
   }
 
   if (e.space == RaceViolation::Space::SGPR) {
+    int mappedPc = mapPc(wavePc);
     std::ostringstream oss;
-    oss << "\nSGPR race detected on line " << wavePc << " (wave " << e.wave
+    oss << "\nSGPR race detected on line " << mappedPc << " (wave " << e.wave
         << ") in workgroup (" << workgroupId.x << "," << workgroupId.y << ","
         << workgroupId.z << "). Conflicting events:\n\n";
 
-    std::vector<int> eventPcs{wavePc};
+    std::vector<int> eventPcs{mappedPc};
     if (waveRaceState) {
       for (EventId evtId : waveRaceState->getWaveMemoryEvents()) {
         if (isToSgpr(getEventType(evtId))) {
           for (uint32_t reg : getEventRegisters(evtId)) {
             if (reg == static_cast<uint32_t>(e.index)) {
-              eventPcs.push_back(getEventPc(evtId));
+              eventPcs.push_back(mapPc(getEventPc(evtId)));
               break;
             }
           }
@@ -232,13 +240,13 @@ std::string RaceDetector::decorateException(
       int wave;
       int lane;
     };
-    std::vector<PcWaveLane> entries{{wavePc, e.wave, e.lane}};
+    std::vector<PcWaveLane> entries{{mapPc(wavePc), e.wave, e.lane}};
 
     auto scanEvents = [&](const std::vector<EventId> &events) {
       for (EventId eventId : events) {
         if (getEventIntervals(eventId).contains(e.index)) {
           entries.push_back(
-              {getEventPc(eventId), getEventWaveId(eventId).value, -1});
+              {mapPc(getEventPc(eventId)), getEventWaveId(eventId).value, -1});
         }
       }
     };

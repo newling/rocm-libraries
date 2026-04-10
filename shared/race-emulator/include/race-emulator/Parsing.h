@@ -93,10 +93,26 @@ struct ParsedAsm {
   /// real byte addresses instead of the synthetic 4*lineIndex scheme.
   std::vector<uint64_t> pcTable;
 
+  /// Source mapping for diagnostics: maps disassembly token index to the
+  /// corresponding line index in the original source (sourceLines). When
+  /// populated, decorateException shows original source lines with comments
+  /// instead of raw disassembly lines. -1 means no mapping for that token.
+  std::vector<int> sourceLineMap;
+
+  /// Original source lines (from the .s file). Used by decorateException
+  /// when sourceLineMap is populated.
+  std::vector<std::string> sourceLines;
+
   void appendStr(std::ostream &os) const;
   std::string str() const;
   void appendTokensStr(std::ostream &os) const;
 };
+
+/// Build a source line mapping from disassembly token indices to original
+/// source line indices. Uses label matching as anchor points and sequential
+/// instruction matching between anchors. Populates result.sourceLineMap
+/// and result.sourceLines.
+void buildSourceMapping(ParsedAsm &result, const ParsedAsm &sourceAsm);
 
 /// Parse llvm-objdump -d output into a ParsedAsm. Populates tokens, labels,
 /// and pcTable. Metadata fields (name, wavefrontSize, args, amdhsa, etc.)

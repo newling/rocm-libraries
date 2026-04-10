@@ -515,4 +515,96 @@ ParsedAsm parseDisassembly(std::string_view disassemblyText) {
   return result;
 }
 
+void buildSourceMapping(ParsedAsm &result, const ParsedAsm &sourceAsm) {
+  // Store original source lines.
+  std::istringstream sourceStream{sourceAsm.assembly};
+  std::string line;
+  while (std::getline(sourceStream, line)) {
+    result.sourceLines.push_back(line);
+  }
+
+  // Initialize mapping: -1 = no mapping.
+  result.sourceLineMap.assign(result.tokens.size(), -1);
+
+  // Build anchor points from label matching. For each label that exists in
+  // both the disassembly and the source, record (disasm token index, source
+  // line index).
+  struct Anchor {
+    int disasmIndex;
+    int sourceIndex;
+  };
+  std::vector<Anchor> anchors;
+  for (const auto &[name, disasmIndex] : result.labels) {
+    auto it = sourceAsm.labels.find(name);
+    if (it != sourceAsm.labels.end()) {
+      anchors.push_back({disasmIndex, it->second});
+    }
+  }
+  std::sort(anchors.begin(), anchors.end(),
+            [](const Anchor &a, const Anchor &b) {
+              return a.disasmIndex < b.disasmIndex;
+            });
+
+  // Between each pair of consecutive anchors (and before the first / after the
+  // last), match instruction lines sequentially. Skip non-instruction lines
+  // (comments, directives, blank lines, labels) in the source.
+  auto isSourceInstruction = [&](int srcLine) -> bool {
+    if (srcLine < 0 || srcLine >= static_cast<int>(sourceAsm.tokens.size())) {
+      return false;
+    }
+    const auto &tok = sourceAsm.tokens[srcLine];
+    if (tok.isEmptyLine || tok.isLabel || tok.isKeyValue || tok.isListItem) {
+      return false;
+    }
+    auto trimmed = tok.commentFreeLine;
+    auto pos = trimmed.find_first_not_of(" \t");
+    if (pos == std::string::npos) {
+      return false;
+    }
+    // Skip directives.
+    if (trimmed[pos] == '.') {
+      return false;
+    }
+    // Skip comments.
+    if (trimmed[pos] == ';' || trimmed[pos] == '/') {
+      return false;
+    }
+    return true;
+  };
+
+  // Add sentinel anchors at start and end.
+  anchors.insert(anchors.begin(), {0, 0});
+  anchors.push_back({static_cast<int>(result.tokens.size()),
+                     static_cast<int>(sourceAsm.tokens.size())});
+
+  for (size_t a = 0; a + 1 < anchors.size(); ++a) {
+    int disasmStart = anchors[a].disasmIndex;
+    int disasmEnd = anchors[a + 1].disasmIndex;
+    int srcCursor = anchors[a].sourceIndex;
+    int srcEnd = anchors[a + 1].sourceIndex;
+
+    for (int di = disasmStart; di < disasmEnd; ++di) {
+      // Skip label tokens in disassembly (they have their own mapping).
+      if (result.tokens[di].isLabel) {
+        // Map label to the label's source line.
+        auto it = sourceAsm.labels.find(result.tokens[di].key);
+        if (it != sourceAsm.labels.end()) {
+          result.sourceLineMap[di] = it->second;
+        }
+        continue;
+      }
+
+      // Advance source cursor past non-instruction lines.
+      while (srcCursor < srcEnd && !isSourceInstruction(srcCursor)) {
+        srcCursor++;
+      }
+
+      if (srcCursor < srcEnd) {
+        result.sourceLineMap[di] = srcCursor;
+        srcCursor++;
+      }
+    }
+  }
+}
+
 } // namespace raceemulator

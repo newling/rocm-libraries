@@ -8,12 +8,16 @@
 #include "race-emulator/Util.h"
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
 #include <sstream>
+#include <thread>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -87,19 +91,111 @@ void Emulator::initKernargSegment() {
   kernargIsSet.resize(parsedAsm->args.size(), false);
 }
 
+namespace {
+namespace fs = std::filesystem;
+
+std::string findTool(const std::string &name) {
+  if (const char *dir = std::getenv("LLVM_BIN_DIR")) {
+    std::string path = std::string(dir) + "/" + name;
+    if (fs::exists(path)) {
+      return path;
+    }
+  }
+  // Check PATH.
+  auto tmpPath = fs::temp_directory_path() /
+      ("race_emu_which_" + std::to_string(std::hash<std::thread::id>{}(
+                               std::this_thread::get_id())) + ".txt");
+  int status = std::system(
+      ("which " + name + " > " + tmpPath.string() + " 2>/dev/null").c_str());
+  if (status != 0) {
+    return "";
+  }
+  std::ifstream ifs(tmpPath);
+  std::string result((std::istreambuf_iterator<char>(ifs)),
+                     std::istreambuf_iterator<char>());
+  fs::remove(tmpPath);
+  if (!result.empty() && result.back() == '\n') {
+    result.pop_back();
+  }
+  return result;
+}
+
+std::string captureCmd(const std::string &cmd) {
+  auto tmpPath = fs::temp_directory_path() /
+      ("race_emu_" + std::to_string(std::hash<std::thread::id>{}(
+                         std::this_thread::get_id())) + ".txt");
+  int status = std::system((cmd + " > " + tmpPath.string() + " 2>&1").c_str());
+  std::ifstream ifs(tmpPath);
+  std::string result((std::istreambuf_iterator<char>(ifs)),
+                     std::istreambuf_iterator<char>());
+  fs::remove(tmpPath);
+  if (status != 0) {
+    throw std::runtime_error("Command failed: " + cmd + "\n" + result);
+  }
+  return result;
+}
+
+} // namespace
+
 Emulator::Emulator(std::string_view a, std::shared_ptr<Architecture> arch)
     : arch(std::move(arch)) {
-  parsedAsm = std::make_unique<ParsedAsm>(a);
+  // Parse .s for metadata.
+  auto sourceAsm = std::make_unique<ParsedAsm>(a);
 
-  // Validate that the provided architecture matches the assembly's target.
-  if (!parsedAsm->target.empty()) {
-    auto detected = architectureFromTarget(parsedAsm->target);
+  // Validate architecture.
+  if (!sourceAsm->target.empty()) {
+    auto detected = architectureFromTarget(sourceAsm->target);
     if (detected->getName() != this->arch->getName()) {
       throw std::runtime_error("Architecture mismatch: assembly targets '" +
                                detected->getName() +
                                "' but emulator was constructed with '" +
                                this->arch->getName() + "'");
     }
+  }
+
+  // Try the disassembly path: assemble → disassemble → parse.
+  std::string llvmMc = findTool("llvm-mc");
+  std::string llvmObjdump = findTool("llvm-objdump");
+  bool usedDisassemblyPath = false;
+  if (!llvmMc.empty() && !llvmObjdump.empty()) {
+    // Write .s to temp file and try assembling.
+    auto tid = std::to_string(std::hash<std::thread::id>{}(
+        std::this_thread::get_id()));
+    auto sPath = fs::temp_directory_path() / ("race_emu_input_" + tid + ".s");
+    auto objPath = fs::temp_directory_path() / ("race_emu_" + tid + ".o");
+    {
+      std::ofstream ofs(sPath);
+      ofs << a;
+    }
+    std::string mcpu = this->arch->getName();
+    try {
+      captureCmd(llvmMc + " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
+                 " -filetype=obj " + sPath.string() + " -o " +
+                 objPath.string());
+      std::string disasm = captureCmd(
+          llvmObjdump + " -d --show-all-symbols " + objPath.string());
+
+      parsedAsm = std::make_unique<ParsedAsm>(parseDisassembly(disasm));
+      parsedAsm->name = sourceAsm->name;
+      parsedAsm->wavefrontSize = sourceAsm->wavefrontSize;
+      parsedAsm->kernargSegmentSize = sourceAsm->kernargSegmentSize;
+      parsedAsm->args = sourceAsm->args;
+      parsedAsm->amdhsa = sourceAsm->amdhsa;
+      parsedAsm->initialRegisterAllocation =
+          sourceAsm->initialRegisterAllocation;
+      parsedAsm->kernargPreloadLength = sourceAsm->kernargPreloadLength;
+      parsedAsm->kernargPreloadOffset = sourceAsm->kernargPreloadOffset;
+      buildSourceMapping(*parsedAsm, *sourceAsm);
+      usedDisassemblyPath = true;
+    } catch (...) {
+      // Assembly failed (e.g. simplified test-only format). Fall through.
+    }
+    fs::remove(sPath);
+    fs::remove(objPath);
+  }
+
+  if (!usedDisassemblyPath) {
+    parsedAsm = std::move(sourceAsm);
   }
 
   initKernargSegment();
@@ -332,13 +428,42 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
         } catch (RaceConditionException &e) {
           auto &wave = workgroup.getWave(e.violation.wave);
           auto *detector = workgroup.getRaceDetector();
+          // When source mapping is available, translate token indices to
+          // original source line indices for diagnostics.
+          auto &slm = parsedAsm->sourceLineMap;
+          auto &srcLines = parsedAsm->sourceLines;
+          bool hasSourceMapping = !slm.empty() && !srcLines.empty();
+
+          int wavePc = wave.getPc();
+          int numLines = hasSourceMapping
+              ? static_cast<int>(srcLines.size())
+              : static_cast<int>(parsedAsm->tokens.size());
+          int mappedPc = hasSourceMapping && wavePc >= 0 &&
+                                 wavePc < static_cast<int>(slm.size()) &&
+                                 slm[wavePc] >= 0
+              ? slm[wavePc]
+              : wavePc;
+
+          auto getLine = [&](int j) -> std::string_view {
+            if (hasSourceMapping) {
+              return srcLines[j];
+            }
+            return parsedAsm->tokens[j].originalLine;
+          };
+          std::function<int(int)> mapper = nullptr;
+          if (hasSourceMapping) {
+            mapper = [&](int tokenIdx) -> int {
+              if (tokenIdx >= 0 &&
+                  tokenIdx < static_cast<int>(slm.size()) && slm[tokenIdx] >= 0) {
+                return slm[tokenIdx];
+              }
+              return tokenIdx;
+            };
+          }
           auto msg = detector->decorateException(
-              e.violation, wave.getPc(),
-              workgroup.getRaceState(e.violation.wave),
-              static_cast<int>(parsedAsm->tokens.size()),
-              [&](int j) -> std::string_view {
-                return parsedAsm->tokens[j].originalLine;
-              });
+              e.violation, mappedPc,
+              workgroup.getRaceState(e.violation.wave), numLines, getLine,
+              mapper);
           throw RaceConditionException(msg, e.violation);
         }
       } catch (...) {
