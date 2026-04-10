@@ -106,7 +106,7 @@ inline Emulator emulatorFromAssembly(std::string_view assembly,
                              std::get<std::string>(metaResult));
   }
 
-  return Emulator(std::get<KernelMetadata>(std::move(metaResult)),
+  return Emulator(std::get<KernelInfo>(std::move(metaResult)),
                   disassembly, std::move(arch),
                   withSourceMapping ? assembly : "");
 }

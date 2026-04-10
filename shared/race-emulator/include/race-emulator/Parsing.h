@@ -50,60 +50,68 @@ struct KernelArg {
   std::string name;
 };
 
-/// Pre-allocated scalar register ranges (e.g., kernarg pointer, workgroup ID).
-struct RegisterMapping {
-  int start_register;
+/// A contiguous range of scalar general-purpose registers.
+struct RegisterRange {
+  int startRegister;
   int count;
 };
-struct AllocationResult {
-  std::map<std::string, RegisterMapping> registers;
+
+/// Describes which SGPRs the hardware pre-loads with special values at kernel
+/// launch. For example, the kernarg segment pointer occupies s[0:1], and
+/// workgroup IDs occupy s[2], s[3], s[4]. The emulator uses this to initialize
+/// wave state before execution.
+struct PreloadedRegisters {
+  std::map<std::string, RegisterRange> registers;
 };
 
-/// Kernel metadata extracted from a code object or .s assembly source.
-struct KernelMetadata {
+/// Information about a kernel extracted from a code object (.co) file.
+struct KernelInfo {
   std::string name;
   WaveSize wavefrontSize{0};
   int kernargSegmentSize = 0;
   std::vector<KernelArg> args;
   std::vector<std::pair<std::string, int>> amdhsa;
-  AllocationResult initialRegisterAllocation;
+  PreloadedRegisters preloadedRegisters;
   int kernargPreloadLength = 0;
   int kernargPreloadOffset = 0;
 };
 
-/// Parsed instruction stream from disassembly or .s assembly.
-struct ParsedAsm {
-  /// Parse .s assembly source (used for source mapping label extraction).
-  ParsedAsm(std::string_view assembly);
+/// Parsed instruction stream. Produced either from llvm-objdump disassembly
+/// (via parseDisassembly) or from compiler-emitted .s source (via
+/// parseAssemblySource, used only for diagnostic source mapping).
+struct DisassembledKernel {
+  std::vector<ParsedLine> instructions;
 
-  std::string assembly;
-  std::vector<ParsedLine> tokens;
+  /// Label name -> instruction index.
   std::map<std::string, int> labels;
 
-  /// Token index -> byte address. Populated by parseDisassembly.
-  std::vector<uint64_t> pcTable;
+  /// Instruction index -> byte address in the code object.
+  /// Empty when parsed from .s source.
+  std::vector<uint64_t> instructionAddresses;
 
-  /// Source mapping for diagnostics: disassembly token index -> original
-  /// source line index. -1 = no mapping.
-  std::vector<int> sourceLineMap;
+  /// Source mapping (populated by buildSourceMapping).
+  /// Maps each instruction index to its line in the original .s source.
+  /// -1 means no mapping for that instruction.
+  std::vector<int> instructionToSourceLine;
 
-  /// Original source lines for diagnostic display.
+  /// Raw lines of the original .s source (populated by buildSourceMapping).
   std::vector<std::string> sourceLines;
 
   void appendStr(std::ostream &os) const;
   std::string str() const;
-  void appendTokensStr(std::ostream &os) const;
-
-  // Legacy metadata fields — still populated by the .s parser constructor
-  // for source mapping (buildSourceMapping needs labels). Will be removed
-  // once source mapping uses a simpler label extractor.
-  KernelMetadata metadata;
+  void appendInstructionsStr(std::ostream &os) const;
 };
 
-/// Build source mapping from disassembly tokens to original source lines.
-void buildSourceMapping(ParsedAsm &result, const ParsedAsm &sourceAsm);
+/// Parse compiler-emitted .s source into a DisassembledKernel. Only populates
+/// instructions and labels — no metadata. Used for diagnostic source mapping.
+DisassembledKernel parseAssemblySource(std::string_view assemblySource);
 
-/// Parse llvm-objdump -d output into a ParsedAsm (tokens, labels, pcTable).
-ParsedAsm parseDisassembly(std::string_view disassemblyText);
+/// Build source mapping by matching labels between disassembly and .s source.
+/// Populates result.instructionToSourceLine and result.sourceLines.
+void buildSourceMapping(DisassembledKernel &result,
+                        const DisassembledKernel &sourceAsm);
+
+/// Parse llvm-objdump -d output into a DisassembledKernel.
+DisassembledKernel parseDisassembly(std::string_view disassemblyText);
 
 } // namespace raceemulator

@@ -171,26 +171,26 @@ public:
   }
 
   /// Whether real byte-address PCs are available (disassembly path).
-  bool hasPcTable() const { return pcTable != nullptr; }
+  bool hasPcTable() const { return instructionAddresses != nullptr; }
 
   /// Return the real byte address for the given token index, or fall back
-  /// to the synthetic 4*index when pcTable is not available.
+  /// to the synthetic 4*index when instructionAddresses is not available.
   uint64_t getByteAddress(int tokenIndex) const {
-    if (pcTable && tokenIndex >= 0 &&
-        static_cast<size_t>(tokenIndex) < pcTable->size()) {
-      return (*pcTable)[tokenIndex];
+    if (instructionAddresses && tokenIndex >= 0 &&
+        static_cast<size_t>(tokenIndex) < instructionAddresses->size()) {
+      return (*instructionAddresses)[tokenIndex];
     }
     return static_cast<uint64_t>(4 * tokenIndex);
   }
 
   /// Look up the token index for a byte address. Returns -1 if not found.
-  /// Only works when pcTable is available.
+  /// Only works when instructionAddresses is available.
   int getTokenIndexFromByteAddress(uint64_t addr) const {
-    if (!pcTable) {
+    if (!instructionAddresses) {
       return static_cast<int>(addr / 4);
     }
-    for (size_t i = 0; i < pcTable->size(); ++i) {
-      if ((*pcTable)[i] == addr) {
+    for (size_t i = 0; i < instructionAddresses->size(); ++i) {
+      if ((*instructionAddresses)[i] == addr) {
         return static_cast<int>(i);
       }
     }
@@ -239,7 +239,7 @@ private:
   const std::map<std::string, int> *labels;
 
   // Token index → byte address. Null when running from .s (line-index PCs).
-  const std::vector<uint64_t> *pcTable = nullptr;
+  const std::vector<uint64_t> *instructionAddresses = nullptr;
 
   std::vector<std::function<int()>> instructionCache;
 

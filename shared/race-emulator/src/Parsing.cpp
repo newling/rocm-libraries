@@ -72,14 +72,14 @@ std::string parserStateStr(ParserState state) {
 // determine how sgprs are initialized.
 class KernelStateParser {
 public:
-  static AllocationResult
+  static PreloadedRegisters
   Parse(const std::vector<std::pair<std::string, int>> &metadata) {
     std::map<std::string, int> meta_map;
     for (const auto &item : metadata) {
       meta_map[item.first] = item.second;
     }
 
-    AllocationResult result;
+    PreloadedRegisters result;
     int current_sgpr = 0;
 
     // 1. identify user sgpr count
@@ -220,17 +220,19 @@ ParsedLine::ParsedLine(std::string_view originalLineIn,
   }
 }
 
-ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
+DisassembledKernel parseAssemblySource(std::string_view assemblySource) {
+  DisassembledKernel result;
+
   std::vector<std::string> assemblyLines;
   {
-    std::istringstream stream(assembly);
+    std::string source{assemblySource};
+    std::istringstream stream(source);
     std::string currentLine;
     while (std::getline(stream, currentLine)) {
       assemblyLines.push_back(currentLine);
     }
   }
 
-  int argsItemDepth = -1;
   ParserState state = ParserState::Root;
 
   auto updateParserState = [&](ParsedLine token) {
@@ -248,124 +250,28 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
       state = ParserState::Kernels;
     }
 
-    if (state == ParserState::Kernels && token.key == ".args") {
-      state = ParserState::Args;
-      argsItemDepth = -1; // will be set on first actual arg list item
-    }
-
-    if (state == ParserState::Args && !token.isEmptyLine && argsItemDepth > 0 &&
-        token.indent < argsItemDepth) {
-      state = ParserState::Kernels;
-    }
-
     if (state == ParserState::Kernels &&
         token.originalLine.find(".end_amdgpu_metadata") != std::string::npos) {
       state = ParserState::Root;
     }
-
   };
 
-  auto processInKernel = [&](ParsedLine token) {
-    if (token.key == ".name") {
-      assert(metadata.name.empty() && "only support one kernel currently");
-      metadata.name = token.value;
-    } else if (token.key == ".kernarg_segment_size") {
-      metadata.kernargSegmentSize = getIntFromView<int>(token.value);
-    } else if (token.key == ".wavefront_size") {
-      metadata.wavefrontSize = WaveSize{getIntFromView<int>(token.value)};
-    }
-  };
-
-  auto processInArgs = [&](ParsedLine token) {
-    if (token.key == ".args") {
-      return;
-    }
-    if (token.isListItem) {
-      metadata.args.push_back(KernelArg{});
-      if (argsItemDepth < 0) {
-        argsItemDepth = token.indent;
-      }
-    }
-    if (metadata.args.empty()) {
-      return;
-    }
-
-    if (token.key == ".size") {
-      metadata.args.back().size = getIntFromView<int>(token.value);
-    } else if (token.key == ".offset") {
-      metadata.args.back().offset = getIntFromView<int>(token.value);
-    } else if (token.key == ".value_kind") {
-      metadata.args.back().valueKind = token.value;
-    } else if (token.key == ".value_type") {
-      metadata.args.back().valueType = token.value;
-    } else if (token.key == ".address_space") {
-      metadata.args.back().addressSpace = token.value;
-    } else if (token.key == ".name") {
-      metadata.args.back().name = token.value;
-    }
-  };
-
-  auto processInAmdhsa = [&](ParsedLine token) {
-    if (token.originalLine.find(".amdhsa_kernel") != std::string::npos) {
-      return;
-    }
-    if (token.isEmptyLine) {
-      return;
-    }
-    metadata.amdhsa.push_back({token.key, std::stoi(token.value)});
-  };
-
-  auto process = [&](ParsedLine token,
-                     std::map<std::string, uint32_t> &symbolTable) {
-    if (state == ParserState::Root) {
-      processInRoot(token, labels, symbolTable);
-    }
-    if (state == ParserState::Amdhsa) {
-      processInAmdhsa(token);
-    }
-    if (state == ParserState::Kernels) {
-      processInKernel(token);
-    } else if (state == ParserState::Args) {
-      processInArgs(token);
-    }
-  };
-
-  tokens.clear();
   std::map<std::string, uint32_t> symbolTable;
   symbolTable["UNDEF"] = 0xFFFFFFFF;
   for (unsigned i = 0; i < assemblyLines.size(); ++i) {
     const auto &originalLine = assemblyLines[i];
     ParsedLine token(originalLine, originalLine, i, state, symbolTable);
-    tokens.push_back(token);
+    result.instructions.push_back(token);
     updateParserState(token);
-    process(token, symbolTable);
-
-  }
-
-  metadata.initialRegisterAllocation =
-      KernelStateParser::Parse(metadata.amdhsa);
-
-  for (const auto &[key, val] : metadata.amdhsa) {
-    if (key == ".amdhsa_user_sgpr_kernarg_preload_length") {
-      metadata.kernargPreloadLength = val;
-    } else if (key == ".amdhsa_user_sgpr_kernarg_preload_offset") {
-      metadata.kernargPreloadOffset = val;
+    if (state == ParserState::Root) {
+      processInRoot(token, result.labels, symbolTable);
     }
   }
+
+  return result;
 }
 
-void ParsedAsm::appendStr(std::ostream &os) const {
-  os << "Kernel Name: " << metadata.name << "\n";
-  os << "Kernarg Segment Size: " << metadata.kernargSegmentSize << "\n";
-  os << "Wavefront Size: " << metadata.wavefrontSize << "\n";
-  os << "Kernel Arguments:\n";
-  for (size_t i = 0; i < metadata.args.size(); ++i) {
-    const auto &arg = metadata.args[i];
-    os << "  Arg " << i << ": name='" << arg.name << "', size=" << arg.size
-       << ", offset=" << arg.offset << ", valueKind='" << arg.valueKind
-       << "', valueType='" << arg.valueType << "', addressSpace='"
-       << arg.addressSpace << "'\n";
-  }
+void DisassembledKernel::appendStr(std::ostream &os) const {
   os << "Labels:\n";
   std::vector<std::pair<int, std::string>> sortedLabels;
   for (const auto &label : labels) {
@@ -375,14 +281,11 @@ void ParsedAsm::appendStr(std::ostream &os) const {
   for (const auto &label : sortedLabels) {
     os << "  " << label.second << ": line " << label.first << "\n";
   }
-  os << "AMDHSA Metadata:\n";
-  for (const auto &[k, v] : metadata.amdhsa) {
-    os << "  " << k << " = " << v << "\n";
-  }
+  os << "Instructions: " << instructions.size() << "\n";
 }
 
-void ParsedAsm::appendTokensStr(std::ostream &os) const {
-  for (const auto &token : tokens) {
+void DisassembledKernel::appendInstructionsStr(std::ostream &os) const {
+  for (const auto &token : instructions) {
     os << "[KV=]" << token.isKeyValue << " [LI]=" << token.isListItem
        << " [LB]=" << token.isLabel << " "
        << parserStateStr(token.precedingParserState) << " "
@@ -390,20 +293,14 @@ void ParsedAsm::appendTokensStr(std::ostream &os) const {
   }
 }
 
-std::string ParsedAsm::str() const {
+std::string DisassembledKernel::str() const {
   std::ostringstream oss;
   appendStr(oss);
   return oss.str();
 }
 
-ParsedAsm parseDisassembly(std::string_view disassemblyText) {
-  // Create a ParsedAsm without invoking the .s parser constructor.
-  // We populate tokens, labels, and pcTable directly.
-  ParsedAsm result("");
-
-  // Clear tokens from the empty-string parse.
-  result.tokens.clear();
-  result.labels.clear();
+DisassembledKernel parseDisassembly(std::string_view disassemblyText) {
+  DisassembledKernel result;
 
   std::string disasmStr{disassemblyText};
   std::istringstream stream{disasmStr};
@@ -424,19 +321,19 @@ ParsedAsm parseDisassembly(std::string_view disassemblyText) {
       if (openAngle != std::string::npos && closeAngle != std::string::npos) {
         std::string labelName =
             line.substr(openAngle + 1, closeAngle - openAngle - 1);
-        int tokenIndex = static_cast<int>(result.tokens.size());
+        int tokenIndex = static_cast<int>(result.instructions.size());
 
         // Create a label ParsedLine (skipped by compileLine as a no-op).
         ParsedLine token(line, labelName + ":", tokenIndex,
                          ParserState::Root, emptySymbolTable);
         token.isLabel = true;
         token.key = labelName;
-        result.tokens.push_back(std::move(token));
+        result.instructions.push_back(std::move(token));
         result.labels[labelName] = tokenIndex;
 
         // Parse the hex address.
         uint64_t addr = std::stoull(line.substr(0, openAngle), nullptr, 16);
-        result.pcTable.push_back(addr);
+        result.instructionAddresses.push_back(addr);
       }
       continue;
     }
@@ -474,26 +371,25 @@ ParsedAsm parseDisassembly(std::string_view disassemblyText) {
       }
     }
 
-    int tokenIndex = static_cast<int>(result.tokens.size());
+    int tokenIndex = static_cast<int>(result.instructions.size());
     ParsedLine token(line, instructionText, tokenIndex, ParserState::Root,
                      emptySymbolTable);
-    result.tokens.push_back(std::move(token));
-    result.pcTable.push_back(pc);
+    result.instructions.push_back(std::move(token));
+    result.instructionAddresses.push_back(pc);
   }
 
   return result;
 }
 
-void buildSourceMapping(ParsedAsm &result, const ParsedAsm &sourceAsm) {
-  // Store original source lines.
-  std::istringstream sourceStream{sourceAsm.assembly};
-  std::string line;
-  while (std::getline(sourceStream, line)) {
-    result.sourceLines.push_back(line);
+void buildSourceMapping(DisassembledKernel &result, const DisassembledKernel &sourceAsm) {
+  // Store original source lines from the parsed source instructions.
+  result.sourceLines.reserve(sourceAsm.instructions.size());
+  for (const auto &inst : sourceAsm.instructions) {
+    result.sourceLines.push_back(inst.originalLine);
   }
 
   // Initialize mapping: -1 = no mapping.
-  result.sourceLineMap.assign(result.tokens.size(), -1);
+  result.instructionToSourceLine.assign(result.instructions.size(), -1);
 
   // Build anchor points from label matching. For each label that exists in
   // both the disassembly and the source, record (disasm token index, source
@@ -518,10 +414,10 @@ void buildSourceMapping(ParsedAsm &result, const ParsedAsm &sourceAsm) {
   // last), match instruction lines sequentially. Skip non-instruction lines
   // (comments, directives, blank lines, labels) in the source.
   auto isSourceInstruction = [&](int srcLine) -> bool {
-    if (srcLine < 0 || srcLine >= static_cast<int>(sourceAsm.tokens.size())) {
+    if (srcLine < 0 || srcLine >= static_cast<int>(sourceAsm.instructions.size())) {
       return false;
     }
-    const auto &tok = sourceAsm.tokens[srcLine];
+    const auto &tok = sourceAsm.instructions[srcLine];
     if (tok.isEmptyLine || tok.isLabel || tok.isKeyValue || tok.isListItem) {
       return false;
     }
@@ -543,8 +439,8 @@ void buildSourceMapping(ParsedAsm &result, const ParsedAsm &sourceAsm) {
 
   // Add sentinel anchors at start and end.
   anchors.insert(anchors.begin(), {0, 0});
-  anchors.push_back({static_cast<int>(result.tokens.size()),
-                     static_cast<int>(sourceAsm.tokens.size())});
+  anchors.push_back({static_cast<int>(result.instructions.size()),
+                     static_cast<int>(sourceAsm.instructions.size())});
 
   for (size_t a = 0; a + 1 < anchors.size(); ++a) {
     int disasmStart = anchors[a].disasmIndex;
@@ -553,12 +449,12 @@ void buildSourceMapping(ParsedAsm &result, const ParsedAsm &sourceAsm) {
     int srcEnd = anchors[a + 1].sourceIndex;
 
     for (int di = disasmStart; di < disasmEnd; ++di) {
-      // Skip label tokens in disassembly (they have their own mapping).
-      if (result.tokens[di].isLabel) {
+      // Skip label instructions in disassembly (they have their own mapping).
+      if (result.instructions[di].isLabel) {
         // Map label to the label's source line.
-        auto it = sourceAsm.labels.find(result.tokens[di].key);
+        auto it = sourceAsm.labels.find(result.instructions[di].key);
         if (it != sourceAsm.labels.end()) {
-          result.sourceLineMap[di] = it->second;
+          result.instructionToSourceLine[di] = it->second;
         }
         continue;
       }
@@ -569,7 +465,7 @@ void buildSourceMapping(ParsedAsm &result, const ParsedAsm &sourceAsm) {
       }
 
       if (srcCursor < srcEnd) {
-        result.sourceLineMap[di] = srcCursor;
+        result.instructionToSourceLine[di] = srcCursor;
         srcCursor++;
       }
     }

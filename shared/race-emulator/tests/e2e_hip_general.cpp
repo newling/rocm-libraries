@@ -610,7 +610,7 @@ TEST(Gfx1151, CopyKernelFromCodeObject) {
   std::string assembly = test::loadKernelFile("gfx1151/copy.s");
   auto co = test::assembleToCodeObject(assembly, "gfx1151");
   std::string disasm = test::disassembleCodeObject(co);
-  auto meta = std::get<KernelMetadata>(
+  auto meta = std::get<KernelInfo>(
       parseCodeObjectMetadata(co.data(), co.size()));
 
   // Construct from .co metadata + disassembly — no .s source needed.
@@ -662,7 +662,7 @@ bool detectsRace(const std::string &assembly,
                  int nGlobalBytes, std::string *diagnosticOut = nullptr) {
   auto co = test::assembleToCodeObject(assembly, arch->getName());
   std::string disasm = test::disassembleCodeObject(co);
-  auto meta = std::get<KernelMetadata>(
+  auto meta = std::get<KernelInfo>(
       parseCodeObjectMetadata(co.data(), co.size()));
   Emulator emulator(std::move(meta), disasm, arch, assembly);
   std::vector<int> h_data(nGlobalBytes / 4 + 1, 0);
@@ -693,7 +693,7 @@ TEST(Gfx942, MutationTest_RemoveBarrier_DetectsRace) {
 
   auto co = test::assembleToCodeObject(mutated, "gfx942");
   std::string disasm = test::disassembleCodeObject(co);
-  auto meta = std::get<KernelMetadata>(
+  auto meta = std::get<KernelInfo>(
       parseCodeObjectMetadata(co.data(), co.size()));
   // Pass the ORIGINAL .s for source mapping — diagnostics show where
   // the barrier was in the unmutated source.

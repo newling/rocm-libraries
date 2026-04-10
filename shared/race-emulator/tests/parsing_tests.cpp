@@ -42,7 +42,7 @@ Disassembly of section .text:
   auto result = parseDisassembly(disasm);
 
   // Check tokens: 2 labels + 7 instructions = 9 entries.
-  EXPECT_EQ(result.tokens.size(), 9u);
+  EXPECT_EQ(result.instructions.size(), 9u);
 
   // Check labels.
   ASSERT_EQ(result.labels.count("my_kernel"), 1u);
@@ -50,21 +50,21 @@ Disassembly of section .text:
   EXPECT_EQ(result.labels.at("my_kernel"), 0);
   EXPECT_EQ(result.labels.at("done"), 6);
 
-  // Check pcTable matches byte addresses.
-  ASSERT_EQ(result.pcTable.size(), result.tokens.size());
-  EXPECT_EQ(result.pcTable[0], 0x0u);  // my_kernel label
-  EXPECT_EQ(result.pcTable[1], 0x0u);  // s_load_b64
-  EXPECT_EQ(result.pcTable[2], 0x8u);  // s_waitcnt
-  EXPECT_EQ(result.pcTable[3], 0xCu);  // v_add_f32
-  EXPECT_EQ(result.pcTable[4], 0x10u); // s_cbranch_scc0
-  EXPECT_EQ(result.pcTable[5], 0x14u); // v_mul_f32
-  EXPECT_EQ(result.pcTable[6], 0x18u); // done label
-  EXPECT_EQ(result.pcTable[7], 0x18u); // global_store_b32
-  EXPECT_EQ(result.pcTable[8], 0x20u); // s_endpgm
+  // Check instructionAddresses matches byte addresses.
+  ASSERT_EQ(result.instructionAddresses.size(), result.instructions.size());
+  EXPECT_EQ(result.instructionAddresses[0], 0x0u);  // my_kernel label
+  EXPECT_EQ(result.instructionAddresses[1], 0x0u);  // s_load_b64
+  EXPECT_EQ(result.instructionAddresses[2], 0x8u);  // s_waitcnt
+  EXPECT_EQ(result.instructionAddresses[3], 0xCu);  // v_add_f32
+  EXPECT_EQ(result.instructionAddresses[4], 0x10u); // s_cbranch_scc0
+  EXPECT_EQ(result.instructionAddresses[5], 0x14u); // v_mul_f32
+  EXPECT_EQ(result.instructionAddresses[6], 0x18u); // done label
+  EXPECT_EQ(result.instructionAddresses[7], 0x18u); // global_store_b32
+  EXPECT_EQ(result.instructionAddresses[8], 0x20u); // s_endpgm
 
   // Check instruction text is clean (no trailing comments).
-  EXPECT_EQ(result.tokens[1].processedLine, "s_load_b64 s[0:1], s[0:1], 0");
-  EXPECT_EQ(result.tokens[3].processedLine, "v_add_f32_e32 v0, s0, v0");
-  EXPECT_EQ(result.tokens[4].processedLine, "s_cbranch_scc0 done");
+  EXPECT_EQ(result.instructions[1].processedLine, "s_load_b64 s[0:1], s[0:1], 0");
+  EXPECT_EQ(result.instructions[3].processedLine, "v_add_f32_e32 v0, s0, v0");
+  EXPECT_EQ(result.instructions[4].processedLine, "s_cbranch_scc0 done");
 
 }

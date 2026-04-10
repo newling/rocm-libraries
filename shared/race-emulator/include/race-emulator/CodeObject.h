@@ -12,7 +12,7 @@
 namespace raceemulator {
 
 /// Parse kernel metadata from an AMDGPU code object ELF.
-using CodeObjectResult = std::variant<KernelMetadata, std::string>;
+using CodeObjectResult = std::variant<KernelInfo, std::string>;
 CodeObjectResult parseCodeObjectMetadata(const uint8_t *elfData, size_t elfSize,
                                          const std::string &kernelName = "");
 

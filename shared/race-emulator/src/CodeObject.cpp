@@ -278,7 +278,7 @@ CodeObjectResult parseCodeObjectMetadata(const uint8_t *elfData, size_t elfSize,
     kernel = &kernelsVal->arrayVal[0];
   }
 
-  KernelMetadata result;
+  KernelInfo result;
 
   auto *nameVal = findInMap(*kernel, ".name");
   if (nameVal && nameVal->type == MsgpackValue::STR) {
@@ -467,26 +467,26 @@ CodeObjectResult parseCodeObjectMetadata(const uint8_t *elfData, size_t elfSize,
       uint32_t userSgprCount = (rsrc2 >> 1) & 0x1F;
       int currentSgpr = 0;
       if (kernargPtr) {
-        result.initialRegisterAllocation
+        result.preloadedRegisters
             .registers[".amdhsa_user_sgpr_kernarg_segment_ptr"] = {
             currentSgpr, 2};
         // System SGPRs start after ALL user SGPRs, not after the pointer.
         currentSgpr = static_cast<int>(userSgprCount);
       }
       if (wgIdX) {
-        result.initialRegisterAllocation
+        result.preloadedRegisters
             .registers[".amdhsa_system_sgpr_workgroup_id_x"] = {currentSgpr,
                                                                  1};
         currentSgpr += 1;
       }
       if (wgIdY) {
-        result.initialRegisterAllocation
+        result.preloadedRegisters
             .registers[".amdhsa_system_sgpr_workgroup_id_y"] = {currentSgpr,
                                                                  1};
         currentSgpr += 1;
       }
       if (wgIdZ) {
-        result.initialRegisterAllocation
+        result.preloadedRegisters
             .registers[".amdhsa_system_sgpr_workgroup_id_z"] = {currentSgpr,
                                                                  1};
         currentSgpr += 1;

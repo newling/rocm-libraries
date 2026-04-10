@@ -21,8 +21,8 @@
 namespace raceemulator {
 
 void Emulator::appendStr(std::ostream &os) const {
-  parsedAsm->appendStr(os);
-  parsedAsm->appendTokensStr(os);
+  disassembledKernel->appendStr(os);
+  disassembledKernel->appendInstructionsStr(os);
 }
 
 std::string Emulator::getProfileReport(double minPercentage) const {
@@ -85,16 +85,16 @@ void Emulator::initKernargSegment() {
   kernargIsSet.resize(metadata_.args.size(), false);
 }
 
-Emulator::Emulator(KernelMetadata metadata, std::string_view disassembly,
+Emulator::Emulator(KernelInfo metadata, std::string_view disassembly,
                    std::shared_ptr<Architecture> arch,
                    std::string_view originalSource)
     : arch(std::move(arch)), metadata_(std::move(metadata)) {
-  parsedAsm = std::make_unique<ParsedAsm>(parseDisassembly(disassembly));
+  disassembledKernel = std::make_unique<DisassembledKernel>(parseDisassembly(disassembly));
 
   // Build source mapping if original .s source is provided (for diagnostics).
   if (!originalSource.empty()) {
-    ParsedAsm sourceAsm(originalSource);
-    buildSourceMapping(*parsedAsm, sourceAsm);
+    DisassembledKernel sourceAsm = parseAssemblySource(originalSource);
+    buildSourceMapping(*disassembledKernel, sourceAsm);
   }
 
   initKernargSegment();
@@ -141,9 +141,9 @@ WorkgroupConfig Emulator::buildWorkgroupConfig(int nWaves,
   wgConfig.raceChecks = config.raceChecks;
   wgConfig.completeEmulation = config.completeEmulation;
   wgConfig.waveSchedule = config.waveSchedule;
-  wgConfig.labels = &parsedAsm->labels;
-  if (!parsedAsm->pcTable.empty()) {
-    wgConfig.pcTable = &parsedAsm->pcTable;
+  wgConfig.labels = &disassembledKernel->labels;
+  if (!disassembledKernel->instructionAddresses.empty()) {
+    wgConfig.instructionAddresses = &disassembledKernel->instructionAddresses;
   }
   return wgConfig;
 }
@@ -153,16 +153,16 @@ void Emulator::initializeWaveState(Workgroup &workgroup, Dim3d wgId,
   for (int i = 0; i < nWaves; ++i) {
     auto &r = workgroup.getWave(i);
     for (const auto &[key, mapping] :
-         metadata_.initialRegisterAllocation.registers) {
+         metadata_.preloadedRegisters.registers) {
       if (key == ".amdhsa_user_sgpr_kernarg_segment_ptr") {
-        r.setSgpr64(mapping.start_register,
+        r.setSgpr64(mapping.startRegister,
                     reinterpret_cast<uint64_t>(kernargSegment.data()));
       } else if (key == ".amdhsa_system_sgpr_workgroup_id_x") {
-        r.setSgpr(mapping.start_register, wgId.x);
+        r.setSgpr(mapping.startRegister, wgId.x);
       } else if (key == ".amdhsa_system_sgpr_workgroup_id_y") {
-        r.setSgpr(mapping.start_register, wgId.y);
+        r.setSgpr(mapping.startRegister, wgId.y);
       } else if (key == ".amdhsa_system_sgpr_workgroup_id_z") {
-        r.setSgpr(mapping.start_register, wgId.z);
+        r.setSgpr(mapping.startRegister, wgId.z);
       } else {
         throw std::runtime_error(
             "Unhandled SGPR register initialization for key: " + key);
@@ -195,13 +195,13 @@ void Emulator::initializeWaveState(Workgroup &workgroup, Dim3d wgId,
     }
   }
 
-  auto start = parsedAsm->labels.find(metadata_.name);
-  if (start == parsedAsm->labels.end()) {
+  auto start = disassembledKernel->labels.find(metadata_.name);
+  if (start == disassembledKernel->labels.end()) {
     // For disassembly, the kernel entry label may differ from the metadata
     // name (e.g. "label_ASM_Start" vs the full Tensile kernel name). Use
     // the label with the lowest token index (earliest in the code).
     int minIndex = std::numeric_limits<int>::max();
-    for (auto it = parsedAsm->labels.begin(); it != parsedAsm->labels.end(); ++it) {
+    for (auto it = disassembledKernel->labels.begin(); it != disassembledKernel->labels.end(); ++it) {
       if (it->second < minIndex) {
         minIndex = it->second;
         start = it;
@@ -277,7 +277,7 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
 
   auto runScope = emulatorProfiler.scopedStopwatch("run");
 
-  const auto &tokens = parsedAsm->tokens;
+  const auto &tokens = disassembledKernel->instructions;
   const int nWorkgroups = static_cast<int>(wgIds.size());
 
   // Each workgroup gets its own Profiler (not thread-safe).
@@ -311,14 +311,14 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
           auto *detector = workgroup.getRaceDetector();
           // When source mapping is available, translate token indices to
           // original source line indices for diagnostics.
-          auto &slm = parsedAsm->sourceLineMap;
-          auto &srcLines = parsedAsm->sourceLines;
+          auto &slm = disassembledKernel->instructionToSourceLine;
+          auto &srcLines = disassembledKernel->sourceLines;
           bool hasSourceMapping = !slm.empty() && !srcLines.empty();
 
           int wavePc = wave.getPc();
           int numLines = hasSourceMapping
               ? static_cast<int>(srcLines.size())
-              : static_cast<int>(parsedAsm->tokens.size());
+              : static_cast<int>(disassembledKernel->instructions.size());
           int mappedPc = hasSourceMapping && wavePc >= 0 &&
                                  wavePc < static_cast<int>(slm.size()) &&
                                  slm[wavePc] >= 0
@@ -329,7 +329,7 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
             if (hasSourceMapping) {
               return srcLines[j];
             }
-            return parsedAsm->tokens[j].originalLine;
+            return disassembledKernel->instructions[j].originalLine;
           };
           std::function<int(int)> mapper = nullptr;
           if (hasSourceMapping) {

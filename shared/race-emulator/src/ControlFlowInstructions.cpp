@@ -308,9 +308,9 @@ struct RegisterFactory {
 // s_swappc_b64: on real HW this saves PC+4 (return address) to the
 // destination SGPR pair and jumps to the byte address in the source pair.
 //
-// When pcTable is available (disassembly path), this is fully functional:
+// When instructionAddresses is available (disassembly path), this is fully functional:
 // saves the return address (next instruction) to dst and jumps to the
-// byte address in src. When pcTable is not available (.s path), falls back
+// byte address in src. When instructionAddresses is not available (.s path), falls back
 // to no-op behaviour (correct only for activationType=0).
 class SOPP_SwapPc : public Instruction {
 public:
@@ -322,7 +322,7 @@ public:
     auto src = partitioned[2];
 
     return [&wave, dst, src]() {
-      // Without pcTable, byte addresses are synthetic (4 * lineIndex) and
+      // Without instructionAddresses, byte addresses are synthetic (4 * lineIndex) and
       // s_getpc + s_add_u32 patterns produce wrong targets. Fall back to
       // no-op, which is correct for activationType=0 (identity).
       if (!wave.hasPcTable()) {
@@ -339,7 +339,7 @@ public:
 
       if (targetIndex < 0) {
         fprintf(stderr, "WARNING: s_swappc_b64 target address 0x%lx not found "
-                        "in pcTable, emulating as no-op.\n", targetAddr);
+                        "in instructionAddresses, emulating as no-op.\n", targetAddr);
         return wave.getPc() + 1;
       }
 

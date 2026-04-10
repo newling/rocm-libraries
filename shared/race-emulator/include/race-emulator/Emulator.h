@@ -16,7 +16,7 @@
 
 namespace raceemulator {
 
-struct ParsedAsm;
+struct DisassembledKernel;
 
 /// Emulates an AMD GPU kernel from a code object ELF. Manages kernel arguments,
 /// architecture state, and delegates execution to Workgroup. Decorates
@@ -30,7 +30,7 @@ public:
   /// output). Optionally accepts original .s source for diagnostic source
   /// mapping. The Emulator has no dependency on LLVM tools — the caller
   /// is responsible for disassembly and metadata extraction.
-  Emulator(KernelMetadata metadata, std::string_view disassembly,
+  Emulator(KernelInfo metadata, std::string_view disassembly,
            std::shared_ptr<Architecture> arch,
            std::string_view originalSource = "");
 
@@ -81,8 +81,8 @@ private:
                            int nWaves);
   void initKernargSegment();
   std::shared_ptr<Architecture> arch;
-  KernelMetadata metadata_;
-  std::unique_ptr<ParsedAsm> parsedAsm;
+  KernelInfo metadata_;
+  std::unique_ptr<DisassembledKernel> disassembledKernel;
   std::vector<char> kernargSegment;
   std::vector<bool> kernargIsSet;
   Profiler emulatorProfiler;

@@ -42,8 +42,8 @@ Workgroup::Workgroup(const WorkgroupConfig &config)
   for (int i = 0; i < config.nWaves; ++i) {
     waves.push_back(Wave(config.vgprCount, agprOffset, config.sgprCount,
                          config.waveSize, WaveId{i}, *this, labels));
-    if (config.pcTable) {
-      waves.back().pcTable = config.pcTable;
+    if (config.instructionAddresses) {
+      waves.back().instructionAddresses = config.instructionAddresses;
     }
     if (raceDetector) {
       waves.back().raceState = &raceDetector->getWaveRaceState(i);
