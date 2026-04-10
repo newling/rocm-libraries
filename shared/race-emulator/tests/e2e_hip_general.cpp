@@ -4,7 +4,7 @@
 #include "race-emulator/Arch.h"
 #include "race-emulator/Emulator.h"
 #include "race-emulator/FloatTypes.h"
-#include "race-emulator/Parsing.h"
+#include "test_utils.h"
 #include <filesystem> // Requires C++17
 #include <fstream>
 #include <gtest/gtest.h>
@@ -48,74 +48,10 @@ struct ArchParam {
       : arch(architectureFromTarget(target)), waveSize(arch->getWaveSize()) {}
 };
 
-std::string captureCommand(const std::string &cmd) {
-  auto tmpPath = fs::temp_directory_path() /
-      ("race_emu_" + std::to_string(std::hash<std::thread::id>{}(
-                         std::this_thread::get_id())) + ".txt");
-  int status = std::system((cmd + " > " + tmpPath.string() + " 2>&1").c_str());
-  std::ifstream ifs(tmpPath);
-  std::string result((std::istreambuf_iterator<char>(ifs)),
-                     std::istreambuf_iterator<char>());
-  fs::remove(tmpPath);
-  if (status != 0) {
-    throw std::runtime_error("Command failed (status " +
-                             std::to_string(status) + "): " + cmd +
-                             "\nOutput: " + result);
-  }
-  return result;
-}
-
-std::string findLlvmTool(const std::string &name) {
-  if (const char *dir = std::getenv("LLVM_BIN_DIR")) {
-    std::string path = std::string(dir) + "/" + name;
-    if (fs::exists(path)) {
-      return path;
-    }
-  }
-  try {
-    std::string result = captureCommand("which " + name + " 2>/dev/null");
-    if (!result.empty() && result.back() == '\n') {
-      result.pop_back();
-    }
-    return result;
-  } catch (...) {
-    return "";
-  }
-}
-
 Emulator loadEmulator(const ArchParam &arch, const std::string &filename) {
   std::string path = arch.arch->getName() + "/" + filename;
   std::string assembly = load_kernel_file(path);
-
-  // Use the disassembly path when LLVM tools are available.
-  std::string llvmMc = findLlvmTool("llvm-mc");
-  std::string llvmObjdump = findLlvmTool("llvm-objdump");
-  if (!llvmMc.empty() && !llvmObjdump.empty()) {
-    ParsedAsm metadataSource(assembly);
-    std::string sPath = std::string(TEST_KERNEL_DIR) + "/" + path;
-    std::string mcpu = arch.arch->getName();
-    std::string baseName = fs::path(filename).stem().string();
-    std::string objPath =
-        "/tmp/race_emu_disasm_" + mcpu + "_" + baseName + ".o";
-    captureCommand(llvmMc + " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
-                   " -filetype=obj " + sPath + " -o " + objPath);
-    std::string disasm = captureCommand(llvmObjdump +
-                                        " -d --show-all-symbols " + objPath);
-    auto parsed = std::make_unique<ParsedAsm>(parseDisassembly(disasm));
-    parsed->name = metadataSource.name;
-    parsed->wavefrontSize = metadataSource.wavefrontSize;
-    parsed->kernargSegmentSize = metadataSource.kernargSegmentSize;
-    parsed->args = metadataSource.args;
-    parsed->amdhsa = metadataSource.amdhsa;
-    parsed->initialRegisterAllocation =
-        metadataSource.initialRegisterAllocation;
-    parsed->kernargPreloadLength = metadataSource.kernargPreloadLength;
-    parsed->kernargPreloadOffset = metadataSource.kernargPreloadOffset;
-    return Emulator(std::move(parsed), arch.arch);
-  }
-
-  // Fallback: .s parser (no LLVM tools available).
-  return Emulator(assembly, arch.arch);
+  return test::emulatorFromAssembly(assembly, arch.arch);
 }
 
 const ArchParam kGfx942("gfx942");
@@ -681,3 +617,27 @@ TEST(Gfx1151, F16Adder) { runF16Adder(kGfx1151); }
 
 TEST(Gfx942, F16RoundTrip) { runF16RoundTrip(kGfx942); }
 TEST(Gfx1151, F16RoundTrip) { runF16RoundTrip(kGfx1151); }
+
+// Construct Emulator directly from a code object (no .s source needed).
+TEST(Gfx1151, CopyKernelFromCodeObject) {
+  std::string assembly = load_kernel_file("gfx1151/copy.s");
+  auto co = test::assembleToCodeObject(assembly, "gfx1151");
+
+  // Construct from .co only — all metadata parsed from the binary.
+  Emulator emulator(co.data(), co.size(), std::make_shared<Gfx1151>());
+
+  int N = 128;
+  std::vector<int> h_in(N);
+  std::iota(h_in.begin(), h_in.end(), 100);
+  std::vector<int> h_out(N, -1);
+
+  int *d_out = h_out.data();
+  const int *d_in = h_in.data();
+  emulator.addKernarg(0, &d_out);
+  emulator.addKernarg(1, &d_in);
+  emulator.run(Dim3d(0), {128, 1, 1}, {.raceChecks = true});
+
+  for (int i = 0; i < N; ++i) {
+    EXPECT_EQ(h_out[i], h_in[i]) << "Mismatch at index " << i;
+  }
+}

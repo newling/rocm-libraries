@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "race-emulator/Emulator.h"
+#include "race-emulator/CodeObject.h"
 #include "race-emulator/EmulatorException.h"
 #include "race-emulator/Parsing.h"
 #include "race-emulator/RaceDetector.h"
@@ -137,86 +138,62 @@ std::string captureCmd(const std::string &cmd) {
 
 } // namespace
 
-Emulator::Emulator(std::string_view a, std::shared_ptr<Architecture> arch)
-    : arch(std::move(arch)) {
-  // Parse .s for metadata.
-  auto sourceAsm = std::make_unique<ParsedAsm>(a);
-
-  // Validate architecture.
-  if (!sourceAsm->target.empty()) {
-    auto detected = architectureFromTarget(sourceAsm->target);
-    if (detected->getName() != this->arch->getName()) {
-      throw std::runtime_error("Architecture mismatch: assembly targets '" +
-                               detected->getName() +
-                               "' but emulator was constructed with '" +
-                               this->arch->getName() + "'");
-    }
-  }
-
-  // Try the disassembly path: assemble → disassemble → parse.
-  std::string llvmMc = findTool("llvm-mc");
-  std::string llvmObjdump = findTool("llvm-objdump");
-  bool usedDisassemblyPath = false;
-  if (!llvmMc.empty() && !llvmObjdump.empty()) {
-    // Write .s to temp file and try assembling.
-    auto tid = std::to_string(std::hash<std::thread::id>{}(
-        std::this_thread::get_id()));
-    auto sPath = fs::temp_directory_path() / ("race_emu_input_" + tid + ".s");
-    auto objPath = fs::temp_directory_path() / ("race_emu_" + tid + ".o");
-    {
-      std::ofstream ofs(sPath);
-      ofs << a;
-    }
-    std::string mcpu = this->arch->getName();
-    try {
-      captureCmd(llvmMc + " -triple=amdgcn-amd-amdhsa -mcpu=" + mcpu +
-                 " -filetype=obj " + sPath.string() + " -o " +
-                 objPath.string());
-      std::string disasm = captureCmd(
-          llvmObjdump + " -d --show-all-symbols " + objPath.string());
-
-      parsedAsm = std::make_unique<ParsedAsm>(parseDisassembly(disasm));
-      parsedAsm->name = sourceAsm->name;
-      parsedAsm->wavefrontSize = sourceAsm->wavefrontSize;
-      parsedAsm->kernargSegmentSize = sourceAsm->kernargSegmentSize;
-      parsedAsm->args = sourceAsm->args;
-      parsedAsm->amdhsa = sourceAsm->amdhsa;
-      parsedAsm->initialRegisterAllocation =
-          sourceAsm->initialRegisterAllocation;
-      parsedAsm->kernargPreloadLength = sourceAsm->kernargPreloadLength;
-      parsedAsm->kernargPreloadOffset = sourceAsm->kernargPreloadOffset;
-      buildSourceMapping(*parsedAsm, *sourceAsm);
-      usedDisassemblyPath = true;
-    } catch (...) {
-      // Assembly failed (e.g. simplified test-only format). Fall through.
-    }
-    fs::remove(sPath);
-    fs::remove(objPath);
-  }
-
-  if (!usedDisassemblyPath) {
-    parsedAsm = std::move(sourceAsm);
-  }
-
-  initKernargSegment();
-}
-
 Emulator::Emulator(std::unique_ptr<ParsedAsm> parsed,
                    std::shared_ptr<Architecture> arch)
     : arch(std::move(arch)), parsedAsm(std::move(parsed)) {
   initKernargSegment();
 }
 
-Emulator Emulator::createGfx942(std::string_view assembly) {
-  return Emulator(assembly, std::make_shared<Gfx942>());
-}
+Emulator::Emulator(const uint8_t *codeObject, size_t size,
+                   std::shared_ptr<Architecture> arch,
+                   std::string_view originalSource)
+    : arch(std::move(arch)) {
+  // Disassemble the code object.
+  std::string llvmObjdump = findTool("llvm-objdump");
+  if (llvmObjdump.empty()) {
+    throw std::runtime_error(
+        "llvm-objdump not found. Set LLVM_BIN_DIR or add to PATH.");
+  }
 
-Emulator Emulator::createGfx950(std::string_view assembly) {
-  return Emulator(assembly, std::make_shared<Gfx950>());
-}
+  auto tid = std::to_string(
+      std::hash<std::thread::id>{}(std::this_thread::get_id()));
+  auto coPath = fs::temp_directory_path() / ("race_emu_co_" + tid + ".o");
+  {
+    std::ofstream ofs(coPath, std::ios::binary);
+    ofs.write(reinterpret_cast<const char *>(codeObject), size);
+  }
 
-Emulator Emulator::createGfx1151(std::string_view assembly) {
-  return Emulator(assembly, std::make_shared<Gfx1151>());
+  std::string disasm =
+      captureCmd(llvmObjdump + " -d --show-all-symbols " + coPath.string());
+  fs::remove(coPath);
+
+  parsedAsm = std::make_unique<ParsedAsm>(parseDisassembly(disasm));
+
+  // Get all metadata from the .co: kernel name, args, wavefront size,
+  // register allocation (from kernel descriptor binary + msgpack .note).
+  auto metaResult = parseCodeObjectMetadata(codeObject, size);
+  if (std::holds_alternative<ParsedAsm>(metaResult)) {
+    auto &metadata = std::get<ParsedAsm>(metaResult);
+    parsedAsm->name = metadata.name;
+    parsedAsm->wavefrontSize = metadata.wavefrontSize;
+    parsedAsm->kernargSegmentSize = metadata.kernargSegmentSize;
+    parsedAsm->args = metadata.args;
+    parsedAsm->amdhsa = metadata.amdhsa;
+    parsedAsm->initialRegisterAllocation = metadata.initialRegisterAllocation;
+    parsedAsm->kernargPreloadLength = metadata.kernargPreloadLength;
+    parsedAsm->kernargPreloadOffset = metadata.kernargPreloadOffset;
+  } else {
+    throw std::runtime_error("Failed to parse code object metadata: " +
+                             std::get<std::string>(metaResult));
+  }
+
+  // Build source mapping if original source is provided (for diagnostics).
+  if (!originalSource.empty()) {
+    ParsedAsm sourceAsm(originalSource);
+    buildSourceMapping(*parsedAsm, sourceAsm);
+  }
+
+  initKernargSegment();
 }
 
 WorkgroupConfig Emulator::buildWorkgroupConfig(int nWaves,

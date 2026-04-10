@@ -3,6 +3,7 @@
 
 #include "race-emulator/Emulator.h"
 #include "race-emulator/WaveRaceState.h"
+#include "test_utils.h"
 #include <cstring> // For std::memcpy
 #include <gtest/gtest.h>
 #include <numeric>
@@ -23,25 +24,36 @@ using namespace raceemulator;
  }
 */
 
-static constexpr std::string_view boiler = R"BOILER(
+// Assembly boilerplate split into header (before instructions) and trailer
+// (after). Together they form a valid AMDGPU assembly file that llvm-mc can
+// assemble, with kernel metadata in both .amdhsa_kernel directives and
+// .amdgpu_metadata YAML.
+static constexpr std::string_view boilerHeader = R"ASM(
+	.amdgcn_target "amdgcn-amd-amdhsa--gfx942"
+	.text
+	.globl foo
+	.p2align 8
+)ASM";
+
+static constexpr std::string_view boilerTrailer = R"ASM(
 	.amdhsa_kernel foo
- 		.amdhsa_group_segment_fixed_size 1024
- 		.amdhsa_private_segment_fixed_size 0
- 		.amdhsa_kernarg_size 8
- 	  .amdhsa_user_sgpr_count 2
-  	  .amdhsa_user_sgpr_dispatch_ptr 0
-  	  .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  	  .amdhsa_user_sgpr_dispatch_id 0
-  	  .amdhsa_enable_private_segment 0
-  	  .amdhsa_system_sgpr_workgroup_id_x 1
-      .amdhsa_next_free_sgpr 10 ; might be more that 10!
-      .amdhsa_next_free_vgpr 10 ; might be more that 10!
-      .amdhsa_accum_offset 10
+		.amdhsa_group_segment_fixed_size 1024
+		.amdhsa_private_segment_fixed_size 0
+		.amdhsa_kernarg_size 8
+		.amdhsa_user_sgpr_count 2
+		.amdhsa_user_sgpr_dispatch_ptr 0
+		.amdhsa_user_sgpr_kernarg_segment_ptr 1
+		.amdhsa_user_sgpr_dispatch_id 0
+		.amdhsa_enable_private_segment 0
+		.amdhsa_system_sgpr_workgroup_id_x 1
+		.amdhsa_next_free_sgpr 10
+		.amdhsa_next_free_vgpr 10
+		.amdhsa_accum_offset 12
 	.end_amdhsa_kernel
+	.amdgpu_metadata
 ---
 amdhsa.kernels:
-  - .agpr_count:     0
-    .args:
+  - .args:
       - .address_space:  global
         .offset:         0
         .size:           8
@@ -49,11 +61,20 @@ amdhsa.kernels:
     .group_segment_fixed_size: 1024
     .kernarg_segment_align: 8
     .kernarg_segment_size: 8
+    .max_flat_workgroup_size: 1024
     .name:           foo
+    .private_segment_fixed_size: 0
+    .sgpr_count:     10
+    .symbol:         foo.kd
+    .vgpr_count:     10
     .wavefront_size: 64
 amdhsa.target:   amdgcn-amd-amdhsa--gfx942
+amdhsa.version:
+  - 1
+  - 2
 ...
-)BOILER";
+	.end_amdgpu_metadata
+)ASM";
 
 struct RaceVerifier {
   std::optional<RaceViolation::Space> space;
@@ -157,10 +178,10 @@ protected:
 
 private:
   Emulator getBoilerEmulator(std::string_view assembly, int nGlobalBytes) {
-    // Construct a string that is "race" + "boiler":
-    std::string combined =
-        "foo:\n" + std::string(assembly) + std::string(boiler);
-    auto emulator = Emulator::createGfx942(combined);
+    std::string combined = std::string(boilerHeader) + "foo:\n" +
+                           std::string(assembly) + std::string(boilerTrailer);
+    auto emulator = test::emulatorFromAssembly(
+        combined, std::make_shared<Gfx942>());
 
     h_data.resize(nGlobalBytes / 4 + 1);
     std::iota(h_data.begin(), h_data.end(), 0);
@@ -211,14 +232,14 @@ TEST_F(RaceTestFixture, DsWriteToDsReadMissingBarrier) {
 LDS race in byte 512 detected in workgroup (0,0,0). Race between a pair in:
 
 Wave 2 Lane 0:
-11     |   ; Each thread writes its 4 bytes to LDS.
-12 --> |   ds_write_b32 v0, v1
-13     |   s_waitcnt lgkmcnt(0)
+16     |   ; Each thread writes its 4 bytes to LDS.
+17 --> |   ds_write_b32 v0, v1
+18     |   s_waitcnt lgkmcnt(0)
 
 Wave 1:
-16     |   ; Each threads reads from LDS, from an address written by another wave.
-17 --> |   ds_read_b32 v1, v2 offset:1020
-18     |   s_waitcnt lgkmcnt(0)
+21     |   ; Each threads reads from LDS, from an address written by another wave.
+22 --> |   ds_read_b32 v1, v2 offset:1020
+23     |   s_waitcnt lgkmcnt(0)
 )MSG";
 
   // With 4 waves, we need a barrier because threads in different waves
@@ -266,15 +287,15 @@ TEST_F(RaceTestFixture, GlobalLoadToLdsWriteMissingVmcnt) {
     )ASM";
 
   auto msg0 = R"MSG(
-VGPR race detected on line 12 (wave 0, lane 0) in workgroup (0,0,0). Conflicting events:
+VGPR race detected on line 17 (wave 0, lane 0) in workgroup (0,0,0). Conflicting events:
 
-7     |   s_waitcnt lgkmcnt(0)
-8 --> |   global_load_dword v1, v0, s[0:1]
-9     |   ; s_waitcnt vmcnt(0) <-- MISSING!
+12     |   s_waitcnt lgkmcnt(0)
+13 --> |   global_load_dword v1, v0, s[0:1]
+14     |   ; s_waitcnt vmcnt(0) <-- MISSING!
 
-11     |   ; Write to LDS
-12 --> |   ds_write_b32 v0, v1
-13     |   s_waitcnt lgkmcnt(0)
+16     |   ; Write to LDS
+17 --> |   ds_write_b32 v0, v1
+18     |   s_waitcnt lgkmcnt(0)
 )MSG";
 
   // With 4 waves, we need a barrier because threads in different waves
@@ -326,7 +347,7 @@ TEST_F(RaceTestFixture, VgprRaceMessageIncludesWaveAndLane) {
 	s_endpgm
     )ASM";
 
-  ExpectRace(code, "VGPR race detected on line 8 (wave 0, lane 0)", 512, 1);
+  ExpectRace(code, "VGPR race detected on line 13 (wave 0, lane 0)", 512, 1);
 }
 
 TEST_F(RaceTestFixture, DsWriteToDsReadInsufficientLgkmCnt) {
@@ -604,7 +625,7 @@ TEST_F(RaceTestFixture, D16_FullLoadStillRaces) {
 // individually arrives.
 TEST(WaveScheduleTest, CrossWaveLdsRaceDetectedForAllSchedules) {
 
-  const std::string code = std::string("foo:\n") + R"ASM(
+  const std::string code = std::string(boilerHeader) + "foo:\n" + R"ASM(
   v_lshlrev_b32_e32 v0, 2, v0   ; v0 = threadId * 4 (per-wave LDS address)
   v_mov_b32_e32 v1, 42
   ds_write_b32 v0, v1            ; each wave writes to its own LDS region
@@ -615,10 +636,10 @@ TEST(WaveScheduleTest, CrossWaveLdsRaceDetectedForAllSchedules) {
   s_waitcnt lgkmcnt(0)
   s_barrier                       ; a later barrier before termination
   s_endpgm
-  )ASM" + std::string(boiler);
+  )ASM" + std::string(boilerTrailer);
 
   auto runWith = [&](WaveSchedule sched) -> bool {
-    auto emulator = Emulator::createGfx942(code);
+    auto emulator = test::emulatorFromAssembly(code, std::make_shared<Gfx942>());
     std::vector<int> h(2, 0);
     int *p = h.data();
     emulator.addKernarg(0, &p);
@@ -725,7 +746,7 @@ TEST_F(RaceTestFixture, SameWave_DoubleWriteThenRead_IsRace) {
 // Two waves: wave 0 writes LDS[0..255], wave 1 reads LDS[0] without barrier.
 // Verify the error message reports correct waves and lanes.
 TEST(WaveScheduleTest, CrossWaveLdsRace_ErrorMessageWaves) {
-  const std::string code = std::string("foo:\n") + R"ASM(
+  const std::string code = std::string(boilerHeader) + "foo:\n" + R"ASM(
   v_lshlrev_b32_e32 v0, 2, v0   ; v0 = threadId * 4
   v_mov_b32_e32 v1, 99
   ds_write_b32 v0, v1            ; each lane writes to its own 4 bytes
@@ -736,9 +757,9 @@ TEST(WaveScheduleTest, CrossWaveLdsRace_ErrorMessageWaves) {
   s_waitcnt lgkmcnt(0)
   s_barrier
   s_endpgm
-  )ASM" + std::string(boiler);
+  )ASM" + std::string(boilerTrailer);
 
-  auto emulator = Emulator::createGfx942(code);
+  auto emulator = test::emulatorFromAssembly(code, std::make_shared<Gfx942>());
   std::vector<int> h(2, 0);
   int *p = h.data();
   emulator.addKernarg(0, &p);
@@ -758,7 +779,7 @@ TEST(WaveScheduleTest, CrossWaveLdsRace_ErrorMessageWaves) {
 // Two waves write to the same LDS address (WAR: wave 0 reads, wave 1 writes
 // without barrier). Verify waves and instruction context in the message.
 TEST(WaveScheduleTest, CrossWaveLdsWriteAfterRead_ErrorMessage) {
-  const std::string code = std::string("foo:\n") + R"ASM(
+  const std::string code = std::string(boilerHeader) + "foo:\n" + R"ASM(
   v_mov_b32_e32 v0, 0
   v_mov_b32_e32 v1, 42
   ; All lanes write to LDS[0]
@@ -770,9 +791,9 @@ TEST(WaveScheduleTest, CrossWaveLdsWriteAfterRead_ErrorMessage) {
   s_waitcnt lgkmcnt(0)
   s_barrier
   s_endpgm
-  )ASM" + std::string(boiler);
+  )ASM" + std::string(boilerTrailer);
 
-  auto emulator = Emulator::createGfx942(code);
+  auto emulator = test::emulatorFromAssembly(code, std::make_shared<Gfx942>());
   std::vector<int> h(2, 0);
   int *p = h.data();
   emulator.addKernarg(0, &p);
@@ -1196,7 +1217,7 @@ TEST(GlobalToLds, CrossWaveSafeAfterBarrier) {
 // workgroupIdx.
 TEST_F(RaceTestFixture, MultiWorkgroupRaceReportsWorkgroupIndex) {
   // 2-wave kernel: wave 0 writes LDS[0], wave 1 reads LDS[0] without barrier.
-  const std::string code = std::string("foo:\n") + R"ASM(
+  const std::string code = std::string(boilerHeader) + "foo:\n" + R"ASM(
   v_lshlrev_b32_e32 v0, 2, v0
   v_mov_b32_e32 v1, 42
   ds_write_b32 v0, v1
@@ -1205,9 +1226,9 @@ TEST_F(RaceTestFixture, MultiWorkgroupRaceReportsWorkgroupIndex) {
   ds_read_b32 v3, v2
   s_waitcnt lgkmcnt(0)
   s_endpgm
-  )ASM" + std::string(boiler);
+  )ASM" + std::string(boilerTrailer);
 
-  auto emulator = Emulator::createGfx942(code);
+  auto emulator = test::emulatorFromAssembly(code, std::make_shared<Gfx942>());
   std::vector<int> h(2, 0);
   int *p = h.data();
   emulator.addKernarg(0, &p);
@@ -1243,13 +1264,13 @@ TEST_F(RaceTestFixture, SLoadWithoutWaitcnt) {
   )ASM";
 
   auto msg = R"MSG(
-SGPR race detected on line 6 (wave 0) in workgroup (0,0,0). Conflicting events:
+SGPR race detected on line 11 (wave 0) in workgroup (0,0,0). Conflicting events:
 
-3     |   s_waitcnt lgkmcnt(0)
-4 --> |   s_load_dword s4, s[0:1], 0x0
-5     |   ; Missing s_waitcnt lgkmcnt(0) for s4
-6 --> |   v_mov_b32_e32 v1, s4
-7     |   s_endpgm
+8     |   s_waitcnt lgkmcnt(0)
+9 --> |   s_load_dword s4, s[0:1], 0x0
+10     |   ; Missing s_waitcnt lgkmcnt(0) for s4
+11 --> |   v_mov_b32_e32 v1, s4
+12     |   s_endpgm
 )MSG";
 
   ExpectRace(code, msg, 16, 1, RaceVerifier::SgprAccess(4));

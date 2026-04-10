@@ -46,6 +46,7 @@ set_target_properties(race-emulator PROPERTIES
 )
 
 target_sources(race-emulator PRIVATE
+    src/CodeObject.cpp
     src/ControlFlowInstructions.cpp
     src/Emulator.cpp
     src/Instruction.cpp

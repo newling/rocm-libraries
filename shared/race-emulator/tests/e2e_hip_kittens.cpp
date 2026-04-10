@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "race-emulator/Emulator.h"
+#include "test_utils.h"
 #include <filesystem> // Requires C++17
 #include <fstream>
 #include <gtest/gtest.h>
@@ -54,7 +55,7 @@ TEST(Gfx942, MatMul_Kittens) {
 
   std::string assembly = load_kernel_file("gfx942/kittens_original_smaller.s");
 
-  auto emulator = Emulator::createGfx942(assembly);
+  auto emulator = test::emulatorFromAssembly(assembly, std::make_shared<Gfx942>());
 
   auto emulatorInitialized = std::chrono::high_resolution_clock::now();
 

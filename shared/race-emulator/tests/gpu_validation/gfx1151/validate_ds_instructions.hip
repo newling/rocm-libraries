@@ -20,6 +20,7 @@
 
 #include "race-emulator/Arch.h"
 #include "race-emulator/Emulator.h"
+#include "../../test_utils.h"
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -97,7 +98,8 @@ std::vector<uint32_t> runOnEmulator(const char *sName, int numThreads,
                                      size_t outputBytes) {
   auto assembly =
       loadFile(fs::path(TEST_KERNEL_DIR) / "gfx1151" / sName);
-  Emulator emulator(assembly, std::make_shared<Gfx1151>());
+  auto emulator = raceemulator::test::emulatorFromAssembly(
+      assembly, std::make_shared<Gfx1151>());
 
   std::vector<uint32_t> out(outputBytes / sizeof(uint32_t), 0x77777777u);
   uint32_t *ptr = out.data();

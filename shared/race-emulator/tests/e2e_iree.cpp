@@ -3,6 +3,7 @@
 
 #include "race-emulator/Arch.h"
 #include "race-emulator/Emulator.h"
+#include "test_utils.h"
 #include "race-emulator/FloatTypes.h"
 #include <cmath>
 #include <cstring>
@@ -96,7 +97,7 @@ TEST(Gfx942, MatMul_IREE_BF16xBF16xF32_32x32x32) {
   std::vector<float> cGpu(M * N, 0.0f);
 
   // Setup emulator
-  Emulator emulator(assembly, std::make_shared<Gfx942>());
+  auto emulator = test::emulatorFromAssembly(assembly, std::make_shared<Gfx942>());
 
   // IREE kernel args: 3 pointers at offsets 0, 8, 16
   uint16_t *aPtr = aBf16.data();
@@ -177,7 +178,7 @@ TEST(Gfx1151, MatMul_IREE_F16xF16xF32_64x128x512) {
 
   std::vector<float> cGpu(M * N, 0.0f);
 
-  Emulator emulator(assembly, std::make_shared<Gfx1151>());
+  auto emulator = test::emulatorFromAssembly(assembly, std::make_shared<Gfx1151>());
 
   uint16_t *aPtr = aF16.data();
   uint16_t *bPtr = bF16.data();
@@ -255,7 +256,7 @@ TEST(Gfx1151, MatMul_IREE_BF16xBF16xF32_32x32x32) {
 
   std::vector<float> cGpu(M * N, 0.0f);
 
-  Emulator emulator(assembly, std::make_shared<Gfx1151>());
+  auto emulator = test::emulatorFromAssembly(assembly, std::make_shared<Gfx1151>());
 
   uint16_t *aPtr = aBf16.data();
   uint16_t *bPtr = bBf16.data();
@@ -310,7 +311,7 @@ TEST(Gfx1151, MatMul_IREE_BF16xBF16xF32_16x16x512_AllOnes) {
   std::vector<uint16_t> bBf16(K * N, floatToBf16(1.0f));
   std::vector<float> cGpu(M * N, 0.0f);
 
-  Emulator emulator(assembly, std::make_shared<Gfx1151>());
+  auto emulator = test::emulatorFromAssembly(assembly, std::make_shared<Gfx1151>());
 
   uint16_t *aPtr = aBf16.data();
   uint16_t *bPtr = bBf16.data();
@@ -384,7 +385,7 @@ TEST(Gfx1151, MatMul_IREE_F16xF16xF32_16x16x16) {
 
   std::vector<float> cGpu(M * N, 0.0f);
 
-  Emulator emulator(assembly, std::make_shared<Gfx1151>());
+  auto emulator = test::emulatorFromAssembly(assembly, std::make_shared<Gfx1151>());
 
   uint16_t *aPtr = aF16.data();
   uint16_t *bPtr = bF16.data();

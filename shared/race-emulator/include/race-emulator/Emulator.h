@@ -29,12 +29,17 @@ struct ParsedAsm;
 class Emulator {
 
 public:
-  Emulator(std::string_view assembly, std::shared_ptr<Architecture> arch);
+  /// Construct from a pre-parsed assembly (legacy path for tests with .set
+  /// symbols or simplified metadata format). Will be removed.
   Emulator(std::unique_ptr<ParsedAsm> parsedAsm, std::shared_ptr<Architecture> arch);
 
-  static Emulator createGfx942(std::string_view assembly);
-  static Emulator createGfx950(std::string_view assembly);
-  static Emulator createGfx1151(std::string_view assembly);
+  /// Construct from a code object ELF. Internally disassembles the .text
+  /// section and parses metadata from the kernel descriptor and msgpack
+  /// .note section. Requires llvm-objdump on PATH or LLVM_BIN_DIR env var.
+  /// Optionally accepts original source for diagnostic source mapping.
+  Emulator(const uint8_t *codeObject, size_t size,
+           std::shared_ptr<Architecture> arch,
+           std::string_view originalSource = "");
 
   Emulator(const Emulator &other);
   Emulator &operator=(const Emulator &other);
