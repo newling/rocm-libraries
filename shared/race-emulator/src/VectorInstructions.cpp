@@ -876,6 +876,61 @@ static RegisterVOP1<uint32_t> v_cvt_f16_f32("v_cvt_f16_f32", [](uint32_t v) {
 });
 
 static Register<VOP1_VConvert<uint32_t, uint32_t>> v_mov_32("v_mov_b32");
+
+// DPP (Data Parallel Primitives): lane permutation on v_mov_b32.
+// quad_perm:[a,b,c,d] means lane i within each quad reads from lane perm[i%4].
+class VOP_MovDpp : public Instruction {
+public:
+  std::function<int()> getExecutor(Wave &wave,
+                                   std::string_view line) const final {
+    auto partitioned = getPartitioned(line);
+    // v_mov_b32_dpp dst, src quad_perm:[a,b,c,d] row_mask:M bank_mask:M
+    auto dst = wave.getFirstRegister(partitioned[1]);
+    auto src = wave.getFirstRegister(partitioned[2]);
+
+    // Parse quad_perm:[a,b,c,d]. getPartitioned splits on commas, so the
+    // perm values may be spread across tokens: "quad_perm:[1", "0", "3", "2]"
+    std::array<int, 4> perm = {0, 1, 2, 3};
+    for (size_t i = 3; i < partitioned.size(); ++i) {
+      auto tok = std::string(partitioned[i]);
+      if (tok.find("quad_perm:") == 0) {
+        int idx = 0;
+        // First value is after '[' in this token.
+        auto bracket = tok.find('[');
+        if (bracket != std::string::npos && bracket + 1 < tok.size()) {
+          perm[idx++] = tok[bracket + 1] - '0';
+        }
+        // Remaining values are in subsequent tokens.
+        for (size_t j = i + 1; j < partitioned.size() && idx < 4; ++j) {
+          auto t = partitioned[j];
+          if (!t.empty() && t[0] >= '0' && t[0] <= '3') {
+            perm[idx++] = t[0] - '0';
+          }
+        }
+        break;
+      }
+    }
+
+    return [&wave, dst, src, perm]() {
+      int ws = wave.getWaveSize();
+      // For each quad (group of 4 lanes), permute the source values.
+      for (int base = 0; base < ws; base += 4) {
+        // Read source values for this quad.
+        std::array<uint32_t, 4> vals;
+        for (int i = 0; i < 4 && base + i < ws; ++i) {
+          vals[i] = wave.getVgpr(src.index, base + i);
+        }
+        // Write permuted values. DPP ignores exec mask — it operates on
+        // all lanes controlled by row_mask/bank_mask (both 0xf = all).
+        for (int i = 0; i < 4 && base + i < ws; ++i) {
+          wave.setVgprRaw(dst.index, base + i, vals[perm[i]]);
+        }
+      }
+      return wave.getPc() + 1;
+    };
+  }
+};
+static Register<VOP_MovDpp> v_mov_dpp("v_mov_b32_dpp");
 static Register<VOP1_VConvert<uint64_t, uint64_t>> v_mov_64("v_mov_b64");
 static Register<VOP1_VConvert<uint32_t, uint32_t>> v_acc_wr("v_accvgpr_write");
 static Register<VOP1_VConvert<uint32_t, uint32_t>>

@@ -1885,3 +1885,63 @@ TEST(Instructions, V_PERMLANE16_SWAP_B32) {
         << "lane " << l;
   }
 }
+
+// v_mov_b32_dpp with quad_perm: permute lanes within each group of 4.
+TEST(Instructions, DppQuadPerm) {
+  std::map<std::string, int> labels;
+  Workgroup wg({.vgprCount = 4, .sgprCount = 4, .waveSize = WaveSize{8},
+                .labels = &labels});
+  auto &wave = wg.getWave(0);
+
+  // Set v0[lane] = lane * 10 for each lane.
+  for (int l = 0; l < 8; ++l) {
+    wave.setVgpr(0, l, l * 10);
+  }
+
+  // quad_perm:[1,0,3,2] swaps pairs within each quad:
+  //   lane 0 ← lane 1, lane 1 ← lane 0, lane 2 ← lane 3, lane 3 ← lane 2
+  tryExecute(wave,
+             "v_mov_b32_dpp v1, v0 quad_perm:[1,0,3,2] "
+             "row_mask:0xf bank_mask:0xf");
+
+  // Quad 0 (lanes 0-3): [10, 0, 30, 20]
+  EXPECT_EQ(wave.getVgpr(1, 0), 10u); // lane 0 ← v0[1]
+  EXPECT_EQ(wave.getVgpr(1, 1), 0u);  // lane 1 ← v0[0]
+  EXPECT_EQ(wave.getVgpr(1, 2), 30u); // lane 2 ← v0[3]
+  EXPECT_EQ(wave.getVgpr(1, 3), 20u); // lane 3 ← v0[2]
+
+  // Quad 1 (lanes 4-7): [50, 40, 70, 60]
+  EXPECT_EQ(wave.getVgpr(1, 4), 50u); // lane 4 ← v0[5]
+  EXPECT_EQ(wave.getVgpr(1, 5), 40u); // lane 5 ← v0[4]
+  EXPECT_EQ(wave.getVgpr(1, 6), 70u); // lane 6 ← v0[7]
+  EXPECT_EQ(wave.getVgpr(1, 7), 60u); // lane 7 ← v0[6]
+}
+
+// DPP ignores exec mask — inactive lanes still get permuted values.
+TEST(Instructions, DppIgnoresExecMask) {
+  std::map<std::string, int> labels;
+  Workgroup wg({.vgprCount = 4, .sgprCount = 4, .waveSize = WaveSize{4},
+                .labels = &labels});
+  auto &wave = wg.getWave(0);
+
+  for (int l = 0; l < 4; ++l) {
+    wave.setVgpr(0, l, (l + 1) * 100);
+  }
+
+  // Set exec to only lane 0 active.
+  wave.setExecU32(0x1);
+
+  // quad_perm:[2,3,0,1] rotates by 2 within the quad.
+  tryExecute(wave,
+             "v_mov_b32_dpp v1, v0 quad_perm:[2,3,0,1] "
+             "row_mask:0xf bank_mask:0xf");
+
+  // All lanes should be written despite exec mask.
+  EXPECT_EQ(wave.getVgpr(1, 0), 300u); // lane 0 ← v0[2]
+  EXPECT_EQ(wave.getVgpr(1, 1), 400u); // lane 1 ← v0[3]
+  EXPECT_EQ(wave.getVgpr(1, 2), 100u); // lane 2 ← v0[0]
+  EXPECT_EQ(wave.getVgpr(1, 3), 200u); // lane 3 ← v0[1]
+
+  // Restore exec for cleanup.
+  wave.setExecU32(0xF);
+}

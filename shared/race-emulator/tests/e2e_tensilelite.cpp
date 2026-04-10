@@ -879,8 +879,7 @@ TEST(Gfx950, MatMul_TensileLite_F16_MFMA_TN_DTL_256x256x128) {
 }
 
 // MXFP4 subtile kernel on gfx950: 32x32x256 GEMM with FP4 inputs, F32 output.
-// Requires DPP instruction support (v_mov_b32_dpp) which is not yet implemented.
-TEST(Gfx950, DISABLED_MatMul_TensileLite_MXFP4_TN_32x32x256) {
+TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
   constexpr int M = 32, N = 32, K = 256, Batch = 1;
   constexpr int MXBlock = 32;
   constexpr int numScalesPerRow = K / MXBlock; // 8

@@ -86,6 +86,12 @@ public:
     assert(index < static_cast<int64_t>(vgprs.size()));
     vgprs[index] = value;
   }
+  /// Write a VGPR without exec mask check (for DPP which ignores exec).
+  void setVgprRaw(int reg, int lane, uint32_t value) {
+    auto index = reg * waveSize + lane;
+    assert(index < static_cast<int64_t>(vgprs.size()));
+    vgprs[index] = value;
+  }
   void setSgpr(int id, uint32_t value);
 
   /// Get/set a pair of consecutively numbered 32-bit registers as uint64_t.
