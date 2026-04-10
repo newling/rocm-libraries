@@ -4,6 +4,7 @@
 #pragma once
 
 #include "race-emulator/Arch.h"
+#include "race-emulator/CodeObject.h"
 #include "race-emulator/Emulator.h"
 #include <cstdlib>
 #include <filesystem>
@@ -98,13 +99,42 @@ inline std::string loadKernelFile(const std::string &filename) {
   return buffer.str();
 }
 
-/// Assemble .s text and create an Emulator from the resulting code object.
+/// Disassemble a code object using llvm-objdump.
+inline std::string disassembleCodeObject(const std::vector<uint8_t> &co) {
+  std::string llvmObjdump = findLlvmTool("llvm-objdump");
+  if (llvmObjdump.empty()) {
+    throw std::runtime_error(
+        "llvm-objdump not found. Set LLVM_BIN_DIR or PATH.");
+  }
+  auto tid = std::to_string(
+      std::hash<std::thread::id>{}(std::this_thread::get_id()));
+  auto coPath = fs::temp_directory_path() / ("race_emu_co_" + tid + ".o");
+  {
+    std::ofstream ofs(coPath, std::ios::binary);
+    ofs.write(reinterpret_cast<const char *>(co.data()), co.size());
+  }
+  std::string disasm = captureCommand(
+      llvmObjdump + " -d --show-all-symbols " + coPath.string());
+  fs::remove(coPath);
+  return disasm;
+}
+
+/// Assemble .s source, disassemble, parse metadata, create Emulator.
 /// Passes the original .s source for diagnostic source mapping.
 inline Emulator emulatorFromAssembly(std::string_view assembly,
                                      std::shared_ptr<Architecture> arch,
                                      bool withSourceMapping = true) {
   auto co = assembleToCodeObject(assembly, arch->getName());
-  return Emulator(co.data(), co.size(), std::move(arch),
+  std::string disassembly = disassembleCodeObject(co);
+
+  auto metaResult = parseCodeObjectMetadata(co.data(), co.size());
+  if (std::holds_alternative<std::string>(metaResult)) {
+    throw std::runtime_error("Failed to parse code object metadata: " +
+                             std::get<std::string>(metaResult));
+  }
+
+  return Emulator(std::get<KernelMetadata>(std::move(metaResult)),
+                  disassembly, std::move(arch),
                   withSourceMapping ? assembly : "");
 }
 

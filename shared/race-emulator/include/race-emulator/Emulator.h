@@ -3,6 +3,7 @@
 
 #pragma once
 #include "Arch.h"
+#include "Parsing.h"
 #include "Profiler.h"
 #include "RunConfig.h"
 #include "Workgroup.h"
@@ -25,11 +26,11 @@ struct ParsedAsm;
 class Emulator {
 
 public:
-  /// Construct from a code object ELF. Internally disassembles the .text
-  /// section and parses metadata from the kernel descriptor and msgpack
-  /// .note section. Requires llvm-objdump on PATH or LLVM_BIN_DIR env var.
-  /// Optionally accepts original source for diagnostic source mapping.
-  Emulator(const uint8_t *codeObject, size_t size,
+  /// Construct from kernel metadata and disassembly text (llvm-objdump -d
+  /// output). Optionally accepts original .s source for diagnostic source
+  /// mapping. The Emulator has no dependency on LLVM tools — the caller
+  /// is responsible for disassembly and metadata extraction.
+  Emulator(KernelMetadata metadata, std::string_view disassembly,
            std::shared_ptr<Architecture> arch,
            std::string_view originalSource = "");
 
@@ -80,6 +81,7 @@ private:
                            int nWaves);
   void initKernargSegment();
   std::shared_ptr<Architecture> arch;
+  KernelMetadata metadata_;
   std::unique_ptr<ParsedAsm> parsedAsm;
   std::vector<char> kernargSegment;
   std::vector<bool> kernargIsSet;

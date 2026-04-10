@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "race-emulator/Arch.h"
+#include "race-emulator/CodeObject.h"
 #include "race-emulator/Emulator.h"
 #include "race-emulator/EmulatorException.h"
 #include "race-emulator/FloatTypes.h"
@@ -608,9 +609,12 @@ TEST(Gfx1151, F16RoundTrip) { runF16RoundTrip(kGfx1151); }
 TEST(Gfx1151, CopyKernelFromCodeObject) {
   std::string assembly = test::loadKernelFile("gfx1151/copy.s");
   auto co = test::assembleToCodeObject(assembly, "gfx1151");
+  std::string disasm = test::disassembleCodeObject(co);
+  auto meta = std::get<KernelMetadata>(
+      parseCodeObjectMetadata(co.data(), co.size()));
 
-  // Construct from .co only — all metadata parsed from the binary.
-  Emulator emulator(co.data(), co.size(), std::make_shared<Gfx1151>());
+  // Construct from .co metadata + disassembly — no .s source needed.
+  Emulator emulator(std::move(meta), disasm, std::make_shared<Gfx1151>());
 
   int N = 128;
   std::vector<int> h_in(N);
@@ -657,7 +661,10 @@ bool detectsRace(const std::string &assembly,
                  std::shared_ptr<Architecture> arch, int nThreads,
                  int nGlobalBytes, std::string *diagnosticOut = nullptr) {
   auto co = test::assembleToCodeObject(assembly, arch->getName());
-  Emulator emulator(co.data(), co.size(), arch, assembly);
+  std::string disasm = test::disassembleCodeObject(co);
+  auto meta = std::get<KernelMetadata>(
+      parseCodeObjectMetadata(co.data(), co.size()));
+  Emulator emulator(std::move(meta), disasm, arch, assembly);
   std::vector<int> h_data(nGlobalBytes / 4 + 1, 0);
   int *d_data = h_data.data();
   emulator.addKernarg(0, &d_data);
@@ -685,9 +692,12 @@ TEST(Gfx942, MutationTest_RemoveBarrier_DetectsRace) {
   mutated.replace(barrierPos, 9, "; REMOVED");
 
   auto co = test::assembleToCodeObject(mutated, "gfx942");
-  // Pass the ORIGINAL .s for source mapping — diagnostics should show the
-  // original lines, so the user sees where the barrier was.
-  Emulator emulator(co.data(), co.size(), std::make_shared<Gfx942>(),
+  std::string disasm = test::disassembleCodeObject(co);
+  auto meta = std::get<KernelMetadata>(
+      parseCodeObjectMetadata(co.data(), co.size()));
+  // Pass the ORIGINAL .s for source mapping — diagnostics show where
+  // the barrier was in the unmutated source.
+  Emulator emulator(std::move(meta), disasm, std::make_shared<Gfx942>(),
                     assembly);
 
   int N = 256;

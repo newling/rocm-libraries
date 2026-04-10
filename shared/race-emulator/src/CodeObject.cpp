@@ -278,11 +278,7 @@ CodeObjectResult parseCodeObjectMetadata(const uint8_t *elfData, size_t elfSize,
     kernel = &kernelsVal->arrayVal[0];
   }
 
-  // Extract metadata into ParsedAsm. Use the ParsedAsm(string_view)
-  // constructor with a minimal valid input to initialize all fields.
-  ParsedAsm result("dummy:\n  s_endpgm\n");
-  result.tokens.clear();
-  result.labels.clear();
+  KernelMetadata result;
 
   auto *nameVal = findInMap(*kernel, ".name");
   if (nameVal && nameVal->type == MsgpackValue::STR) {

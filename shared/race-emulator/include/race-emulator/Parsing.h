@@ -59,24 +59,25 @@ struct AllocationResult {
   std::map<std::string, RegisterMapping> registers;
 };
 
-/// Parsed kernel metadata and instruction tokens. Populated from either the
-/// .s parser (for source mapping) or parseDisassembly + parseCodeObjectMetadata.
-struct ParsedAsm {
-  /// Parse .s assembly source for metadata and labels (used for source mapping).
-  ParsedAsm(std::string_view assembly);
-
+/// Kernel metadata extracted from a code object or .s assembly source.
+struct KernelMetadata {
   std::string name;
-  std::string assembly;
-  int kernargSegmentSize = 0;
   WaveSize wavefrontSize{0};
+  int kernargSegmentSize = 0;
   std::vector<KernelArg> args;
-  std::vector<ParsedLine> tokens;
-  AllocationResult initialRegisterAllocation;
   std::vector<std::pair<std::string, int>> amdhsa;
+  AllocationResult initialRegisterAllocation;
   int kernargPreloadLength = 0;
   int kernargPreloadOffset = 0;
+};
 
-  /// Label name -> line index.
+/// Parsed instruction stream from disassembly or .s assembly.
+struct ParsedAsm {
+  /// Parse .s assembly source (used for source mapping label extraction).
+  ParsedAsm(std::string_view assembly);
+
+  std::string assembly;
+  std::vector<ParsedLine> tokens;
   std::map<std::string, int> labels;
 
   /// Token index -> byte address. Populated by parseDisassembly.
@@ -92,6 +93,11 @@ struct ParsedAsm {
   void appendStr(std::ostream &os) const;
   std::string str() const;
   void appendTokensStr(std::ostream &os) const;
+
+  // Legacy metadata fields — still populated by the .s parser constructor
+  // for source mapping (buildSourceMapping needs labels). Will be removed
+  // once source mapping uses a simpler label extractor.
+  KernelMetadata metadata;
 };
 
 /// Build source mapping from disassembly tokens to original source lines.

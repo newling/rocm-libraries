@@ -2,16 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include "race-emulator/Emulator.h"
-#include "race-emulator/CodeObject.h"
 #include "race-emulator/EmulatorException.h"
 #include "race-emulator/Parsing.h"
 #include "race-emulator/RaceDetector.h"
 #include <cassert>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -46,138 +42,56 @@ std::string Emulator::str() const {
   return oss.str();
 }
 
-std::string Emulator::getName() const { return parsedAsm->name; }
+std::string Emulator::getName() const { return metadata_.name; }
 
 int Emulator::getKernargSegmentSize() const {
-  return parsedAsm->kernargSegmentSize;
+  return metadata_.kernargSegmentSize;
 }
 
 int Emulator::getNumKernargs() const {
-  return static_cast<int>(parsedAsm->args.size());
+  return static_cast<int>(metadata_.args.size());
 }
 
 int Emulator::getKernargOffset(int argNumber) const {
   assert(argNumber >= 0 && argNumber < getNumKernargs());
-  return parsedAsm->args[argNumber].offset;
+  return metadata_.args[argNumber].offset;
 }
 
 int Emulator::getKernargSize(int argNumber) const {
   assert(argNumber >= 0 && argNumber < getNumKernargs());
-  return parsedAsm->args[argNumber].size;
+  return metadata_.args[argNumber].size;
 }
 
 std::string Emulator::getKernargValueKind(int argNumber) const {
   assert(argNumber >= 0 && argNumber < getNumKernargs());
-  return parsedAsm->args[argNumber].valueKind;
+  return metadata_.args[argNumber].valueKind;
 }
 
 std::string Emulator::getKernargAddressSpace(int argNumber) const {
   assert(argNumber >= 0 && argNumber < getNumKernargs());
-  return parsedAsm->args[argNumber].addressSpace;
+  return metadata_.args[argNumber].addressSpace;
 }
 
 std::string Emulator::getKernargName(int argNumber) const {
   assert(argNumber >= 0 && argNumber < getNumKernargs());
-  return parsedAsm->args[argNumber].name;
+  return metadata_.args[argNumber].name;
 }
 
 void Emulator::initKernargSegment() {
   constexpr int kMaxScalarLoadBytes = 64;
   constexpr char kPoisonByte = static_cast<char>(0xFF);
-  int paddedSize = parsedAsm->kernargSegmentSize + kMaxScalarLoadBytes;
+  int paddedSize = metadata_.kernargSegmentSize + kMaxScalarLoadBytes;
   kernargSegment.resize(paddedSize, kPoisonByte);
-  kernargIsSet.resize(parsedAsm->args.size(), false);
+  kernargIsSet.resize(metadata_.args.size(), false);
 }
 
-namespace {
-namespace fs = std::filesystem;
-
-std::string findTool(const std::string &name) {
-  if (const char *dir = std::getenv("LLVM_BIN_DIR")) {
-    std::string path = std::string(dir) + "/" + name;
-    if (fs::exists(path)) {
-      return path;
-    }
-  }
-  // Check PATH.
-  auto tmpPath = fs::temp_directory_path() /
-      ("race_emu_which_" + std::to_string(std::hash<std::thread::id>{}(
-                               std::this_thread::get_id())) + ".txt");
-  int status = std::system(
-      ("which " + name + " > " + tmpPath.string() + " 2>/dev/null").c_str());
-  if (status != 0) {
-    return "";
-  }
-  std::ifstream ifs(tmpPath);
-  std::string result((std::istreambuf_iterator<char>(ifs)),
-                     std::istreambuf_iterator<char>());
-  fs::remove(tmpPath);
-  if (!result.empty() && result.back() == '\n') {
-    result.pop_back();
-  }
-  return result;
-}
-
-std::string captureCmd(const std::string &cmd) {
-  auto tmpPath = fs::temp_directory_path() /
-      ("race_emu_" + std::to_string(std::hash<std::thread::id>{}(
-                         std::this_thread::get_id())) + ".txt");
-  int status = std::system((cmd + " > " + tmpPath.string() + " 2>&1").c_str());
-  std::ifstream ifs(tmpPath);
-  std::string result((std::istreambuf_iterator<char>(ifs)),
-                     std::istreambuf_iterator<char>());
-  fs::remove(tmpPath);
-  if (status != 0) {
-    throw std::runtime_error("Command failed: " + cmd + "\n" + result);
-  }
-  return result;
-}
-
-} // namespace
-
-Emulator::Emulator(const uint8_t *codeObject, size_t size,
+Emulator::Emulator(KernelMetadata metadata, std::string_view disassembly,
                    std::shared_ptr<Architecture> arch,
                    std::string_view originalSource)
-    : arch(std::move(arch)) {
-  // Disassemble the code object.
-  std::string llvmObjdump = findTool("llvm-objdump");
-  if (llvmObjdump.empty()) {
-    throw std::runtime_error(
-        "llvm-objdump not found. Set LLVM_BIN_DIR or add to PATH.");
-  }
+    : arch(std::move(arch)), metadata_(std::move(metadata)) {
+  parsedAsm = std::make_unique<ParsedAsm>(parseDisassembly(disassembly));
 
-  auto tid = std::to_string(
-      std::hash<std::thread::id>{}(std::this_thread::get_id()));
-  auto coPath = fs::temp_directory_path() / ("race_emu_co_" + tid + ".o");
-  {
-    std::ofstream ofs(coPath, std::ios::binary);
-    ofs.write(reinterpret_cast<const char *>(codeObject), size);
-  }
-
-  std::string disasm =
-      captureCmd(llvmObjdump + " -d --show-all-symbols " + coPath.string());
-  fs::remove(coPath);
-
-  parsedAsm = std::make_unique<ParsedAsm>(parseDisassembly(disasm));
-
-  // Parse all metadata from the .co binary.
-  auto metaResult = parseCodeObjectMetadata(codeObject, size);
-  if (std::holds_alternative<ParsedAsm>(metaResult)) {
-    auto &metadata = std::get<ParsedAsm>(metaResult);
-    parsedAsm->name = metadata.name;
-    parsedAsm->wavefrontSize = metadata.wavefrontSize;
-    parsedAsm->kernargSegmentSize = metadata.kernargSegmentSize;
-    parsedAsm->args = metadata.args;
-    parsedAsm->amdhsa = metadata.amdhsa;
-    parsedAsm->initialRegisterAllocation = metadata.initialRegisterAllocation;
-    parsedAsm->kernargPreloadLength = metadata.kernargPreloadLength;
-    parsedAsm->kernargPreloadOffset = metadata.kernargPreloadOffset;
-  } else {
-    throw std::runtime_error("Failed to parse code object metadata: " +
-                             std::get<std::string>(metaResult));
-  }
-
-  // Build source mapping if original source is provided (for diagnostics).
+  // Build source mapping if original .s source is provided (for diagnostics).
   if (!originalSource.empty()) {
     ParsedAsm sourceAsm(originalSource);
     buildSourceMapping(*parsedAsm, sourceAsm);
@@ -193,8 +107,8 @@ WorkgroupConfig Emulator::buildWorkgroupConfig(int nWaves,
   int nextFreeSgpr{-1};
   int ldsSize{0};
 
-  if (!parsedAsm->amdhsa.empty()) {
-    for (const auto &[key, val] : parsedAsm->amdhsa) {
+  if (!metadata_.amdhsa.empty()) {
+    for (const auto &[key, val] : metadata_.amdhsa) {
       if (key == ".amdhsa_next_free_sgpr") {
         nextFreeSgpr = val;
       }
@@ -222,7 +136,7 @@ WorkgroupConfig Emulator::buildWorkgroupConfig(int nWaves,
   wgConfig.vgprCount = nextFreeVgpr;
   wgConfig.agprOffset = accumOffset; // -1 handled by Workgroup ctor
   wgConfig.sgprCount = nextFreeSgpr;
-  wgConfig.waveSize = parsedAsm->wavefrontSize;
+  wgConfig.waveSize = metadata_.wavefrontSize;
   wgConfig.ldsSize = ldsSize;
   wgConfig.raceChecks = config.raceChecks;
   wgConfig.completeEmulation = config.completeEmulation;
@@ -239,7 +153,7 @@ void Emulator::initializeWaveState(Workgroup &workgroup, Dim3d wgId,
   for (int i = 0; i < nWaves; ++i) {
     auto &r = workgroup.getWave(i);
     for (const auto &[key, mapping] :
-         parsedAsm->initialRegisterAllocation.registers) {
+         metadata_.initialRegisterAllocation.registers) {
       if (key == ".amdhsa_user_sgpr_kernarg_segment_ptr") {
         r.setSgpr64(mapping.start_register,
                     reinterpret_cast<uint64_t>(kernargSegment.data()));
@@ -256,12 +170,12 @@ void Emulator::initializeWaveState(Workgroup &workgroup, Dim3d wgId,
     }
   }
 
-  if (parsedAsm->kernargPreloadLength > 0) {
+  if (metadata_.kernargPreloadLength > 0) {
     auto *srcPtr = reinterpret_cast<const uint32_t *>(
-        kernargSegment.data() + parsedAsm->kernargPreloadOffset);
+        kernargSegment.data() + metadata_.kernargPreloadOffset);
     for (int i = 0; i < nWaves; ++i) {
       auto &r = workgroup.getWave(i);
-      for (int j = 0; j < parsedAsm->kernargPreloadLength; ++j) {
+      for (int j = 0; j < metadata_.kernargPreloadLength; ++j) {
         r.setSgpr(2 + j, srcPtr[j]);
       }
     }
@@ -281,7 +195,7 @@ void Emulator::initializeWaveState(Workgroup &workgroup, Dim3d wgId,
     }
   }
 
-  auto start = parsedAsm->labels.find(parsedAsm->name);
+  auto start = parsedAsm->labels.find(metadata_.name);
   if (start == parsedAsm->labels.end()) {
     // For disassembly, the kernel entry label may differ from the metadata
     // name (e.g. "label_ASM_Start" vs the full Tensile kernel name). Use
@@ -296,7 +210,7 @@ void Emulator::initializeWaveState(Workgroup &workgroup, Dim3d wgId,
     if (minIndex == std::numeric_limits<int>::max()) {
       throw std::runtime_error(
           "Kernel start label not found. Expected to find the label '" +
-          parsedAsm->name + "' in labels.");
+          metadata_.name + "' in labels.");
     }
   }
 
@@ -318,7 +232,7 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
   assert(blockDim.z >= 1 && blockDim.z <= 1024 &&
          "blockDim.z must be in [1, 1024]");
 
-  const WaveSize wavefrontSize = parsedAsm->wavefrontSize;
+  const WaveSize wavefrontSize = metadata_.wavefrontSize;
   const int totalThreads = blockDim.x * blockDim.y * blockDim.z;
 
   // For early stage development, assert that totalThreads is divisible by
@@ -337,12 +251,12 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
   auto threadsInX = blockDim.x;
   auto threadsInY = blockDim.y;
   auto threadsInZ = blockDim.z;
-  for (size_t i = 0; i < parsedAsm->args.size(); ++i) {
-    if (parsedAsm->args[i].valueKind == "hidden_group_size_x") {
+  for (size_t i = 0; i < metadata_.args.size(); ++i) {
+    if (metadata_.args[i].valueKind == "hidden_group_size_x") {
       addKernarg(i, &threadsInX);
-    } else if (parsedAsm->args[i].valueKind == "hidden_group_size_y") {
+    } else if (metadata_.args[i].valueKind == "hidden_group_size_y") {
       addKernarg(i, &threadsInY);
-    } else if (parsedAsm->args[i].valueKind == "hidden_group_size_z") {
+    } else if (metadata_.args[i].valueKind == "hidden_group_size_z") {
       addKernarg(i, &threadsInZ);
     }
   }
@@ -350,11 +264,11 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
   // Validate that all non-hidden kernargs have been set.
   for (size_t i = 0; i < kernargIsSet.size(); ++i) {
     if (!kernargIsSet[i]) {
-      if (parsedAsm->args[i].valueKind.find("hidden") != std::string::npos) {
+      if (metadata_.args[i].valueKind.find("hidden") != std::string::npos) {
         continue;
       }
       throw std::runtime_error(
-          "Kernarg " + std::to_string(i) + " name=(" + parsedAsm->args[i].name +
+          "Kernarg " + std::to_string(i) + " name=(" + metadata_.args[i].name +
           ") not set! There are " + std::to_string(kernargIsSet.size()) +
           " kernarg(s). All (non hidden) kernargs must "
           "be set before running the kernel!");
@@ -481,10 +395,10 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
 
 void Emulator::addKernarg(int argNumber, const void *argValue) {
   assert(argNumber >= 0 &&
-         argNumber < static_cast<int64_t>(parsedAsm->args.size()) &&
+         argNumber < static_cast<int64_t>(metadata_.args.size()) &&
          "Invalid argument number");
-  const auto &arg = parsedAsm->args[argNumber];
-  assert(arg.offset + arg.size <= parsedAsm->kernargSegmentSize &&
+  const auto &arg = metadata_.args[argNumber];
+  assert(arg.offset + arg.size <= metadata_.kernargSegmentSize &&
          "Kernarg exceeds segment size");
   kernargIsSet[argNumber] = true;
   std::memcpy(&kernargSegment[arg.offset], argValue, arg.size);
@@ -496,7 +410,7 @@ void Emulator::addAllKernargs(const void *args) {
     kernargIsSet[i] = true;
   }
   // Copy only the declared kernarg size, not the full (padded) buffer.
-  std::memcpy(kernargSegment.data(), args, parsedAsm->kernargSegmentSize);
+  std::memcpy(kernargSegment.data(), args, metadata_.kernargSegmentSize);
 }
 
 Emulator::Emulator(Emulator &&other) noexcept = default;

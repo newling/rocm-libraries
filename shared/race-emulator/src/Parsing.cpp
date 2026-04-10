@@ -267,42 +267,41 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
 
   auto processInKernel = [&](ParsedLine token) {
     if (token.key == ".name") {
-      assert(name.empty() && "only support one kernel currently");
-      name = token.value;
+      assert(metadata.name.empty() && "only support one kernel currently");
+      metadata.name = token.value;
     } else if (token.key == ".kernarg_segment_size") {
-      kernargSegmentSize = getIntFromView<int>(token.value);
+      metadata.kernargSegmentSize = getIntFromView<int>(token.value);
     } else if (token.key == ".wavefront_size") {
-      wavefrontSize = WaveSize{getIntFromView<int>(token.value)};
+      metadata.wavefrontSize = WaveSize{getIntFromView<int>(token.value)};
     }
   };
 
   auto processInArgs = [&](ParsedLine token) {
-    // Skip the ".args:" line itself -- it enters Args state but isn't an arg.
     if (token.key == ".args") {
       return;
     }
     if (token.isListItem) {
-      args.push_back(KernelArg{});
+      metadata.args.push_back(KernelArg{});
       if (argsItemDepth < 0) {
         argsItemDepth = token.indent;
       }
     }
-    if (args.empty()) {
+    if (metadata.args.empty()) {
       return;
     }
 
     if (token.key == ".size") {
-      args.back().size = getIntFromView<int>(token.value);
+      metadata.args.back().size = getIntFromView<int>(token.value);
     } else if (token.key == ".offset") {
-      args.back().offset = getIntFromView<int>(token.value);
+      metadata.args.back().offset = getIntFromView<int>(token.value);
     } else if (token.key == ".value_kind") {
-      args.back().valueKind = token.value;
+      metadata.args.back().valueKind = token.value;
     } else if (token.key == ".value_type") {
-      args.back().valueType = token.value;
+      metadata.args.back().valueType = token.value;
     } else if (token.key == ".address_space") {
-      args.back().addressSpace = token.value;
+      metadata.args.back().addressSpace = token.value;
     } else if (token.key == ".name") {
-      args.back().name = token.value;
+      metadata.args.back().name = token.value;
     }
   };
 
@@ -313,7 +312,7 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
     if (token.isEmptyLine) {
       return;
     }
-    amdhsa.push_back({token.key, std::stoi(token.value)});
+    metadata.amdhsa.push_back({token.key, std::stoi(token.value)});
   };
 
   auto process = [&](ParsedLine token,
@@ -343,25 +342,25 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
 
   }
 
-  initialRegisterAllocation = KernelStateParser::Parse(amdhsa);
+  metadata.initialRegisterAllocation =
+      KernelStateParser::Parse(metadata.amdhsa);
 
-  // Extract kernarg preload settings from amdhsa metadata.
-  for (const auto &[key, val] : amdhsa) {
+  for (const auto &[key, val] : metadata.amdhsa) {
     if (key == ".amdhsa_user_sgpr_kernarg_preload_length") {
-      kernargPreloadLength = val;
+      metadata.kernargPreloadLength = val;
     } else if (key == ".amdhsa_user_sgpr_kernarg_preload_offset") {
-      kernargPreloadOffset = val;
+      metadata.kernargPreloadOffset = val;
     }
   }
 }
 
 void ParsedAsm::appendStr(std::ostream &os) const {
-  os << "Kernel Name: " << name << "\n";
-  os << "Kernarg Segment Size: " << kernargSegmentSize << "\n";
-  os << "Wavefront Size: " << wavefrontSize << "\n";
+  os << "Kernel Name: " << metadata.name << "\n";
+  os << "Kernarg Segment Size: " << metadata.kernargSegmentSize << "\n";
+  os << "Wavefront Size: " << metadata.wavefrontSize << "\n";
   os << "Kernel Arguments:\n";
-  for (size_t i = 0; i < args.size(); ++i) {
-    const auto &arg = args[i];
+  for (size_t i = 0; i < metadata.args.size(); ++i) {
+    const auto &arg = metadata.args[i];
     os << "  Arg " << i << ": name='" << arg.name << "', size=" << arg.size
        << ", offset=" << arg.offset << ", valueKind='" << arg.valueKind
        << "', valueType='" << arg.valueType << "', addressSpace='"
@@ -376,11 +375,9 @@ void ParsedAsm::appendStr(std::ostream &os) const {
   for (const auto &label : sortedLabels) {
     os << "  " << label.second << ": line " << label.first << "\n";
   }
-
-
   os << "AMDHSA Metadata:\n";
-  for (const auto &amdhsa : amdhsa) {
-    os << "  " << amdhsa.first << " = " << amdhsa.second << "\n";
+  for (const auto &[k, v] : metadata.amdhsa) {
+    os << "  " << k << " = " << v << "\n";
   }
 }
 
