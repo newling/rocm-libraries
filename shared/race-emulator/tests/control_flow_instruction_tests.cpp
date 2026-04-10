@@ -46,43 +46,65 @@ TEST(Instructions, SAndSaveExecB64) {
   EXPECT_TRUE(wave.getScc());         // new exec non-zero
 }
 
-// s_swappc_b64 is a no-op in the emulator.  On real HW it saves the
-// return address (PC+4) to the destination SGPR pair and jumps to the
-// byte-address in the source pair.  Because the emulator uses line-index
-// PCs instead of byte addresses, the target address cannot be resolved.
-// Currently only used for activation function calls with activationType=0
-// (identity), so no-op is correct.  Verify that:
-//   1) PC advances by 1.
-//   2) Neither operand is clobbered (the real instruction would write dst;
-//      the no-op deliberately does not, because the caller's code flow
-//      assumes the subroutine runs and returns, which our no-op skips).
+// Without instructionAddresses, s_swappc_b64 falls back to no-op (advances
+// PC by 1, does not modify registers).
 TEST(Instructions, S_SwapPc_B64_NoOp) {
   Workgroup wg({.vgprCount = 4, .sgprCount = 16, .waveSize = WaveSize{32}});
   auto &wave = wg.getWave(0);
 
-  // Set up operands as the kernel does:
-  //   s_swappc_b64 s[4:5], s[12:13]
-  // Pre-fill both dst and src with sentinel values.
   wave.setSgpr(4, 0xAAAAAAAA);
   wave.setSgpr(5, 0xBBBBBBBB);
   wave.setSgpr(12, 0x12345678);
   wave.setSgpr(13, 0x9ABCDEF0);
-
-  // Also set a VGPR to check it isn't touched.
   wave.setVgpr(0, 0, 42);
 
   int pcBefore = wave.getPc();
   tryExecute(wave, "s_swappc_b64 s[4:5], s[12:13]");
   EXPECT_EQ(wave.getPc(), pcBefore + 1);
 
-  // SGPRs should be untouched (no-op does not write return address).
+  // No-op: SGPRs untouched.
   EXPECT_EQ(wave.getSgpr(4), 0xAAAAAAAAu);
   EXPECT_EQ(wave.getSgpr(5), 0xBBBBBBBBu);
   EXPECT_EQ(wave.getSgpr(12), 0x12345678u);
   EXPECT_EQ(wave.getSgpr(13), 0x9ABCDEF0u);
-
-  // VGPR untouched.
   EXPECT_EQ(wave.getVgpr(0, 0), 42u);
+}
+
+// With instructionAddresses, s_swappc_b64 saves the return byte address
+// (next instruction) to the destination SGPR pair and jumps to the byte
+// address in the source SGPR pair.
+//
+// Simulated layout (4 instructions):
+//   token 0: addr 0x100  (some instruction, the swappc lives here)
+//   token 1: addr 0x108  (return point)
+//   token 2: addr 0x200  (jump target)
+//   token 3: addr 0x208  (instruction after target)
+TEST(Instructions, S_SwapPc_B64_WithPcTable) {
+  std::vector<uint64_t> addresses = {0x100, 0x108, 0x200, 0x208};
+  Workgroup wg({.vgprCount = 4,
+                .sgprCount = 16,
+                .waveSize = WaveSize{32},
+                .instructionAddresses = &addresses});
+  auto &wave = wg.getWave(0);
+
+  // Source SGPRs hold the target byte address (0x200 = token 2).
+  wave.setSgpr64(12, 0x200);
+
+  // Destination SGPRs pre-filled with sentinels.
+  wave.setSgpr(4, 0xAAAAAAAA);
+  wave.setSgpr(5, 0xBBBBBBBB);
+
+  wave.setPc(0);
+  tryExecute(wave, "s_swappc_b64 s[4:5], s[12:13]");
+
+  // PC should jump to token index 2 (byte address 0x200).
+  EXPECT_EQ(wave.getPc(), 2);
+
+  // Destination SGPRs should hold the return byte address (0x108 = token 1).
+  EXPECT_EQ(wave.getSgpr64(4), 0x108u);
+
+  // Source SGPRs are unchanged.
+  EXPECT_EQ(wave.getSgpr64(12), 0x200u);
 }
 
 // s_sendmsg is a no-op in the emulator (hardware sends a message to the

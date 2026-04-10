@@ -86,17 +86,18 @@ void Emulator::initKernargSegment() {
 }
 
 Emulator::Emulator(KernelInfo metadata, std::string_view disassembly,
-                   std::shared_ptr<Architecture> arch,
-                   std::string_view originalSource)
+                   std::shared_ptr<Architecture> arch)
     : arch(std::move(arch)), metadata_(std::move(metadata)) {
   disassembledKernel = std::make_unique<DisassembledKernel>(parseDisassembly(disassembly));
+  initKernargSegment();
+}
 
-  // Build source mapping if original .s source is provided (for diagnostics).
-  if (!originalSource.empty()) {
-    DisassembledKernel sourceAsm = parseAssemblySource(originalSource);
-    buildSourceMapping(*disassembledKernel, sourceAsm);
-  }
-
+Emulator::Emulator(KernelInfo metadata, std::string_view disassembly,
+                   std::shared_ptr<Architecture> arch,
+                   SourceMapping sourceMapping)
+    : arch(std::move(arch)), metadata_(std::move(metadata)),
+      sourceMapping_(std::move(sourceMapping)) {
+  disassembledKernel = std::make_unique<DisassembledKernel>(parseDisassembly(disassembly));
   initKernargSegment();
 }
 
@@ -311,8 +312,8 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
           auto *detector = workgroup.getRaceDetector();
           // When source mapping is available, translate token indices to
           // original source line indices for diagnostics.
-          auto &slm = disassembledKernel->instructionToSourceLine;
-          auto &srcLines = disassembledKernel->sourceLines;
+          auto &slm = sourceMapping_.instructionToSourceLine;
+          auto &srcLines = sourceMapping_.sourceLines;
           bool hasSourceMapping = !slm.empty() && !srcLines.empty();
 
           int wavePc = wave.getPc();

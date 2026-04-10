@@ -76,6 +76,18 @@ struct KernelInfo {
   int kernargPreloadOffset = 0;
 };
 
+/// Maps disassembly instruction indices to lines in an external source file.
+/// The source can be anything: compiler-emitted .s, HIP, or any other format.
+/// Constructed independently and attached to an Emulator for diagnostics.
+struct SourceMapping {
+  /// Maps each instruction index to a line index in sourceLines.
+  /// -1 means no mapping for that instruction.
+  std::vector<int> instructionToSourceLine;
+
+  /// The source text, split into lines.
+  std::vector<std::string> sourceLines;
+};
+
 /// Parsed instruction stream. Produced either from llvm-objdump disassembly
 /// (via parseDisassembly) or from compiler-emitted .s source (via
 /// parseAssemblySource, used only for diagnostic source mapping).
@@ -89,27 +101,18 @@ struct DisassembledKernel {
   /// Empty when parsed from .s source.
   std::vector<uint64_t> instructionAddresses;
 
-  /// Source mapping (populated by buildSourceMapping).
-  /// Maps each instruction index to its line in the original .s source.
-  /// -1 means no mapping for that instruction.
-  std::vector<int> instructionToSourceLine;
-
-  /// Raw lines of the original .s source (populated by buildSourceMapping).
-  std::vector<std::string> sourceLines;
-
   void appendStr(std::ostream &os) const;
   std::string str() const;
   void appendInstructionsStr(std::ostream &os) const;
 };
 
 /// Parse compiler-emitted .s source into a DisassembledKernel. Only populates
-/// instructions and labels — no metadata. Used for diagnostic source mapping.
+/// instructions and labels. Used for diagnostic source mapping.
 DisassembledKernel parseAssemblySource(std::string_view assemblySource);
 
-/// Build source mapping by matching labels between disassembly and .s source.
-/// Populates result.instructionToSourceLine and result.sourceLines.
-void buildSourceMapping(DisassembledKernel &result,
-                        const DisassembledKernel &sourceAsm);
+/// Build a source mapping by matching labels between disassembly and .s source.
+SourceMapping buildSourceMapping(const DisassembledKernel &disassembly,
+                                 const DisassembledKernel &sourceAsm);
 
 /// Parse llvm-objdump -d output into a DisassembledKernel.
 DisassembledKernel parseDisassembly(std::string_view disassemblyText);

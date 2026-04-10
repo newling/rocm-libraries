@@ -93,7 +93,7 @@ inline std::string disassembleCodeObject(const std::vector<uint8_t> &co) {
 }
 
 /// Assemble .s source, disassemble, parse metadata, create Emulator.
-/// Passes the original .s source for diagnostic source mapping.
+/// Optionally builds a source mapping from .s labels for diagnostics.
 inline Emulator emulatorFromAssembly(std::string_view assembly,
                                      std::shared_ptr<Architecture> arch,
                                      bool withSourceMapping = true) {
@@ -106,9 +106,16 @@ inline Emulator emulatorFromAssembly(std::string_view assembly,
                              std::get<std::string>(metaResult));
   }
 
-  return Emulator(std::get<KernelInfo>(std::move(metaResult)),
-                  disassembly, std::move(arch),
-                  withSourceMapping ? assembly : "");
+  auto kernelInfo = std::get<KernelInfo>(std::move(metaResult));
+
+  if (withSourceMapping) {
+    auto disassembled = parseDisassembly(disassembly);
+    auto sourceAsm = parseAssemblySource(assembly);
+    return Emulator(std::move(kernelInfo), disassembly, std::move(arch),
+                    buildSourceMapping(disassembled, sourceAsm));
+  }
+
+  return Emulator(std::move(kernelInfo), disassembly, std::move(arch));
 }
 
 } // namespace raceemulator::test

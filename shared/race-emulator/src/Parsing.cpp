@@ -381,15 +381,18 @@ DisassembledKernel parseDisassembly(std::string_view disassemblyText) {
   return result;
 }
 
-void buildSourceMapping(DisassembledKernel &result, const DisassembledKernel &sourceAsm) {
+SourceMapping buildSourceMapping(const DisassembledKernel &disassembly,
+                                 const DisassembledKernel &sourceAsm) {
+  SourceMapping mapping;
+
   // Store original source lines from the parsed source instructions.
-  result.sourceLines.reserve(sourceAsm.instructions.size());
+  mapping.sourceLines.reserve(sourceAsm.instructions.size());
   for (const auto &inst : sourceAsm.instructions) {
-    result.sourceLines.push_back(inst.originalLine);
+    mapping.sourceLines.push_back(inst.originalLine);
   }
 
   // Initialize mapping: -1 = no mapping.
-  result.instructionToSourceLine.assign(result.instructions.size(), -1);
+  mapping.instructionToSourceLine.assign(disassembly.instructions.size(), -1);
 
   // Build anchor points from label matching. For each label that exists in
   // both the disassembly and the source, record (disasm token index, source
@@ -399,7 +402,7 @@ void buildSourceMapping(DisassembledKernel &result, const DisassembledKernel &so
     int sourceIndex;
   };
   std::vector<Anchor> anchors;
-  for (const auto &[name, disasmIndex] : result.labels) {
+  for (const auto &[name, disasmIndex] : disassembly.labels) {
     auto it = sourceAsm.labels.find(name);
     if (it != sourceAsm.labels.end()) {
       anchors.push_back({disasmIndex, it->second});
@@ -439,7 +442,7 @@ void buildSourceMapping(DisassembledKernel &result, const DisassembledKernel &so
 
   // Add sentinel anchors at start and end.
   anchors.insert(anchors.begin(), {0, 0});
-  anchors.push_back({static_cast<int>(result.instructions.size()),
+  anchors.push_back({static_cast<int>(disassembly.instructions.size()),
                      static_cast<int>(sourceAsm.instructions.size())});
 
   for (size_t a = 0; a + 1 < anchors.size(); ++a) {
@@ -450,11 +453,10 @@ void buildSourceMapping(DisassembledKernel &result, const DisassembledKernel &so
 
     for (int di = disasmStart; di < disasmEnd; ++di) {
       // Skip label instructions in disassembly (they have their own mapping).
-      if (result.instructions[di].isLabel) {
-        // Map label to the label's source line.
-        auto it = sourceAsm.labels.find(result.instructions[di].key);
+      if (disassembly.instructions[di].isLabel) {
+        auto it = sourceAsm.labels.find(disassembly.instructions[di].key);
         if (it != sourceAsm.labels.end()) {
-          result.instructionToSourceLine[di] = it->second;
+          mapping.instructionToSourceLine[di] = it->second;
         }
         continue;
       }
@@ -465,11 +467,13 @@ void buildSourceMapping(DisassembledKernel &result, const DisassembledKernel &so
       }
 
       if (srcCursor < srcEnd) {
-        result.instructionToSourceLine[di] = srcCursor;
+        mapping.instructionToSourceLine[di] = srcCursor;
         srcCursor++;
       }
     }
   }
+
+  return mapping;
 }
 
 } // namespace raceemulator

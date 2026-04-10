@@ -664,7 +664,10 @@ bool detectsRace(const std::string &assembly,
   std::string disasm = test::disassembleCodeObject(co);
   auto meta = std::get<KernelInfo>(
       parseCodeObjectMetadata(co.data(), co.size()));
-  Emulator emulator(std::move(meta), disasm, arch, assembly);
+  auto disassembled = parseDisassembly(disasm);
+  auto sourceAsm = parseAssemblySource(assembly);
+  Emulator emulator(std::move(meta), disasm, arch,
+                    buildSourceMapping(disassembled, sourceAsm));
   std::vector<int> h_data(nGlobalBytes / 4 + 1, 0);
   int *d_data = h_data.data();
   emulator.addKernarg(0, &d_data);
@@ -695,10 +698,12 @@ TEST(Gfx942, MutationTest_RemoveBarrier_DetectsRace) {
   std::string disasm = test::disassembleCodeObject(co);
   auto meta = std::get<KernelInfo>(
       parseCodeObjectMetadata(co.data(), co.size()));
-  // Pass the ORIGINAL .s for source mapping — diagnostics show where
+  // Pass the ORIGINAL .s for source mapping -- diagnostics show where
   // the barrier was in the unmutated source.
+  auto disassembled = parseDisassembly(disasm);
+  auto sourceAsm = parseAssemblySource(assembly);
   Emulator emulator(std::move(meta), disasm, std::make_shared<Gfx942>(),
-                    assembly);
+                    buildSourceMapping(disassembled, sourceAsm));
 
   int N = 256;
   std::vector<int> h_data(N);

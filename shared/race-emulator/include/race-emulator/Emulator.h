@@ -27,12 +27,15 @@ class Emulator {
 
 public:
   /// Construct from kernel metadata and disassembly text (llvm-objdump -d
-  /// output). Optionally accepts original .s source for diagnostic source
-  /// mapping. The Emulator has no dependency on LLVM tools — the caller
+  /// output). The Emulator has no dependency on LLVM tools -- the caller
   /// is responsible for disassembly and metadata extraction.
   Emulator(KernelInfo metadata, std::string_view disassembly,
-           std::shared_ptr<Architecture> arch,
-           std::string_view originalSource = "");
+           std::shared_ptr<Architecture> arch);
+
+  /// Construct with a source mapping for diagnostic display. The mapping
+  /// translates instruction indices to lines in an external source file.
+  Emulator(KernelInfo metadata, std::string_view disassembly,
+           std::shared_ptr<Architecture> arch, SourceMapping sourceMapping);
 
   Emulator(const Emulator &) = delete;
   Emulator &operator=(const Emulator &) = delete;
@@ -83,6 +86,7 @@ private:
   std::shared_ptr<Architecture> arch;
   KernelInfo metadata_;
   std::unique_ptr<DisassembledKernel> disassembledKernel;
+  SourceMapping sourceMapping_;
   std::vector<char> kernargSegment;
   std::vector<bool> kernargIsSet;
   Profiler emulatorProfiler;
