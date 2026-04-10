@@ -406,19 +406,27 @@ CodeObjectResult parseCodeObjectMetadata(const uint8_t *elfData, size_t elfSize,
       }
       const uint8_t *kd = elfData + kdOff;
 
-      uint32_t rsrc1, rsrc2;
+      uint32_t rsrc1, rsrc2, rsrc3;
       uint16_t kcp;
+      std::memcpy(&rsrc3, kd + 44, 4);
       std::memcpy(&rsrc1, kd + 48, 4);
       std::memcpy(&rsrc2, kd + 52, 4);
       std::memcpy(&kcp, kd + 56, 2);
 
       // Extract VGPR/SGPR counts from compute_pgm_rsrc1.
-      // GRANULATED_WORKITEM_VGPR_COUNT is bits[5:0], granularity depends on
-      // target (4 for GFX9, 8 for GFX940+). Use 8 as conservative default.
       uint32_t vgprGran = (rsrc1 & 0x3F) + 1;
       uint32_t sgprGran = ((rsrc1 >> 6) & 0x0F) + 1;
-      int vgprs = static_cast<int>(vgprGran * 8); // conservative
+      int vgprs = static_cast<int>(vgprGran * 8);
       int sgprs = static_cast<int>(sgprGran * 8);
+
+      // Extract accum_offset from compute_pgm_rsrc3 bits[5:0].
+      uint32_t accumOffsetField = rsrc3 & 0x3F;
+      int accumOffset = static_cast<int>((accumOffsetField + 1) * 4);
+      if (accumOffset > 4) {
+        result.amdhsa.emplace_back(".amdhsa_accum_offset", accumOffset);
+        // Ensure vgprCount covers both VGPRs and AGPRs.
+        vgprs = std::max(vgprs, accumOffset * 2);
+      }
 
       // Override msgpack vgpr/sgpr counts if they were lower.
       bool hasVgprFromKd = true;
