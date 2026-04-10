@@ -344,15 +344,9 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
   //                      parsing (indent, labels, key-value) and instruction
   //                      execution (via tryExecute).
   //
-  // Comment stripping happens in stripComments() below. Symbol substitution
-  // happens inside the ParsedLine constructor.
-
-  bool inBlockComment = false;
   for (unsigned i = 0; i < assemblyLines.size(); ++i) {
     const auto &originalLine = assemblyLines[i];
-    auto commentFreeLine = stripComments(originalLine, inBlockComment);
-
-    ParsedLine token(originalLine, commentFreeLine, i, state, symbolTable);
+    ParsedLine token(originalLine, originalLine, i, state, symbolTable);
     tokens.push_back(token);
     updateParserState(token);
     process(token, symbolTable);
@@ -360,12 +354,12 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
     // Extract .amdgcn_target value (outside processInRoot since it needs
     // access to ParsedAsm fields).
     if (state == ParserState::Root) {
-      auto pos = commentFreeLine.find(".amdgcn_target");
+      auto pos = originalLine.find(".amdgcn_target");
       if (pos != std::string::npos) {
-        auto q1 = commentFreeLine.find('"', pos);
-        auto q2 = commentFreeLine.find('"', q1 + 1);
+        auto q1 = originalLine.find('"', pos);
+        auto q2 = originalLine.find('"', q1 + 1);
         if (q1 != std::string::npos && q2 != std::string::npos) {
-          target = commentFreeLine.substr(q1 + 1, q2 - q1 - 1);
+          target = originalLine.substr(q1 + 1, q2 - q1 - 1);
         }
       }
     }

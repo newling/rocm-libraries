@@ -29,10 +29,6 @@ struct ParsedAsm;
 class Emulator {
 
 public:
-  /// Construct from a pre-parsed assembly (legacy path for tests with .set
-  /// symbols or simplified metadata format). Will be removed.
-  Emulator(std::unique_ptr<ParsedAsm> parsedAsm, std::shared_ptr<Architecture> arch);
-
   /// Construct from a code object ELF. Internally disassembles the .text
   /// section and parses metadata from the kernel descriptor and msgpack
   /// .note section. Requires llvm-objdump on PATH or LLVM_BIN_DIR env var.

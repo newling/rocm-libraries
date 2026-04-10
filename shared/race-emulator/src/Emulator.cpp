@@ -138,12 +138,6 @@ std::string captureCmd(const std::string &cmd) {
 
 } // namespace
 
-Emulator::Emulator(std::unique_ptr<ParsedAsm> parsed,
-                   std::shared_ptr<Architecture> arch)
-    : arch(std::move(arch)), parsedAsm(std::move(parsed)) {
-  initKernargSegment();
-}
-
 Emulator::Emulator(const uint8_t *codeObject, size_t size,
                    std::shared_ptr<Architecture> arch,
                    std::string_view originalSource)

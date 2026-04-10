@@ -128,11 +128,14 @@ protected:
   void ExpectRace(const std::string &assemblyBody,
                   const std::string &expectedMsgPart, int nGlobalBytes = 16,
                   int nWaves = 1,
-                  std::optional<RaceVerifier> verifier = std::nullopt) {
-    Emulator emulator = getBoilerEmulator(assemblyBody, nGlobalBytes);
+                  std::optional<RaceVerifier> verifier = std::nullopt,
+                  std::shared_ptr<Architecture> arch = nullptr) {
+    if (!arch) arch = std::make_shared<Gfx942>();
+    Emulator emulator = getBoilerEmulator(assemblyBody, nGlobalBytes, arch);
+    int waveSize = arch->getWaveSize();
     try {
-      emulator.run(Dim3d(0), {nWaves * 64, 1, 1},
-                   {.raceChecks = true}); // nWaves waves * 64 threads/wave
+      emulator.run(Dim3d(0), {nWaves * waveSize, 1, 1},
+                   {.raceChecks = true});
       FAIL() << "Expected RaceConditionException, but simulation completed "
                 "successfully.";
     } catch (const RaceConditionException &e) {
@@ -170,18 +173,51 @@ protected:
   }
 
   void ExpectSuccess(const std::string &assemblyBody, int nGlobalBytes = 16,
-                     int nWaves = 1) {
-    Emulator emulator = getBoilerEmulator(assemblyBody, nGlobalBytes);
-    emulator.run(Dim3d(0), {nWaves * 64, 1, 1},
+                     int nWaves = 1,
+                     std::shared_ptr<Architecture> arch = nullptr) {
+    if (!arch) arch = std::make_shared<Gfx942>();
+    Emulator emulator = getBoilerEmulator(assemblyBody, nGlobalBytes, arch);
+    int waveSize = arch->getWaveSize();
+    emulator.run(Dim3d(0), {nWaves * waveSize, 1, 1},
                  {.raceChecks = true}); // nWaves waves * 64 threads/wave
   }
 
 private:
-  Emulator getBoilerEmulator(std::string_view assembly, int nGlobalBytes) {
-    std::string combined = std::string(boilerHeader) + "foo:\n" +
-                           std::string(assembly) + std::string(boilerTrailer);
-    auto emulator = test::emulatorFromAssembly(
-        combined, std::make_shared<Gfx942>());
+  Emulator getBoilerEmulator(std::string_view assembly, int nGlobalBytes,
+                             std::shared_ptr<Architecture> arch = nullptr) {
+    if (!arch) {
+      arch = std::make_shared<Gfx942>();
+    }
+    // Replace the target in the boiler header to match the arch.
+    std::string header = std::string(boilerHeader);
+    std::string target = std::string(boilerTrailer);
+    auto replaceTarget = [&](std::string &s) {
+      auto pos = s.find("gfx942");
+      while (pos != std::string::npos) {
+        s.replace(pos, 6, arch->getName());
+        pos = s.find("gfx942", pos + arch->getName().size());
+      }
+    };
+    replaceTarget(header);
+    replaceTarget(target);
+    // Adjust arch-specific fields.
+    if (arch->getName() != "gfx942") {
+      // .amdhsa_accum_offset is gfx90a+ only.
+      auto accPos = target.find(".amdhsa_accum_offset");
+      if (accPos != std::string::npos) {
+        auto eol = target.find('\n', accPos);
+        target.erase(accPos, eol - accPos + 1);
+      }
+      // Update wavefront_size in YAML metadata.
+      auto wfPos = target.find(".wavefront_size: 64");
+      if (wfPos != std::string::npos) {
+        target.replace(wfPos, 19,
+            ".wavefront_size: " + std::to_string(arch->getWaveSize()));
+      }
+    }
+    std::string combined = header + "foo:\n" +
+                           std::string(assembly) + target;
+    auto emulator = test::emulatorFromAssembly(combined, arch);
 
     h_data.resize(nGlobalBytes / 4 + 1);
     std::iota(h_data.begin(), h_data.end(), 0);
@@ -422,11 +458,9 @@ TEST_F(RaceTestFixture, DSReadOverReadIsFine) {
   // Case where the destination is the same:
   const std::string readReadSameDst = R"ASM(
   v_lshlrev_b32_e32 v0, 2, v0
-  print int v0 0
 
   ; set v1 to be v0 plus 4:
   v_add_u32_e32 v1, 4, v0
-  print int v1 0
   ds_read_b32 v3, v0
   ds_read_b32 v3, v1
   s_waitcnt lgkmcnt(0)
@@ -565,7 +599,8 @@ TEST_F(RaceTestFixture, D16_LdsLoad_NoFalsePositive) {
   s_waitcnt lgkmcnt(0)
   s_endpgm
   )ASM";
-  ExpectSuccess(code, 0, 1);
+  auto gfx1151 = std::make_shared<Gfx1151>();
+  ExpectSuccess(code, 0, 1, gfx1151);
 }
 
 // D16 hi load outstanding, but ds_store_b16 reads only lo half. No race.
@@ -588,7 +623,8 @@ TEST_F(RaceTestFixture, D16_HiLoadOutstanding_LoReadSafe) {
   s_waitcnt lgkmcnt(0)
   s_endpgm
   )ASM";
-  ExpectSuccess(code, 0, 1);
+  auto gfx1151 = std::make_shared<Gfx1151>();
+  ExpectSuccess(code, 0, 1, gfx1151);
 }
 
 // Full-register LDS load, then read without waitcnt — should race.
@@ -610,7 +646,9 @@ TEST_F(RaceTestFixture, D16_FullLoadStillRaces) {
   s_waitcnt lgkmcnt(0)
   s_endpgm
   )ASM";
-  ExpectRace(code, "VGPR race", 0, 1, RaceVerifier::VgprAccess(2).onRead());
+  auto gfx1151 = std::make_shared<Gfx1151>();
+  ExpectRace(code, "VGPR race", 0, 1, RaceVerifier::VgprAccess(2).onRead(),
+             gfx1151);
 }
 
 // Cross-wave LDS race detected regardless of wave scheduling order.
@@ -674,7 +712,9 @@ TEST_F(RaceTestFixture, D16_LoLoadOutstanding_FullReadRaces) {
   s_waitcnt lgkmcnt(0)
   s_endpgm
   )ASM";
-  ExpectRace(code, "VGPR race", 0, 1, RaceVerifier::VgprAccess(2).onRead());
+  auto gfx1151 = std::make_shared<Gfx1151>();
+  ExpectRace(code, "VGPR race", 0, 1, RaceVerifier::VgprAccess(2).onRead(),
+             gfx1151);
 }
 
 // ---------------------------------------------------------------------------
@@ -908,12 +948,14 @@ TEST_F(RaceTestFixture, DeepEventStack_FullWaitcnt_AllSafe) {
 TEST_F(RaceTestFixture, ExecMask_PartialWrite_FullRead_IsRace) {
   const std::string code = R"ASM(
   ; Only lane 0 active.
-  s_mov_b64 exec, 1
+  s_mov_b32 exec_lo, 1
+  s_mov_b32 exec_hi, 0
   v_mov_b32_e32 v0, 0
   v_mov_b32_e32 v1, 42
   ds_write_b32 v0, v1
   ; Restore full exec.
-  s_mov_b64 exec, -1
+  s_mov_b32 exec_lo, 0xFFFFFFFF
+  s_mov_b32 exec_hi, 0xFFFFFFFF
   ; All lanes read LDS[0] — lane 0's write is still ACTIVE.
   v_mov_b32_e32 v3, 0
   ds_read_b32 v2, v3
@@ -928,12 +970,14 @@ TEST_F(RaceTestFixture, ExecMask_PartialWrite_FullRead_IsRace) {
 // LDS[0] → safe (same wave, WAVE_COMPLETE).
 TEST_F(RaceTestFixture, ExecMask_PartialWrite_Waitcnt_FullRead_NoRace) {
   const std::string code = R"ASM(
-  s_mov_b64 exec, 1
+  s_mov_b32 exec_lo, 1
+  s_mov_b32 exec_hi, 0
   v_mov_b32_e32 v0, 0
   v_mov_b32_e32 v1, 42
   ds_write_b32 v0, v1
   s_waitcnt lgkmcnt(0)
-  s_mov_b64 exec, -1
+  s_mov_b32 exec_lo, 0xFFFFFFFF
+  s_mov_b32 exec_hi, 0xFFFFFFFF
   v_mov_b32_e32 v3, 0
   ds_read_b32 v2, v3
   s_waitcnt lgkmcnt(0)
@@ -947,17 +991,20 @@ TEST_F(RaceTestFixture, ExecMask_PartialWrite_Waitcnt_FullRead_NoRace) {
 TEST_F(RaceTestFixture, ExecMask_DisjointLanes_OverlappingAddresses_IsRace) {
   const std::string code = R"ASM(
   ; Lanes 0-31 active: each writes to LDS[lane*4].
-  s_mov_b64 exec, 0x00000000FFFFFFFF
+  s_mov_b32 exec_lo, 0xFFFFFFFF
+  s_mov_b32 exec_hi, 0
   v_lshlrev_b32_e32 v0, 2, v0
   v_mov_b32_e32 v1, 42
   ds_write_b32 v0, v1
   ; NO s_waitcnt
   ; Lanes 32-63 active: all read from LDS[0].
-  s_mov_b64 exec, 0xFFFFFFFF00000000
+  s_mov_b32 exec_lo, 0
+  s_mov_b32 exec_hi, 0xFFFFFFFF
   v_mov_b32_e32 v3, 0
   ds_read_b32 v2, v3
   s_waitcnt lgkmcnt(0)
-  s_mov_b64 exec, -1
+  s_mov_b32 exec_lo, 0xFFFFFFFF
+  s_mov_b32 exec_hi, 0xFFFFFFFF
   s_endpgm
   )ASM";
   ExpectRace(code, "LDS race in byte 0", 0, 1,
@@ -969,17 +1016,20 @@ TEST_F(RaceTestFixture, ExecMask_DisjointLanes_OverlappingAddresses_IsRace) {
 TEST_F(RaceTestFixture, ExecMask_DisjointLanes_DisjointAddresses_NoRace) {
   const std::string code = R"ASM(
   ; Lanes 0-31 active: each writes to LDS[lane*4] (addresses 0..124).
-  s_mov_b64 exec, 0x00000000FFFFFFFF
+  s_mov_b32 exec_lo, 0xFFFFFFFF
+  s_mov_b32 exec_hi, 0
   v_lshlrev_b32_e32 v0, 2, v0
   v_mov_b32_e32 v1, 42
   ds_write_b32 v0, v1
   ; Lanes 32-63 active: each reads from LDS[lane*4] (addresses 128..252).
   ; These addresses don't overlap with the writes.
-  s_mov_b64 exec, 0xFFFFFFFF00000000
+  s_mov_b32 exec_lo, 0
+  s_mov_b32 exec_hi, 0xFFFFFFFF
   v_lshlrev_b32_e32 v3, 2, v0
   ds_read_b32 v2, v3
   s_waitcnt lgkmcnt(0)
-  s_mov_b64 exec, -1
+  s_mov_b32 exec_lo, 0xFFFFFFFF
+  s_mov_b32 exec_hi, 0xFFFFFFFF
   s_endpgm
   )ASM";
   ExpectSuccess(code, 0, 1);
@@ -1051,24 +1101,29 @@ static std::string crossWavePartialExecCode(int lgkmcnt1, int lgkmcnt2,
   v_mov_b32_e32 v7, 42
 
   ; Write 0: lanes 0-15 active, LDS [waveBase, waveBase+64)
-  s_mov_b64 exec, 0x000000000000FFFF
+  s_mov_b32 exec_lo, 0x0000FFFF
+  s_mov_b32 exec_hi, 0
   ds_write_b32 v6, v7
 
   ; Write 1: lanes 16-31, LDS [waveBase+64, waveBase+128)
-  s_mov_b64 exec, 0x00000000FFFF0000
+  s_mov_b32 exec_lo, 0xFFFF0000
+  s_mov_b32 exec_hi, 0
   ds_write_b32 v6, v7 offset:64
 
   ; Write 2: lanes 32-47, LDS [waveBase+128, waveBase+192)
-  s_mov_b64 exec, 0x0000FFFF00000000
+  s_mov_b32 exec_lo, 0
+  s_mov_b32 exec_hi, 0x0000FFFF
   ds_write_b32 v6, v7 offset:128
 
   ; Write 3: lanes 48-63, LDS [waveBase+192, waveBase+256)
-  s_mov_b64 exec, 0xFFFF000000000000
+  s_mov_b32 exec_lo, 0
+  s_mov_b32 exec_hi, 0xFFFF0000
   ds_write_b32 v6, v7 offset:192
 
   )ASM";
   code += "  s_waitcnt lgkmcnt(" + std::to_string(lgkmcnt1) + ")\n";
-  code += "  s_mov_b64 exec, -1\n";
+  code += "  s_mov_b32 exec_lo, 0xFFFFFFFF\n";
+  code += "  s_mov_b32 exec_hi, 0xFFFFFFFF\n";
   if (barrier1) {
     code += "  s_barrier\n";
   }
@@ -1084,23 +1139,27 @@ static std::string crossWavePartialExecCode(int lgkmcnt1, int lgkmcnt2,
   v_add_u32_e32 v8, v1, v8
 
   ; Read 0: lanes 0-31 read [otherBase, otherBase+128)
-  s_mov_b64 exec, 0x00000000FFFFFFFF
+  s_mov_b32 exec_lo, 0xFFFFFFFF
+  s_mov_b32 exec_hi, 0
   ds_read_b32 v9, v8
   )ASM";
   if (lgkmcnt2 >= 0) {
     code += "  s_waitcnt lgkmcnt(" + std::to_string(lgkmcnt2) + ")\n";
   }
-  code += "  s_mov_b64 exec, -1\n";
+  code += "  s_mov_b32 exec_lo, 0xFFFFFFFF\n";
+  code += "  s_mov_b32 exec_hi, 0xFFFFFFFF\n";
   if (barrier2) {
     code += "  s_barrier\n";
   }
   code += R"ASM(
   ; Read 1: lanes 32-63 read [otherBase+128, otherBase+256)
-  s_mov_b64 exec, 0xFFFFFFFF00000000
+  s_mov_b32 exec_lo, 0
+  s_mov_b32 exec_hi, 0xFFFFFFFF
   ds_read_b32 v9, v8 offset:128
   s_waitcnt lgkmcnt(0)
 
-  s_mov_b64 exec, -1
+  s_mov_b32 exec_lo, 0xFFFFFFFF
+  s_mov_b32 exec_hi, 0xFFFFFFFF
   s_endpgm
   )ASM";
   return code;

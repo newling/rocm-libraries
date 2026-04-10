@@ -5,7 +5,6 @@
 
 #include "race-emulator/Arch.h"
 #include "race-emulator/Emulator.h"
-#include "race-emulator/Parsing.h"
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -92,16 +91,9 @@ inline std::vector<uint8_t> assembleToCodeObject(std::string_view assembly,
 inline Emulator emulatorFromAssembly(std::string_view assembly,
                                      std::shared_ptr<Architecture> arch,
                                      bool withSourceMapping = true) {
-  try {
-    auto co = assembleToCodeObject(assembly, arch->getName());
-    return Emulator(co.data(), co.size(), arch,
-                    withSourceMapping ? assembly : "");
-  } catch (...) {
-    // Assembly failed — use legacy .s parser path. This happens for tests
-    // with .set symbol substitution or simplified metadata format.
-    auto parsed = std::make_unique<ParsedAsm>(assembly);
-    return Emulator(std::move(parsed), arch);
-  }
+  auto co = assembleToCodeObject(assembly, arch->getName());
+  return Emulator(co.data(), co.size(), std::move(arch),
+                  withSourceMapping ? assembly : "");
 }
 
 } // namespace raceemulator::test
