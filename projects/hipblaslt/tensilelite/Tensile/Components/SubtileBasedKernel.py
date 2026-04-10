@@ -204,6 +204,9 @@ class TileInfo:
     _tc = 'A' if isA else 'B'
     self.isSwizzled = isMXSAB
     self.isPreShuffled = isAB and kernel["ProblemType"].get("SwizzleTensor%s" % _tc, False)
+    if self.isPreShuffled:
+      assert kernel["ProblemType"]["DataType"].isFloat4(), \
+          "Pre-shuffled tensors only supported for FP4"
 
     if isAB or isMXSAB:
 
@@ -407,8 +410,11 @@ class TileInfo:
     for i in range(self.numGRPerSubtile):
       self.sharedVgprGROffset.append(writer.vgprPool.checkOut(1))
 
-    # Allocate shared vgprs for LR
-    for i in range(self.numLRPerSubtile):
+    # Allocate shared vgprs for LR.
+    # Pre-shuffled tiles only need 1 VGPR: offset[i] = offset[0] + i*mmaTileBytes,
+    # and the constant delta is folded into the ds_read offset field.
+    numLRVgprs = 1 if self.isPreShuffled else self.numLRPerSubtile
+    for i in range(numLRVgprs):
       self.sharedVgprLROffset.append(writer.vgprPool.checkOut(1))
       self.sharedVgprLROffsetSwap.append(writer.vgprPool.checkOut(1))
 
@@ -540,27 +546,19 @@ def _computeLROffset(module, kernel, tileInfo, colOffset, rowOffset):
     module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=vgpr(rowOffset), comment="%s: row + col"%tc))
 
 def _computeLROffsetLinear(module, kernel, writer, tileInfo):
-  """Compute linear LR offsets for a pre-shuffled tensor (laneId * 16 per MFMA tile)."""
+  """Compute linear LR offset for a pre-shuffled tensor (laneId * 16).
+
+  Only one VGPR is allocated (sharedVgprLROffset[0] = laneId * 16).
+  The per-MFMA-tile offset (i * mmaTileBytes) is folded into the ds_read
+  constant offset field in emitSingleDsRead.
+  """
   tc = tileInfo.tc
   wavesize = kernel["WavefrontSize"]
-  laneIdVgpr = writer.vgprPool.checkOut(1)
-  module.addComment0("Pre-shuffled %s: linear LR offset = laneId * 16" % tc)
-  module.add(VAndB32(dst=vgpr(laneIdVgpr), src0=vgpr("Serial"), src1=wavesize-1, comment="laneId within wave"))
-  module.add(VLShiftLeftB32(dst=vgpr(laneIdVgpr), shiftHex=hex(4), src=vgpr(laneIdVgpr), comment="laneId * 16"))
-  # Populate the ds_read address VGPRs. sharedVgprLROffset[i] holds the LDS
-  # byte offset that each lane will use to read data for the i-th MFMA tile.
-  # Tiles are are `mmaTileBytes` bytes (defined below) apart.
-  #
-  # Example with 2 MFMA tiles per subtile, and mmaTileBytes = 1024:
-  #   lane 0:  sharedVgprLROffset[0] = 0,    sharedVgprLROffset[1] = 1024
-  #   lane 1:  sharedVgprLROffset[0] = 16,   sharedVgprLROffset[1] = 1040
-  #   lane 63: sharedVgprLROffset[0] = 1008, sharedVgprLROffset[1] = 2032
-  mmaTileBytes = tileInfo.mmaTileSize
-  for vgprId in range(len(tileInfo.sharedVgprLROffset)):
-    module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=hex(vgprId * mmaTileBytes),
-                       src1=vgpr(laneIdVgpr),
-                       comment="ds_read addr for MFMA tile %u" % vgprId))
-  writer.vgprPool.checkIn(laneIdVgpr)
+  module.addComment0("Pre-shuffled %s: LR offset = laneId * 16" % tc)
+  module.add(VAndB32(dst=vgpr(tileInfo.sharedVgprLROffset[0]), src0=vgpr("Serial"),
+                     src1=wavesize-1, comment="laneId within wave"))
+  module.add(VLShiftLeftB32(dst=vgpr(tileInfo.sharedVgprLROffset[0]), shiftHex=hex(4),
+                            src=vgpr(tileInfo.sharedVgprLROffset[0]), comment="laneId * 16"))
 
 def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
   """Apply wave-based partition offset to LR offsets.
@@ -1358,26 +1356,14 @@ def emitSingleBufferLoad(tileInfo, writer, kernel, sId0, sId1):
     soffset = sgpr(regList.regValues[0]) if len(regList) > 0 and useSgpr else 0
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.regValues[i]
 
-    # Pre-shuffled: in HBM, consecutive 16-row stripes are K elements apart,
-    # but in LDS they are only DepthU elements apart. The soffset correction
-    # bridges this gap for each wave. When soffset is already in use (SGPR
-    # path), add the correction before the load and restore it after.
-    matrixStates = writer.states.a if tc == 'A' else writer.states.b
-    needsRestore = False
-    if tileInfo.isPreShuffled:
-      correction = sgpr(matrixStates.preShuffleSoffsetCorrection)
-      if soffset == 0:
-        soffset = correction
-      else:
-        module.add(SAddU32(dst=soffset, src0=soffset, src1=correction,
-                           comment="Pre-shuffled %s: soffset += wave partition correction" % tc))
-        needsRestore = True
+    # Pre-shuffled VGPR path (soffset==0): use the correction SGPR directly.
+    # SGPR path: correction is applied at the caller level (see
+    # _addPreShuffleSoffsetCorrection / _removePreShuffleSoffsetCorrection).
+    if tileInfo.isPreShuffled and soffset == 0:
+      matrixStates = writer.states.a if tc == 'A' else writer.states.b
+      soffset = sgpr(matrixStates.preShuffleSoffsetCorrection)
 
     module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i)))
-
-    if needsRestore:
-      module.add(SSubU32(dst=soffset, src0=soffset, src1=correction,
-                         comment="Pre-shuffled %s: restore soffset" % tc))
 
   return module
 
@@ -1390,15 +1376,54 @@ def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
 # Subroutine to generate GR load code
 # Initial idea: maybe store asm in modules in a separate obj?
 #
+def _addPreShuffleSoffsetCorrection(module, writer, tileInfo):
+  """Add the per-wave soffset correction to all unique subtile SGPR soffsets.
+
+  Called once before a batch of buffer_loads, paired with
+  _removePreShuffleSoffsetCorrection after the batch. This avoids
+  per-load add/restore in the inner loop.
+  """
+  tc = tileInfo.tc
+  matrixStates = writer.states.a if tc == 'A' else writer.states.b
+  correction = sgpr(matrixStates.preShuffleSoffsetCorrection)
+  corrected = set()
+  for regList in tileInfo.localSubtilesRegister:
+    if regList.regPool == writer.sgprPool and len(regList) > 0:
+      s = regList.regValues[0]
+      if s not in corrected:
+        corrected.add(s)
+        module.add(SAddU32(dst=sgpr(s), src0=sgpr(s), src1=correction,
+                           comment="Pre-shuffled %s: soffset += correction" % tc))
+
+def _removePreShuffleSoffsetCorrection(module, writer, tileInfo):
+  """Remove the per-wave soffset correction from all unique subtile SGPR soffsets."""
+  tc = tileInfo.tc
+  matrixStates = writer.states.a if tc == 'A' else writer.states.b
+  correction = sgpr(matrixStates.preShuffleSoffsetCorrection)
+  corrected = set()
+  for regList in tileInfo.localSubtilesRegister:
+    if regList.regPool == writer.sgprPool and len(regList) > 0:
+      s = regList.regValues[0]
+      if s not in corrected:
+        corrected.add(s)
+        module.add(SSubU32(dst=sgpr(s), src0=sgpr(s), src1=correction,
+                           comment="Pre-shuffled %s: restore soffset" % tc))
+
 def globalReadDoSubtile(tc, writer, kernel):
   module = Module()
 
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
 
+  if tileInfo.isPreShuffled:
+    _addPreShuffleSoffsetCorrection(module, writer, tileInfo)
+
   for j in range(tileInfo.localSubtileGrid[1]):
     for i in range(tileInfo.localSubtileGrid[0]):
       module.addComment0("Emit load for %s subtile: [%u, %u]"%(tc, i, j))
       module.add(emitSubtileBufferLoad(tc, writer, kernel, [i, j]))
+
+  if tileInfo.isPreShuffled:
+    _removePreShuffleSoffsetCorrection(module, writer, tileInfo)
 
   return module
 
@@ -1414,7 +1439,9 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, interleaved = Fals
 
   # du maps to mfmaC, mfmaR is always 0 (subtileShape[0]=1)
   mfmaId = tileInfo.getSubtileShapeLinearId(subIterK, 0)
-  addrVgpr = tileInfo.sharedVgprLROffset[mfmaId]
+  # Pre-shuffled tiles use a single LR VGPR (index 0); the per-MFMA-tile
+  # delta is folded into the ds_read offset below.
+  addrVgpr = tileInfo.sharedVgprLROffset[0 if tileInfo.isPreShuffled else mfmaId]
 
   offsetStride = tileInfo.subtileSize
   if interleaved:
@@ -1428,6 +1455,10 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, interleaved = Fals
     offset = sId0*offsetStride
 
   offset = offset + sId1 * tileInfo.globalSubtileGrid[0] * offsetStride
+
+  # Pre-shuffled: single LR VGPR, fold MFMA tile offset into ds_read offset
+  if tileInfo.isPreShuffled:
+    offset += mfmaId * tileInfo.mmaTileSize
 
   dstVgpr = dstTile.regList.regValues[0]
   numRegs = len(dstTile.regList.regValues)

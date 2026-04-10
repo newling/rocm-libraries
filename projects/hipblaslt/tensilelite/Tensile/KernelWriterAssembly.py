@@ -3968,6 +3968,14 @@ class KernelWriterAssembly(KernelWriter):
       mxSwizzleSize0 = 32 # M,N direction
       mxSwizzleSize1 = 256 # K direction
       mxSwizzleBlockSize = mxSwizzleSize0 * mxSwizzleSize1 // mxBlock
+    if isPreShuffled:
+      # Pre-shuffled tiles: 16 rows x 32 FP4 elements (16 bytes per row, 256 bytes per tile).
+      # These block sizes are FP4-specific; other data types would need different values.
+      assert kernel["ProblemType"]["DataType"].isFloat4(), \
+          "Pre-shuffled tensors only supported for FP4 (SwizzleSize0/1 are FP4-specific)"
+      psSwizzleSize0 = 16  # rows per tile
+      psSwizzleSize1 = 32  # FP4 elements per tile in K direction
+      psSwizzleBlockSize = psSwizzleSize0 * psSwizzleSize1 * tP["bpeGR"]  # 256 bytes
     allocateTensor2dSize = use64bShadowLimit and not isMX
     numDim = len(indices)
     with self.allocTmpSgpr(2 + 2 + (0 if allocateTensor2dSize else 2)) as tmpSgprInfo:
@@ -4057,23 +4065,39 @@ class KernelWriterAssembly(KernelWriter):
             #   Srd+2   = (numLine * stride_elements + DepthU) * bpe
             #
             # Key: numLine/numElems <= MT (compile-time), so the multiply stays in 32 bits.
+            # Compute SRD+2 bounds using swizzle block geometry.
+            # MX scales and pre-shuffled A/B both use block-unit tileStart;
+            # non-pre-shuffled data A/B uses element-unit tileStart.
             if isMX:
+              swzSize0    = mxSwizzleSize0
               mt_units    = mt  # roundUp(MT/mxSwizzleSize0), compile-time
               extra_bytes = mxSwizzleBlockSize * (kernel["DepthU"] // mxSwizzleSize1)
+            elif isPreShuffled:
+              swzSize0    = psSwizzleSize0
+              mt_units    = roundUp(kernel[tP["mt"]] / psSwizzleSize0)
+              extra_bytes = psSwizzleBlockSize * (kernel["DepthU"] // psSwizzleSize1)
             else:
               mt_units    = kernel[tP["mt"]]  # MT0 or MT1, compile-time
               extra_bytes = kernel["DepthU"]  # one K step in elements
+
+            useBlockUnits = isMX or isPreShuffled
 
             for i in range(0, numDim):
               idx = indices[i]
               if idx == kernel["ProblemType"]["Index0"] or idx == kernel["ProblemType"]["Index1"]:
                 size = self.sizeRef(idx)
-                if isMX:
-                  # tileStart already in block units (WG * roundUp(MT/mxSwizzleSize0))
-                  module.add(SAddU32(dst=sgpr(stmp+0), src0=size, src1=(mxSwizzleSize0 - 1), comment="size + %u - 1"%mxSwizzleSize0))
-                  module.add(SLShiftRightB32(dst=sgpr(stmp+0), src=sgpr(stmp+0), shiftHex=log2(mxSwizzleSize0), comment="roundup(size/%u)"%mxSwizzleSize0))
-                  module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(tileStart+0), comment="numBlkToEnd = roundUp(size/%u) - tileStart_blk"%mxSwizzleSize0))
-                  module.add(SMinU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=mt_units, comment="min (numBlkToEnd, roundup(MT/%u))"%mxSwizzleSize0))
+                if useBlockUnits:
+                  if isPreShuffled:
+                    # tileStart is in element units (WG*MT); convert to block units
+                    module.add(SLShiftRightB32(dst=sgpr(stmp+1), src=sgpr(tileStart+0), shiftHex=log2(swzSize0), comment="tileStart_blk = WG*MT/%u"%swzSize0))
+                    tileStartBlk = sgpr(stmp+1)
+                  else:
+                    # MX: tileStart already in block units
+                    tileStartBlk = sgpr(tileStart+0)
+                  module.add(SAddU32(dst=sgpr(stmp+0), src0=size, src1=(swzSize0 - 1), comment="size + %u - 1"%swzSize0))
+                  module.add(SLShiftRightB32(dst=sgpr(stmp+0), src=sgpr(stmp+0), shiftHex=log2(swzSize0), comment="roundup(size/%u)"%swzSize0))
+                  module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=tileStartBlk, comment="numBlkToEnd = roundUp(size/%u) - tileStart_blk"%swzSize0))
+                  module.add(SMinU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=mt_units, comment="min(numBlkToEnd, %u)"%mt_units))
                   module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=1, comment="numLine = min - 1 (0-based index)"))
                 else:
                   # tileStart in element units (WG * MT); no block rounding needed
@@ -4082,10 +4106,10 @@ class KernelWriterAssembly(KernelWriter):
                   module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=1, comment="numLine = min - 1 (0-based index)"))
                 module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), \
                           strideF, comment="numLine * stride"))
-                if isMX:
+                if useBlockUnits:
                   module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr(stmp+0), src1=extra_bytes, comment="buffer_load limit for %s"%tc))
                 else:
-                  # (numLine * stride + DepthU) * bpe  — mirrors scale path structure
+                  # (numLine * stride + DepthU) * bpe
                   module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=extra_bytes, comment="+ DepthU (one K step)"))
                   module.add(scalarMultiplyBpe(sgpr("Srd%s+2"%tc), sgpr(stmp+0), tP["bpeGR"], comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
@@ -4160,10 +4184,8 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAddCU32(dst=sgpr(tensor2dSize1), src0=sgpr(tensor2dSize1), src1=sgpr(stmp+1), comment="sum tensor size"))
 
       # skip ShadowLimit and Srd+2 calculation here in useFixedSrd2 case
-      if isPreShuffled:
-        module.add(SMovB32(dst=sgpr("Srd%s+2"%tc), src="BufferLimit",
-                           comment="Pre-shuffled %s: disable SRD bounds check" % tc))
-      elif not useFixedSrd2:
+      # (pre-shuffled Srd+2 is computed in the useBlockUnits path above)
+      if not useFixedSrd2:
         if use64bShadowLimit:
           limitTmp0 = "ShadowLimit%s+0"%tc
           limitTmp1 = "ShadowLimit%s+1"%tc

@@ -38,6 +38,7 @@ from Tensile.Components.SubtileBasedKernel import TileInfo
 from Tensile.Components.SubtileBasedKernel import emitMfmaInstruction
 from Tensile.Components.SubtileBasedKernel import emitSingleDsRead
 from Tensile.Components.SubtileBasedKernel import emitSingleBufferLoad
+from Tensile.Components.SubtileBasedKernel import _addPreShuffleSoffsetCorrection, _removePreShuffleSoffsetCorrection
 from Tensile.Components.SubtileBasedKernel import globalReadPtrUpdates, globalReadLDSBufferSwap, localReadLDSBufferSwap
 from Tensile.Components.SubtileBasedKernel import globalReadDoScaleSubtile, globalReadScalePtrUpdates
 from rocisa.code import Module, Label
@@ -1517,11 +1518,16 @@ class SubtileBasedScheduler:
         if op.firstForMT and self.hasScale:
             module.add(globalReadDoScaleSubtile('MXSA', writer, kernel))
             module.add(globalReadDoScaleSubtile('MXSB', writer, kernel))
-        # A and B data loads — subtile lists are already deduped by the scheduler
+        # A and B data loads — subtile lists are already deduped by the scheduler.
+        # Pre-shuffled soffset correction is applied once around the batch.
         for subtileList, tileInfo in [(op.subtileA, self.tileInfoA),
                                       (op.subtileB, self.tileInfoB)]:
+            if tileInfo.isPreShuffled and subtileList:
+                _addPreShuffleSoffsetCorrection(module, writer, tileInfo)
             for sId0 in subtileList:
                 module.add(emitSingleBufferLoad(tileInfo, writer, kernel, sId0, 0))
+            if tileInfo.isPreShuffled and subtileList:
+                _removePreShuffleSoffsetCorrection(module, writer, tileInfo)
         return module
 
     def _emitOp(self, writer, kernel, op, dtileInfo, scaleSet=0, scaleLRSet=0):
