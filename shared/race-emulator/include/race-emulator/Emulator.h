@@ -5,25 +5,21 @@
 #include "Arch.h"
 #include "Profiler.h"
 #include "RunConfig.h"
-#include "Util.h"
-#include "Wave.h"
 #include "Workgroup.h"
-#include <cassert>
 #include <cstdint>
-#include <cstring>
-#include <iostream>
 #include <memory>
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace raceemulator {
 
 struct ParsedAsm;
 
-/// Main entry point for the race emulator. Parses AMD GPU assembly, manages
-/// kernel arguments and architecture state, and delegates execution to
-/// Workgroup. Decorates exceptions with assembly context for diagnostics.
+/// Emulates an AMD GPU kernel from a code object ELF. Manages kernel arguments,
+/// architecture state, and delegates execution to Workgroup. Decorates
+/// exceptions with assembly context for diagnostics.
 ///
 /// TODO(newling) handle case of multiple kernels in single assembly file.
 class Emulator {
@@ -37,10 +33,10 @@ public:
            std::shared_ptr<Architecture> arch,
            std::string_view originalSource = "");
 
-  Emulator(const Emulator &other);
-  Emulator &operator=(const Emulator &other);
+  Emulator(const Emulator &) = delete;
+  Emulator &operator=(const Emulator &) = delete;
   Emulator(Emulator &&other) noexcept;
-  Emulator &operator=(Emulator &&other) = delete;
+  Emulator &operator=(Emulator &&) = delete;
   ~Emulator();
 
   /// Return a formatted profiling report. Entries below minPercentage of
@@ -78,12 +74,8 @@ public:
   std::string str() const;
 
 private:
-  /// Extract structural metadata from parsed assembly into a WorkgroupConfig.
   WorkgroupConfig buildWorkgroupConfig(int nWaves,
                                        const RunConfig &config) const;
-
-  /// Initialize per-wave runtime state (SGPRs, kernarg preload, thread IDs,
-  /// PC) on an already-constructed Workgroup.
   void initializeWaveState(Workgroup &workgroup, Dim3d wgId, Dim3d blockDim,
                            int nWaves);
   void initKernargSegment();

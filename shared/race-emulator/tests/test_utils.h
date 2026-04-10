@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -84,10 +85,21 @@ inline std::vector<uint8_t> assembleToCodeObject(std::string_view assembly,
   return coData;
 }
 
+/// Load a kernel .s file from TEST_KERNEL_DIR.
+inline std::string loadKernelFile(const std::string &filename) {
+  fs::path filepath = fs::path(TEST_KERNEL_DIR) / filename;
+  std::ifstream file(filepath);
+  if (!file.is_open()) {
+    throw std::runtime_error("Failed to open kernel file: " +
+                             filepath.string());
+  }
+  std::stringstream buffer;
+  buffer << file.rdbuf();
+  return buffer.str();
+}
+
 /// Assemble .s text and create an Emulator from the resulting code object.
-/// Optionally passes the original .s source for diagnostic source mapping.
-/// If assembly fails (e.g. uses .set symbols or simplified format), falls
-/// back to parsing the .s directly via the legacy ParsedAsm path.
+/// Passes the original .s source for diagnostic source mapping.
 inline Emulator emulatorFromAssembly(std::string_view assembly,
                                      std::shared_ptr<Architecture> arch,
                                      bool withSourceMapping = true) {

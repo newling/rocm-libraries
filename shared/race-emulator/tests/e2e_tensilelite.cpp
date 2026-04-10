@@ -25,19 +25,7 @@ namespace {
 using namespace raceemulator;
 namespace fs = std::filesystem;
 
-// Helper utilities
-
-std::string loadKernelFile(const std::string &filename) {
-  fs::path filepath = fs::path(TEST_KERNEL_DIR) / filename;
-  std::ifstream file(filepath);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to open kernel file: " +
-                             filepath.string());
-  }
-  std::stringstream buffer;
-  buffer << file.rdbuf();
-  return buffer.str();
-}
+using test::loadKernelFile;
 
 struct GemmDims {
   int M, N, K;
@@ -96,11 +84,6 @@ void cpuGemmReferenceF32(const GemmDims &dims, const std::vector<float> &h_a,
   }
 }
 
-Emulator loadEmulatorFromAssembly(const std::string &assembly,
-                                  std::shared_ptr<Architecture> arch) {
-  return test::emulatorFromAssembly(assembly, arch);
-}
-
 // Test runner class
 
 // KernelType: The data type used by the GPU (e.g., float or uint16_t for bf16)
@@ -143,7 +126,7 @@ public:
     std::vector<KernelType> dGpu(sizeC, static_cast<KernelType>(0));
 
     // 4. Setup Emulator.
-    Emulator emulator = loadEmulatorFromAssembly(assembly_, arch_);
+    Emulator emulator = test::emulatorFromAssembly(assembly_, arch_);
 
     int argIdx = 0;
 
@@ -798,7 +781,7 @@ TEST(Gfx1151, MatMul_TensileLite_F16_WMMA_TN_CustomKernel) {
   std::string assembly =
       loadKernelFile("gfx1151/tensilelite_custom_f16_wmma_tn_m16n128k4096.s");
   auto arch = std::make_shared<Gfx1151>();
-  Emulator emulator = loadEmulatorFromAssembly(assembly, arch);
+  Emulator emulator = test::emulatorFromAssembly(assembly, arch);
   emulator.addAllKernargs(argBuf.data());
 
   // 4. Run: 4 waves/WG (128 threads, wave32), 2 workgroups
@@ -957,7 +940,7 @@ TEST(Gfx950, MatMul_TensileLite_MXFP4_TN_32x32x256) {
   std::string assembly =
       loadKernelFile("gfx950/tensilelite_mxfp4_subtile_m32n32k256.s");
   auto arch = std::make_shared<Gfx950>();
-  Emulator emulator = loadEmulatorFromAssembly(assembly, arch);
+  Emulator emulator = test::emulatorFromAssembly(assembly, arch);
   emulator.addAllKernargs(argBuf.data());
 
   // WG 32x8x1 = 256 threads, wave64 = 4 waves, 1 workgroup.

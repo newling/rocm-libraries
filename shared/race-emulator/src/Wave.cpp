@@ -35,8 +35,6 @@ const constexpr int nullIndex = -7;
 
 const constexpr int nExtraSgrs = -nullIndex + 1;
 
-using LabelMap = std::map<std::string, int>;
-
 } // namespace
 
 Wave::Wave(int vgprCount, int agprOffset, int sgprCount, WaveSize waveSize,
@@ -188,8 +186,7 @@ Wave::compileLine(const std::string &line) {
   assert(!partitioned.empty() && "Empty partitioned line");
 
   // Skip directives.
-  if (partitioned[0] == ".set" || partitioned[0] == ".align" ||
-      partitioned[0] == ".macro" || partitioned[0] == ".endm") {
+  if (partitioned[0] == ".set" || partitioned[0] == ".align") {
     return nullOpt;
   }
 

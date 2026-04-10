@@ -24,21 +24,6 @@
 namespace {
 
 using namespace raceemulator;
-namespace fs = std::filesystem;
-
-std::string load_kernel_file(const std::string &filename) {
-  fs::path filepath = fs::path(TEST_KERNEL_DIR) / filename;
-
-  std::ifstream file(filepath);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to open kernel file: " +
-                             filepath.string());
-  }
-
-  std::stringstream buffer;
-  buffer << file.rdbuf();
-  return buffer.str();
-}
 
 // Architecture parameter for multi-arch tests.
 struct ArchParam {
@@ -51,7 +36,7 @@ struct ArchParam {
 
 Emulator loadEmulator(const ArchParam &arch, const std::string &filename) {
   std::string path = arch.arch->getName() + "/" + filename;
-  std::string assembly = load_kernel_file(path);
+  std::string assembly = test::loadKernelFile(path);
   return test::emulatorFromAssembly(assembly, arch.arch);
 }
 
@@ -621,7 +606,7 @@ TEST(Gfx1151, F16RoundTrip) { runF16RoundTrip(kGfx1151); }
 
 // Construct Emulator directly from a code object (no .s source needed).
 TEST(Gfx1151, CopyKernelFromCodeObject) {
-  std::string assembly = load_kernel_file("gfx1151/copy.s");
+  std::string assembly = test::loadKernelFile("gfx1151/copy.s");
   auto co = test::assembleToCodeObject(assembly, "gfx1151");
 
   // Construct from .co only — all metadata parsed from the binary.
@@ -690,7 +675,7 @@ bool detectsRace(const std::string &assembly,
 // Mutation test: remove a barrier from a real kernel, verify the race
 // detector catches it and the diagnostic points to the correct .s lines.
 TEST(Gfx942, MutationTest_RemoveBarrier_DetectsRace) {
-  std::string assembly = load_kernel_file("gfx942/lds_reverse_2.s");
+  std::string assembly = test::loadKernelFile("gfx942/lds_reverse_2.s");
 
   // Remove the s_barrier to introduce a RAW race between waves.
   auto barrierPos = assembly.find("s_barrier");

@@ -67,11 +67,6 @@ struct Scalar3OpCase {
 };
 void tryExecute(Wave &wave, const std::string &line) {
   // Hacky way to run each instruction as if it is in its own program.
-  // static int pc = 0;
-  // std::map<std::string, int> labels;
-  // std::map<std::string, Macro> macros;
-  // ++pc;
-  // return wave.tryExecute(line, pc, labels, macros);
   wave.tryExecute(line, false);
   wave.getWorkgroup().dispatchPendingRaceEvents(wave.getWaveId());
 }

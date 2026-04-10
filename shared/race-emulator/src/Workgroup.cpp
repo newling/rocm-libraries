@@ -104,7 +104,7 @@ void Workgroup::run(const std::vector<ParsedLine> &tokens) {
     auto &wave = waves[waveId];
 
     const auto &token = tokens[wave.getPc()];
-    std::string_view trimmedAndCommentFree = trim(token.commentFreeLine);
+    std::string_view trimmedAndCommentFree = trim(token.processedLine);
 
     auto sw = [&]() -> Profiler::ScopedStopwatch {
       if (!profiler || trimmedAndCommentFree.empty()) {
@@ -123,7 +123,7 @@ void Workgroup::run(const std::vector<ParsedLine> &tokens) {
       });
     }();
 
-    wave.tryExecute(token.commentFreeLine, true);
+    wave.tryExecute(token.processedLine, true);
     dispatchPendingRaceEvents(WaveId{waveId});
 
     // Check if the instruction changed wave state (s_endpgm / s_barrier).

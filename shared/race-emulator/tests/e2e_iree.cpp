@@ -22,19 +22,6 @@
 namespace {
 
 using namespace raceemulator;
-namespace fs = std::filesystem;
-
-std::string loadKernelFile(const std::string &filename) {
-  fs::path filepath = fs::path(TEST_KERNEL_DIR) / filename;
-  std::ifstream file(filepath);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to open kernel file: " +
-                             filepath.string());
-  }
-  std::stringstream buffer;
-  buffer << file.rdbuf();
-  return buffer.str();
-}
 
 // CPU reference: row-major matmul C = A * B (f32 accumulation).
 // A is [M x K], B is [K x N], C is [M x N], all row-major.
@@ -67,7 +54,7 @@ TEST(Gfx942, MatMul_IREE_BF16xBF16xF32_32x32x32) {
   const int M = 32, N = 32, K = 32;
 
   // Load assembly
-  auto assembly = loadKernelFile("gfx942/iree_matmul_32x32x32_bf16xbf16xf32.s");
+  auto assembly = test::loadKernelFile("gfx942/iree_matmul_32x32x32_bf16xbf16xf32.s");
 
   // Initialize A and B with simple values (±1 as bf16)
   std::mt19937 rng(42);
@@ -152,7 +139,7 @@ TEST(Gfx1151, MatMul_IREE_F16xF16xF32_64x128x512) {
   const int M = 64, N = 128, K = 512;
 
   auto assembly =
-      loadKernelFile("gfx1151/iree_matmul_64x128x512_f16xf16xf32.s");
+      test::loadKernelFile("gfx1151/iree_matmul_64x128x512_f16xf16xf32.s");
 
   std::mt19937 rng(123);
   std::uniform_int_distribution<int> dist(0, 1);
@@ -230,7 +217,7 @@ TEST(Gfx1151, MatMul_IREE_BF16xBF16xF32_32x32x32) {
   const int M = 32, N = 32, K = 32;
 
   auto assembly =
-      loadKernelFile("gfx1151/iree_matmul_32x32x32_bf16xbf16xf32.s");
+      test::loadKernelFile("gfx1151/iree_matmul_32x32x32_bf16xbf16xf32.s");
 
   std::mt19937 rng(42);
   std::uniform_int_distribution<int> dist(0, 1);
@@ -305,7 +292,7 @@ TEST(Gfx1151, MatMul_IREE_BF16xBF16xF32_16x16x512_AllOnes) {
   const int M = 16, N = 16, K = 512;
 
   auto assembly =
-      loadKernelFile("gfx1151/iree_matmul_16x16x512_bf16xbf16xf32.s");
+      test::loadKernelFile("gfx1151/iree_matmul_16x16x512_bf16xbf16xf32.s");
 
   std::vector<uint16_t> aBf16(M * K, floatToBf16(1.0f));
   std::vector<uint16_t> bBf16(K * N, floatToBf16(1.0f));
@@ -361,7 +348,7 @@ TEST(Gfx1151, MatMul_IREE_BF16xBF16xF32_16x16x512_AllOnes) {
 TEST(Gfx1151, MatMul_IREE_F16xF16xF32_16x16x16) {
   const int M = 16, N = 16, K = 16;
 
-  auto assembly = loadKernelFile("gfx1151/iree_matmul_16x16x16_f16xf16xf32.s");
+  auto assembly = test::loadKernelFile("gfx1151/iree_matmul_16x16x16_f16xf16xf32.s");
 
   std::mt19937 rng(77);
   std::uniform_int_distribution<int> dist(0, 1);

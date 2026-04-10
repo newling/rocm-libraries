@@ -20,22 +20,6 @@
 namespace {
 
 using namespace raceemulator;
-namespace fs = std::filesystem;
-
-// Helper function to read file content
-std::string load_kernel_file(const std::string &filename) {
-  fs::path filepath = fs::path(TEST_KERNEL_DIR) / filename;
-
-  std::ifstream file(filepath);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to open kernel file: " +
-                             filepath.string());
-  }
-
-  std::stringstream buffer;
-  buffer << file.rdbuf();
-  return buffer.str();
-}
 
 uint16_t float_to_bf16(float f) {
   uint32_t bits = std::bit_cast<uint32_t>(f);
@@ -53,7 +37,7 @@ TEST(Gfx942, MatMul_Kittens) {
 
   auto start = std::chrono::high_resolution_clock::now();
 
-  std::string assembly = load_kernel_file("gfx942/kittens_original_smaller.s");
+  std::string assembly = test::loadKernelFile("gfx942/kittens_original_smaller.s");
 
   auto emulator = test::emulatorFromAssembly(assembly, std::make_shared<Gfx942>());
 

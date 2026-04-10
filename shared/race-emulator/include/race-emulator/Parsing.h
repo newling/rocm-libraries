@@ -4,11 +4,9 @@
 #pragma once
 
 #include "Types.h"
-#include <cassert>
 #include <cstdint>
-#include <cstring>
-#include <iostream>
 #include <map>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,23 +16,20 @@ namespace raceemulator {
 /// Tracks which section of the assembly file the parser is currently in.
 enum class ParserState { Root, Amdhsa, Kernels, Args };
 
-/// A single line of assembly after parsing: comments stripped, symbols
-/// resolved, labels and key-value pairs identified.
+/// A single parsed line of assembly or disassembly.
 struct ParsedLine {
-  ParsedLine(std::string_view originalLine, std::string_view commentFreeLine,
+  ParsedLine(std::string_view originalLine, std::string_view processedLine,
              int lineNumber, ParserState precedingParserState,
              const std::map<std::string, uint32_t> &symbolTable);
 
-  /// The raw source line, with comments. Used in error messages.
+  /// The raw source line (with comments). Used for diagnostic display.
   std::string originalLine;
-  /// Comments stripped, .set symbols replaced by their numeric values.
-  /// This is the line that instruction executors see via tryExecute().
-  std::string commentFreeLine;
+  /// Processed line: .set symbols resolved (for .s path), or trailing
+  /// // ADDR: HEX comment stripped (for disassembly path).
+  std::string processedLine;
   bool isEmptyLine{false};
-  /// 0-based line number in the original assembly.
   int lineNumber;
   ParserState precedingParserState;
-  /// Column index of the first non-whitespace character.
   int indent{-1};
   bool isListItem{false};
   bool isLabel{false};
@@ -45,7 +40,7 @@ struct ParsedLine {
   std::string str() const;
 };
 
-/// A kernel argument descriptor from the AMDGPU metadata YAML section.
+/// A kernel argument descriptor from the AMDGPU metadata.
 struct KernelArg {
   int size = 0;
   int offset = 0;
@@ -55,8 +50,7 @@ struct KernelArg {
   std::string name;
 };
 
-/// Pre-allocated scalar register ranges (e.g., kernarg pointer, workgroup ID),
-/// determined by parsing the assembly metadata.
+/// Pre-allocated scalar register ranges (e.g., kernarg pointer, workgroup ID).
 struct RegisterMapping {
   int start_register;
   int count;
@@ -65,42 +59,34 @@ struct AllocationResult {
   std::map<std::string, RegisterMapping> registers;
 };
 
-/// Top-level result of parsing an AMD GPU assembly file: kernel metadata,
-/// parsed instruction lines, labels, and macros.
+/// Parsed kernel metadata and instruction tokens. Populated from either the
+/// .s parser (for source mapping) or parseDisassembly + parseCodeObjectMetadata.
 struct ParsedAsm {
+  /// Parse .s assembly source for metadata and labels (used for source mapping).
   ParsedAsm(std::string_view assembly);
 
   std::string name;
   std::string assembly;
-  std::string target;
   int kernargSegmentSize = 0;
   WaveSize wavefrontSize{0};
   std::vector<KernelArg> args;
   std::vector<ParsedLine> tokens;
   AllocationResult initialRegisterAllocation;
   std::vector<std::pair<std::string, int>> amdhsa;
-
-  /// Kernarg preload: hardware preloads this many dwords from the kernarg
-  /// segment into SGPRs starting right after the kernarg segment pointer.
   int kernargPreloadLength = 0;
   int kernargPreloadOffset = 0;
 
   /// Label name -> line index.
   std::map<std::string, int> labels;
 
-  /// Token index -> byte address. Populated by parseDisassembly, empty for
-  /// .s-parsed assemblies. When non-empty, s_getpc/s_setpc/s_swappc use
-  /// real byte addresses instead of the synthetic 4*lineIndex scheme.
+  /// Token index -> byte address. Populated by parseDisassembly.
   std::vector<uint64_t> pcTable;
 
-  /// Source mapping for diagnostics: maps disassembly token index to the
-  /// corresponding line index in the original source (sourceLines). When
-  /// populated, decorateException shows original source lines with comments
-  /// instead of raw disassembly lines. -1 means no mapping for that token.
+  /// Source mapping for diagnostics: disassembly token index -> original
+  /// source line index. -1 = no mapping.
   std::vector<int> sourceLineMap;
 
-  /// Original source lines (from the .s file). Used by decorateException
-  /// when sourceLineMap is populated.
+  /// Original source lines for diagnostic display.
   std::vector<std::string> sourceLines;
 
   void appendStr(std::ostream &os) const;
@@ -108,15 +94,10 @@ struct ParsedAsm {
   void appendTokensStr(std::ostream &os) const;
 };
 
-/// Build a source line mapping from disassembly token indices to original
-/// source line indices. Uses label matching as anchor points and sequential
-/// instruction matching between anchors. Populates result.sourceLineMap
-/// and result.sourceLines.
+/// Build source mapping from disassembly tokens to original source lines.
 void buildSourceMapping(ParsedAsm &result, const ParsedAsm &sourceAsm);
 
-/// Parse llvm-objdump -d output into a ParsedAsm. Populates tokens, labels,
-/// and pcTable. Metadata fields (name, wavefrontSize, args, amdhsa, etc.)
-/// are NOT populated — they must be set by the caller from the code object.
+/// Parse llvm-objdump -d output into a ParsedAsm (tokens, labels, pcTable).
 ParsedAsm parseDisassembly(std::string_view disassemblyText);
 
 } // namespace raceemulator

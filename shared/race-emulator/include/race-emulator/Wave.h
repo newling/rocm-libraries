@@ -108,9 +108,8 @@ public:
 
   /// Number of times tryExecute has compiled an instruction (as opposed to
   /// using a cached executor). With caching enabled, each unique PC should
-  /// be compiled at most once. Note: macro-body instructions are never cached
-  /// (recompiled every invocation), and dual instructions (A :: B) count as
-  /// one compilation despite compiling two sub-instructions internally.
+  /// be compiled at most once. Dual instructions (A :: B) count as one
+  /// compilation despite compiling two sub-instructions internally.
   int getCompileCount() const { return compileCount; }
 
   void setScc(bool value);

@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "race-emulator/Arch.h"
-#include "race-emulator/Emulator.h"
 #include "race-emulator/Parsing.h"
-#include "race-emulator/Util.h"
-#include "test_utils.h"
-#include <cstring>
 #include <gtest/gtest.h>
 #include <string_view>
 
@@ -67,8 +63,8 @@ Disassembly of section .text:
   EXPECT_EQ(result.pcTable[8], 0x20u); // s_endpgm
 
   // Check instruction text is clean (no trailing comments).
-  EXPECT_EQ(result.tokens[1].commentFreeLine, "s_load_b64 s[0:1], s[0:1], 0");
-  EXPECT_EQ(result.tokens[3].commentFreeLine, "v_add_f32_e32 v0, s0, v0");
-  EXPECT_EQ(result.tokens[4].commentFreeLine, "s_cbranch_scc0 done");
+  EXPECT_EQ(result.tokens[1].processedLine, "s_load_b64 s[0:1], s[0:1], 0");
+  EXPECT_EQ(result.tokens[3].processedLine, "v_add_f32_e32 v0, s0, v0");
+  EXPECT_EQ(result.tokens[4].processedLine, "s_cbranch_scc0 done");
 
 }

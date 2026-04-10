@@ -161,24 +161,22 @@ std::string ParsedLine::str() const {
 }
 
 ParsedLine::ParsedLine(std::string_view originalLineIn,
-                       std::string_view commentFreeLineIn, int n,
+                       std::string_view processedLineIn, int n,
                        ParserState state,
                        const std::map<std::string, uint32_t> &symbolTable)
     : originalLine(originalLineIn), lineNumber(n), precedingParserState(state) {
 
-  // Start from the comment-free line. In Root state, also replace .set
-  // symbols (e.g. sgprKernArgAddress -> 0) so that instruction executors
-  // see numeric values.
-  commentFreeLine = std::string(commentFreeLineIn);
+  // In Root state, replace .set symbols with their numeric values.
+  processedLine = std::string(processedLineIn);
   if (state == ParserState::Root) {
-    commentFreeLine = getSymbolReducedLine(commentFreeLine, symbolTable);
+    processedLine = getSymbolReducedLine(processedLine, symbolTable);
   }
 
-  // Structural parsing uses the comment-free input before symbol substitution.
-  auto trimmed = trim(commentFreeLineIn);
+  // Structural parsing uses the input before symbol substitution.
+  auto trimmed = trim(processedLineIn);
 
   // Calculate indentation.
-  size_t firstChar = commentFreeLineIn.find_first_not_of(" \t");
+  size_t firstChar = processedLineIn.find_first_not_of(" \t");
   if (firstChar == std::string::npos) {
     isEmptyLine = true;
     return;
@@ -336,14 +334,6 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
   tokens.clear();
   std::map<std::string, uint32_t> symbolTable;
   symbolTable["UNDEF"] = 0xFFFFFFFF;
-  // Each source line has two representations stored in ParsedLine:
-  //
-  //   originalLine     — raw source, preserved verbatim for error messages.
-  //   commentFreeLine  — comments stripped (;  //  /* ... */) and .set symbols
-  //                      replaced by their numeric values. Used for structural
-  //                      parsing (indent, labels, key-value) and instruction
-  //                      execution (via tryExecute).
-  //
   for (unsigned i = 0; i < assemblyLines.size(); ++i) {
     const auto &originalLine = assemblyLines[i];
     ParsedLine token(originalLine, originalLine, i, state, symbolTable);
@@ -351,18 +341,6 @@ ParsedAsm::ParsedAsm(std::string_view a) : assembly(a) {
     updateParserState(token);
     process(token, symbolTable);
 
-    // Extract .amdgcn_target value (outside processInRoot since it needs
-    // access to ParsedAsm fields).
-    if (state == ParserState::Root) {
-      auto pos = originalLine.find(".amdgcn_target");
-      if (pos != std::string::npos) {
-        auto q1 = originalLine.find('"', pos);
-        auto q2 = originalLine.find('"', q1 + 1);
-        if (q1 != std::string::npos && q2 != std::string::npos) {
-          target = originalLine.substr(q1 + 1, q2 - q1 - 1);
-        }
-      }
-    }
   }
 
   initialRegisterAllocation = KernelStateParser::Parse(amdhsa);
@@ -411,7 +389,7 @@ void ParsedAsm::appendTokensStr(std::ostream &os) const {
     os << "[KV=]" << token.isKeyValue << " [LI]=" << token.isListItem
        << " [LB]=" << token.isLabel << " "
        << parserStateStr(token.precedingParserState) << " "
-       << token.commentFreeLine << "\n";
+       << token.processedLine << "\n";
   }
 }
 
@@ -550,7 +528,7 @@ void buildSourceMapping(ParsedAsm &result, const ParsedAsm &sourceAsm) {
     if (tok.isEmptyLine || tok.isLabel || tok.isKeyValue || tok.isListItem) {
       return false;
     }
-    auto trimmed = tok.commentFreeLine;
+    auto trimmed = tok.processedLine;
     auto pos = trimmed.find_first_not_of(" \t");
     if (pos == std::string::npos) {
       return false;

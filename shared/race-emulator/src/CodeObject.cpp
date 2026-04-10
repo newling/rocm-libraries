@@ -345,11 +345,6 @@ CodeObjectResult parseCodeObjectMetadata(const uint8_t *elfData, size_t elfSize,
   addAmdhsa(".amdhsa_next_free_vgpr", vgprCount);
   addAmdhsa(".amdhsa_group_segment_fixed_size", groupSize);
 
-  // Parse amdhsa target for architecture.
-  auto *targetVal = findInMap(top, "amdhsa.target");
-  if (targetVal && targetVal->type == MsgpackValue::STR) {
-    result.target = targetVal->strVal;
-  }
 
   // Parse the kernel descriptor binary for register allocation.
   // Find the .kd symbol in the symbol table.
