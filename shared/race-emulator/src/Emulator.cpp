@@ -169,28 +169,38 @@ Emulator::Emulator(const uint8_t *codeObject, size_t size,
 
   parsedAsm = std::make_unique<ParsedAsm>(parseDisassembly(disasm));
 
-  // Get all metadata from the .co: kernel name, args, wavefront size,
-  // register allocation (from kernel descriptor binary + msgpack .note).
-  auto metaResult = parseCodeObjectMetadata(codeObject, size);
-  if (std::holds_alternative<ParsedAsm>(metaResult)) {
-    auto &metadata = std::get<ParsedAsm>(metaResult);
-    parsedAsm->name = metadata.name;
-    parsedAsm->wavefrontSize = metadata.wavefrontSize;
-    parsedAsm->kernargSegmentSize = metadata.kernargSegmentSize;
-    parsedAsm->args = metadata.args;
-    parsedAsm->amdhsa = metadata.amdhsa;
-    parsedAsm->initialRegisterAllocation = metadata.initialRegisterAllocation;
-    parsedAsm->kernargPreloadLength = metadata.kernargPreloadLength;
-    parsedAsm->kernargPreloadOffset = metadata.kernargPreloadOffset;
-  } else {
-    throw std::runtime_error("Failed to parse code object metadata: " +
-                             std::get<std::string>(metaResult));
-  }
-
-  // Build source mapping if original source is provided (for diagnostics).
   if (!originalSource.empty()) {
+    // When original .s source is available, use it for metadata — the .s
+    // parser reads .amdhsa_* directives which are the authoritative source
+    // for register counts, LDS size, etc.
     ParsedAsm sourceAsm(originalSource);
+    parsedAsm->name = sourceAsm.name;
+    parsedAsm->wavefrontSize = sourceAsm.wavefrontSize;
+    parsedAsm->kernargSegmentSize = sourceAsm.kernargSegmentSize;
+    parsedAsm->args = sourceAsm.args;
+    parsedAsm->amdhsa = sourceAsm.amdhsa;
+    parsedAsm->initialRegisterAllocation = sourceAsm.initialRegisterAllocation;
+    parsedAsm->kernargPreloadLength = sourceAsm.kernargPreloadLength;
+    parsedAsm->kernargPreloadOffset = sourceAsm.kernargPreloadOffset;
     buildSourceMapping(*parsedAsm, sourceAsm);
+  } else {
+    // No .s source — parse metadata from the .co binary.
+    auto metaResult = parseCodeObjectMetadata(codeObject, size);
+    if (std::holds_alternative<ParsedAsm>(metaResult)) {
+      auto &metadata = std::get<ParsedAsm>(metaResult);
+      parsedAsm->name = metadata.name;
+      parsedAsm->wavefrontSize = metadata.wavefrontSize;
+      parsedAsm->kernargSegmentSize = metadata.kernargSegmentSize;
+      parsedAsm->args = metadata.args;
+      parsedAsm->amdhsa = metadata.amdhsa;
+      parsedAsm->initialRegisterAllocation =
+          metadata.initialRegisterAllocation;
+      parsedAsm->kernargPreloadLength = metadata.kernargPreloadLength;
+      parsedAsm->kernargPreloadOffset = metadata.kernargPreloadOffset;
+    } else {
+      throw std::runtime_error("Failed to parse code object metadata: " +
+                               std::get<std::string>(metaResult));
+    }
   }
 
   initKernargSegment();

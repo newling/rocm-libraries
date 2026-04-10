@@ -3,6 +3,7 @@
 
 #include "race-emulator/Arch.h"
 #include "race-emulator/Emulator.h"
+#include "race-emulator/EmulatorException.h"
 #include "race-emulator/FloatTypes.h"
 #include "test_utils.h"
 #include <filesystem> // Requires C++17
@@ -639,5 +640,50 @@ TEST(Gfx1151, CopyKernelFromCodeObject) {
 
   for (int i = 0; i < N; ++i) {
     EXPECT_EQ(h_out[i], h_in[i]) << "Mismatch at index " << i;
+  }
+}
+
+// Mutation test: remove a barrier from a real kernel, verify the race
+// detector catches it and the diagnostic points to the correct .s lines.
+TEST(Gfx942, MutationTest_RemoveBarrier_DetectsRace) {
+  std::string assembly = load_kernel_file("gfx942/lds_reverse_2.s");
+
+  // Remove the s_barrier to introduce a RAW race between waves.
+  auto barrierPos = assembly.find("s_barrier");
+  ASSERT_NE(barrierPos, std::string::npos) << "s_barrier not found in kernel";
+  std::string mutated = assembly;
+  // Comment out the barrier instead of deleting (preserves line numbers).
+  mutated.replace(barrierPos, 9, "; REMOVED");
+
+  auto co = test::assembleToCodeObject(mutated, "gfx942");
+  // Pass the ORIGINAL .s for source mapping — diagnostics should show the
+  // original lines, so the user sees where the barrier was.
+  Emulator emulator(co.data(), co.size(), std::make_shared<Gfx942>(),
+                    assembly);
+
+  int N = 256;
+  std::vector<int> h_data(N);
+  std::iota(h_data.begin(), h_data.end(), 0);
+  int *d_data = h_data.data();
+  emulator.addKernarg(0, &d_data);
+
+  try {
+    emulator.run(Dim3d(0), {256, 1, 1}, {.raceChecks = true});
+    FAIL() << "Expected race to be detected after removing s_barrier";
+  } catch (const RaceConditionException &e) {
+    std::string msg = e.what();
+    // The diagnostic should mention ds_write_b32 and ds_read_b32 from the
+    // original .s source (not the disassembly).
+    EXPECT_NE(msg.find("ds_write_b32"), std::string::npos)
+        << "Expected ds_write_b32 in diagnostic:\n" << msg;
+    EXPECT_NE(msg.find("ds_read_b32"), std::string::npos)
+        << "Expected ds_read_b32 in diagnostic:\n" << msg;
+    // The diagnostic should show original .s line numbers (16 and 19 for
+    // ds_write_b32 and ds_read_b32 respectively).
+    EXPECT_NE(msg.find("16"), std::string::npos)
+        << "Expected line 16 in diagnostic:\n" << msg;
+    // Print the full diagnostic for manual inspection.
+    fprintf(stderr, "\nRace diagnostic after barrier removal:\n%s\n",
+            msg.c_str());
   }
 }
