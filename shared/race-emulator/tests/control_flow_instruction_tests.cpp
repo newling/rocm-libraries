@@ -82,6 +82,30 @@ TEST(Instructions, S_SwapPc_B64) {
   EXPECT_EQ(wave.getSgpr64(12), 0x200u);
 }
 
+// s_cbranch_scc1 with a numeric offset instead of a label name.
+// llvm-objdump with --show-all-symbols always emits label names, but the
+// numeric format is valid disassembly. Offset is a signed 16-bit dword count
+// from PC+4.
+//
+// Layout:
+//   instruction 0: addr 0x00  (v_mov_b32, PC starts here)
+//   instruction 1: addr 0x04  (s_cbranch_scc1 with offset 1 = skip to addr 0x0C)
+//   instruction 2: addr 0x08  (v_mov_b32, skipped)
+//   instruction 3: addr 0x0C  (s_endpgm, branch target)
+TEST(Instructions, S_CbranchScc1_NumericOffset) {
+  Workgroup wg({.vgprCount = 4,
+                .sgprCount = 4,
+                .waveSize = WaveSize{1},
+                .instructionAddresses = {0x00, 0x04, 0x08, 0x0C}});
+  auto &wave = wg.getWave(0);
+
+  wave.setScc(true);
+  wave.setPc(1);
+  // Offset 1: target = PC(0x04) + 4 + 1*4 = 0x0C = instruction 3.
+  tryExecute(wave, "s_cbranch_scc1 1");
+  EXPECT_EQ(wave.getPc(), 3);
+}
+
 // s_sendmsg is a no-op in the emulator (hardware sends a message to the
 // SQUEUE, which has no emulator equivalent). Verify it executes without
 // throwing and leaves registers unchanged.
