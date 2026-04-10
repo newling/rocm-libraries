@@ -321,15 +321,15 @@ DisassembledKernel parseDisassembly(std::string_view disassemblyText) {
       if (openAngle != std::string::npos && closeAngle != std::string::npos) {
         std::string labelName =
             line.substr(openAngle + 1, closeAngle - openAngle - 1);
-        int tokenIndex = static_cast<int>(result.instructions.size());
+        int instructionIndex = static_cast<int>(result.instructions.size());
 
         // Create a label ParsedLine (skipped by compileLine as a no-op).
-        ParsedLine token(line, labelName + ":", tokenIndex,
+        ParsedLine token(line, labelName + ":", instructionIndex,
                          ParserState::Root, emptySymbolTable);
         token.isLabel = true;
         token.key = labelName;
         result.instructions.push_back(std::move(token));
-        result.labels[labelName] = tokenIndex;
+        result.labels[labelName] = instructionIndex;
 
         // Parse the hex address.
         uint64_t addr = std::stoull(line.substr(0, openAngle), nullptr, 16);
@@ -371,8 +371,8 @@ DisassembledKernel parseDisassembly(std::string_view disassemblyText) {
       }
     }
 
-    int tokenIndex = static_cast<int>(result.instructions.size());
-    ParsedLine token(line, instructionText, tokenIndex, ParserState::Root,
+    int instructionIndex = static_cast<int>(result.instructions.size());
+    ParsedLine token(line, instructionText, instructionIndex, ParserState::Root,
                      emptySymbolTable);
     result.instructions.push_back(std::move(token));
     result.instructionAddresses.push_back(pc);
@@ -395,7 +395,7 @@ SourceMapping buildSourceMapping(const DisassembledKernel &disassembly,
   mapping.instructionToSourceLine.assign(disassembly.instructions.size(), -1);
 
   // Build anchor points from label matching. For each label that exists in
-  // both the disassembly and the source, record (disasm token index, source
+  // both the disassembly and the source, record (disasm instruction index, source
   // line index).
   struct Anchor {
     int disasmIndex;

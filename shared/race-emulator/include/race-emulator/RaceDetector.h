@@ -121,14 +121,13 @@ public:
   }
 
   /// Format a RaceViolation with assembly context for diagnostics.
-  /// getSourceLine(i) returns the original source text for line index i.
-  /// pcMapper translates internal PCs (token indices) to source line indices.
-  /// When pcMapper is null, PCs are used as-is (legacy .s path).
+  /// getSourceLine(i) returns the source text for line index i.
+  /// pcMapper translates instruction indices to source line indices.
   std::string
   decorateException(const RaceViolation &v, int wavePc,
                     WaveRaceState *waveRaceState, int numSourceLines,
                     std::function<std::string_view(int)> getSourceLine,
-                    std::function<int(int)> pcMapper = nullptr) const;
+                    std::function<int(int)> pcMapper) const;
 
   WaveRaceState &getWaveRaceState(int waveIndex);
 

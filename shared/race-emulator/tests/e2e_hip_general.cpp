@@ -732,5 +732,42 @@ TEST(Gfx942, MutationTest_RemoveBarrier_DetectsRace) {
   }
 }
 
+// Race detection without source mapping: diagnostics fall back to showing
+// disassembly lines instead of .s source lines.
+TEST(Gfx942, RaceDetection_WithoutSourceMapping) {
+  std::string assembly = test::loadKernelFile("gfx942/lds_reverse_2.s");
+
+  auto barrierPos = assembly.find("s_barrier");
+  ASSERT_NE(barrierPos, std::string::npos);
+  std::string mutated = assembly;
+  mutated.replace(barrierPos, 9, "; REMOVED");
+
+  auto co = test::assembleToCodeObject(mutated, "gfx942");
+  std::string disasm = test::disassembleCodeObject(co);
+  auto meta = std::get<KernelInfo>(
+      parseCodeObjectMetadata(co.data(), co.size()));
+
+  // No source mapping -- construct with 3-arg constructor.
+  Emulator emulator(std::move(meta), disasm, std::make_shared<Gfx942>());
+
+  int N = 256;
+  std::vector<int> h_data(N);
+  std::iota(h_data.begin(), h_data.end(), 0);
+  int *d_data = h_data.data();
+  emulator.addKernarg(0, &d_data);
+
+  try {
+    emulator.run(Dim3d(0), {256, 1, 1}, {.raceChecks = true});
+    FAIL() << "Expected race to be detected";
+  } catch (const RaceConditionException &e) {
+    std::string msg = e.what();
+    // Diagnostic should still contain instruction mnemonics from disassembly.
+    EXPECT_NE(msg.find("ds_write_b32"), std::string::npos)
+        << "Expected ds_write_b32 in diagnostic:\n" << msg;
+    EXPECT_NE(msg.find("ds_read_b32"), std::string::npos)
+        << "Expected ds_read_b32 in diagnostic:\n" << msg;
+  }
+}
+
 // Tensile mutation test is in e2e_tensilelite.cpp where TensileGemmRunner
 // provides the full kernarg setup needed by Tensile kernels.

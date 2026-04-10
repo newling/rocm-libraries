@@ -198,7 +198,7 @@ void Emulator::initializeWaveState(Workgroup &workgroup, Dim3d wgId,
   if (start == disassembledKernel->labels.end()) {
     // For disassembly, the kernel entry label may differ from the metadata
     // name (e.g. "label_ASM_Start" vs the full Tensile kernel name). Use
-    // the label with the lowest token index (earliest in the code).
+    // the label with the lowest instruction index (earliest in the code).
     int minIndex = std::numeric_limits<int>::max();
     for (auto it = disassembledKernel->labels.begin(); it != disassembledKernel->labels.end(); ++it) {
       if (it->second < minIndex) {
@@ -330,15 +330,17 @@ void Emulator::run(const std::vector<Dim3d> &wgIds, Dim3d blockDim,
             }
             return disassembledKernel->instructions[j].originalLine;
           };
-          std::function<int(int)> mapper = nullptr;
+          std::function<int(int)> mapper;
           if (hasSourceMapping) {
-            mapper = [&](int tokenIdx) -> int {
-              if (tokenIdx >= 0 &&
-                  tokenIdx < static_cast<int>(slm.size()) && slm[tokenIdx] >= 0) {
-                return slm[tokenIdx];
+            mapper = [&](int instructionIdx) -> int {
+              if (instructionIdx >= 0 &&
+                  instructionIdx < static_cast<int>(slm.size()) && slm[instructionIdx] >= 0) {
+                return slm[instructionIdx];
               }
-              return tokenIdx;
+              return instructionIdx;
             };
+          } else {
+            mapper = [](int i) { return i; };
           }
           auto msg = detector->decorateException(
               e.violation, mappedPc,

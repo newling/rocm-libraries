@@ -137,10 +137,7 @@ std::string RaceDetector::decorateException(
     std::function<std::string_view(int)> getSourceLine,
     std::function<int(int)> pcMapper) const {
 
-  // Apply PC mapping if available (translates token indices to source lines).
-  auto mapPc = [&](int pc) -> int {
-    return pcMapper ? pcMapper(pc) : pc;
-  };
+  auto mapPc = [&](int pc) -> int { return pcMapper(pc); };
 
   auto printCodeBlock = [&](std::ostringstream &oss, int startLine, int endLine,
                             std::span<const int> arrowLines) {
