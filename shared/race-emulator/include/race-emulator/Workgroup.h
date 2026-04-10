@@ -35,8 +35,8 @@ struct WorkgroupConfig {
   std::function<void(RaceViolation)> raceHandler = {};
   Profiler *profiler = nullptr;
   const std::map<std::string, int> *labels = nullptr;
-  /// Token index → byte address. Non-null when running from disassembly.
-  const std::vector<uint64_t> *instructionAddresses = nullptr;
+  /// Instruction index to byte address.
+  std::vector<uint64_t> instructionAddresses;
 };
 
 /// Per-workgroup state: owns waves, LDS memory, the execution loop, and an

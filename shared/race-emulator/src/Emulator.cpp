@@ -143,9 +143,7 @@ WorkgroupConfig Emulator::buildWorkgroupConfig(int nWaves,
   wgConfig.completeEmulation = config.completeEmulation;
   wgConfig.waveSchedule = config.waveSchedule;
   wgConfig.labels = &disassembledKernel->labels;
-  if (!disassembledKernel->instructionAddresses.empty()) {
-    wgConfig.instructionAddresses = &disassembledKernel->instructionAddresses;
-  }
+  wgConfig.instructionAddresses = disassembledKernel->instructionAddresses;
   return wgConfig;
 }
 

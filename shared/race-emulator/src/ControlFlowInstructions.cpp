@@ -154,14 +154,14 @@ public:
     bool isNumeric = !target.empty() &&
                      (std::isdigit(static_cast<unsigned char>(target[0])) ||
                       target[0] == '-');
-    if (isNumeric && wave.hasPcTable()) {
+    if (isNumeric) {
       // Numeric offset: signed 16-bit dword count from PC+4. Large unsigned
       // values (e.g. 65520 = 0xFFF0) are negative offsets (backward jumps).
       int raw = std::stoi(target);
       int16_t offset = static_cast<int16_t>(raw & 0xFFFF);
       uint64_t currentPc = wave.getByteAddress(wave.getPc());
       uint64_t targetAddr = currentPc + 4 + static_cast<int64_t>(offset) * 4;
-      labelIndex = wave.getTokenIndexFromByteAddress(targetAddr);
+      labelIndex = wave.getInstructionIndex(targetAddr);
     } else {
       const auto &labels = wave.getLabels();
       auto it = labels.find(target);
@@ -211,7 +211,7 @@ public:
       auto srcReg = wave.getFirstRegister(src);
       assert(srcReg.type == CommonRegister::Type::SGPR);
       uint64_t targetAddr = wave.getSgpr64(srcReg.index);
-      return wave.getTokenIndexFromByteAddress(targetAddr);
+      return wave.getInstructionIndex(targetAddr);
     };
   }
 };
@@ -305,13 +305,8 @@ struct RegisterFactory {
   }
 };
 
-// s_swappc_b64: on real HW this saves PC+4 (return address) to the
+// s_swappc_b64: saves the return byte address (next instruction) to the
 // destination SGPR pair and jumps to the byte address in the source pair.
-//
-// When instructionAddresses is available (disassembly path), this is fully functional:
-// saves the return address (next instruction) to dst and jumps to the
-// byte address in src. When instructionAddresses is not available (.s path), falls back
-// to no-op behaviour (correct only for activationType=0).
 class SOPP_SwapPc : public Instruction {
 public:
   std::function<int()> getExecutor(Wave &wave,
@@ -322,28 +317,22 @@ public:
     auto src = partitioned[2];
 
     return [&wave, dst, src]() {
-      // Without instructionAddresses, byte addresses are synthetic (4 * lineIndex) and
-      // s_getpc + s_add_u32 patterns produce wrong targets. Fall back to
-      // no-op, which is correct for activationType=0 (identity).
-      if (!wave.hasPcTable()) {
-        return wave.getPc() + 1;
-      }
-
       auto dstReg = wave.getFirstRegister(dst);
       auto srcReg = wave.getFirstRegister(src);
       assert(dstReg.type == CommonRegister::Type::SGPR);
       assert(srcReg.type == CommonRegister::Type::SGPR);
 
       uint64_t targetAddr = wave.getSgpr64(srcReg.index);
-      int targetIndex = wave.getTokenIndexFromByteAddress(targetAddr);
+      int targetIndex = wave.getInstructionIndex(targetAddr);
 
       if (targetIndex < 0) {
-        fprintf(stderr, "WARNING: s_swappc_b64 target address 0x%lx not found "
-                        "in instructionAddresses, emulating as no-op.\n", targetAddr);
-        return wave.getPc() + 1;
+        throw std::runtime_error(
+            "s_swappc_b64: target byte address 0x" +
+            std::to_string(targetAddr) +
+            " not found in instructionAddresses");
       }
 
-      // Save return address (next instruction after this one).
+      // Save return byte address (next instruction after this one).
       wave.setSgpr64(dstReg.index, wave.getByteAddress(wave.getPc() + 1));
       return targetIndex;
     };

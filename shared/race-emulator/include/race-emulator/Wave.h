@@ -170,27 +170,17 @@ public:
     return *labels;
   }
 
-  /// Whether real byte-address PCs are available (disassembly path).
-  bool hasPcTable() const { return instructionAddresses != nullptr; }
-
-  /// Return the real byte address for the given token index, or fall back
-  /// to the synthetic 4*index when instructionAddresses is not available.
-  uint64_t getByteAddress(int tokenIndex) const {
-    if (instructionAddresses && tokenIndex >= 0 &&
-        static_cast<size_t>(tokenIndex) < instructionAddresses->size()) {
-      return (*instructionAddresses)[tokenIndex];
-    }
-    return static_cast<uint64_t>(4 * tokenIndex);
+  /// Return the byte address for the given instruction index.
+  uint64_t getByteAddress(int instructionIndex) const {
+    assert(instructionIndex >= 0 &&
+           static_cast<size_t>(instructionIndex) < instructionAddresses.size());
+    return instructionAddresses[instructionIndex];
   }
 
-  /// Look up the token index for a byte address. Returns -1 if not found.
-  /// Only works when instructionAddresses is available.
-  int getTokenIndexFromByteAddress(uint64_t addr) const {
-    if (!instructionAddresses) {
-      return static_cast<int>(addr / 4);
-    }
-    for (size_t i = 0; i < instructionAddresses->size(); ++i) {
-      if ((*instructionAddresses)[i] == addr) {
+  /// Look up the instruction index for a byte address. Returns -1 if not found.
+  int getInstructionIndex(uint64_t byteAddress) const {
+    for (size_t i = 0; i < instructionAddresses.size(); ++i) {
+      if (instructionAddresses[i] == byteAddress) {
         return static_cast<int>(i);
       }
     }
@@ -238,8 +228,8 @@ private:
   // Pointer to the label map for the assembly.
   const std::map<std::string, int> *labels;
 
-  // Token index → byte address. Null when running from .s (line-index PCs).
-  const std::vector<uint64_t> *instructionAddresses = nullptr;
+  // Instruction index to byte address.
+  std::vector<uint64_t> instructionAddresses;
 
   std::vector<std::function<int()>> instructionCache;
 

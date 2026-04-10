@@ -46,48 +46,23 @@ TEST(Instructions, SAndSaveExecB64) {
   EXPECT_TRUE(wave.getScc());         // new exec non-zero
 }
 
-// Without instructionAddresses, s_swappc_b64 falls back to no-op (advances
-// PC by 1, does not modify registers).
-TEST(Instructions, S_SwapPc_B64_NoOp) {
-  Workgroup wg({.vgprCount = 4, .sgprCount = 16, .waveSize = WaveSize{32}});
-  auto &wave = wg.getWave(0);
-
-  wave.setSgpr(4, 0xAAAAAAAA);
-  wave.setSgpr(5, 0xBBBBBBBB);
-  wave.setSgpr(12, 0x12345678);
-  wave.setSgpr(13, 0x9ABCDEF0);
-  wave.setVgpr(0, 0, 42);
-
-  int pcBefore = wave.getPc();
-  tryExecute(wave, "s_swappc_b64 s[4:5], s[12:13]");
-  EXPECT_EQ(wave.getPc(), pcBefore + 1);
-
-  // No-op: SGPRs untouched.
-  EXPECT_EQ(wave.getSgpr(4), 0xAAAAAAAAu);
-  EXPECT_EQ(wave.getSgpr(5), 0xBBBBBBBBu);
-  EXPECT_EQ(wave.getSgpr(12), 0x12345678u);
-  EXPECT_EQ(wave.getSgpr(13), 0x9ABCDEF0u);
-  EXPECT_EQ(wave.getVgpr(0, 0), 42u);
-}
-
-// With instructionAddresses, s_swappc_b64 saves the return byte address
+// s_swappc_b64 saves the return byte address
 // (next instruction) to the destination SGPR pair and jumps to the byte
 // address in the source SGPR pair.
 //
 // Simulated layout (4 instructions):
-//   token 0: addr 0x100  (some instruction, the swappc lives here)
-//   token 1: addr 0x108  (return point)
-//   token 2: addr 0x200  (jump target)
-//   token 3: addr 0x208  (instruction after target)
-TEST(Instructions, S_SwapPc_B64_WithPcTable) {
-  std::vector<uint64_t> addresses = {0x100, 0x108, 0x200, 0x208};
+//   instruction 0: addr 0x100  (the swappc lives here)
+//   instruction 1: addr 0x108  (return point)
+//   instruction 2: addr 0x200  (jump target)
+//   instruction 3: addr 0x208  (instruction after target)
+TEST(Instructions, S_SwapPc_B64) {
   Workgroup wg({.vgprCount = 4,
                 .sgprCount = 16,
                 .waveSize = WaveSize{32},
-                .instructionAddresses = &addresses});
+                .instructionAddresses = {0x100, 0x108, 0x200, 0x208}});
   auto &wave = wg.getWave(0);
 
-  // Source SGPRs hold the target byte address (0x200 = token 2).
+  // Source SGPRs hold the target byte address (0x200 = instruction 2).
   wave.setSgpr64(12, 0x200);
 
   // Destination SGPRs pre-filled with sentinels.
@@ -97,7 +72,7 @@ TEST(Instructions, S_SwapPc_B64_WithPcTable) {
   wave.setPc(0);
   tryExecute(wave, "s_swappc_b64 s[4:5], s[12:13]");
 
-  // PC should jump to token index 2 (byte address 0x200).
+  // PC should jump to instruction index 2 (byte address 0x200).
   EXPECT_EQ(wave.getPc(), 2);
 
   // Destination SGPRs should hold the return byte address (0x108 = token 1).
