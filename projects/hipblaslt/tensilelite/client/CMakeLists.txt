@@ -53,7 +53,11 @@ endif()
 
 if(HIPBLASLT_ENABLE_RACE_EMULATOR)
     target_link_libraries(tensilelite-client PRIVATE roc::race-emulator)
-    target_compile_definitions(tensilelite-client PRIVATE HIPBLASLT_HAS_RACE_EMULATOR)
+    target_compile_definitions(tensilelite-client PRIVATE
+        HIPBLASLT_HAS_RACE_EMULATOR
+        LLVM_MC_PATH="${LLVM_MC}"
+        LLVM_OBJDUMP_PATH="${LLVM_OBJDUMP}"
+    )
 endif()
 
 add_subdirectory(include)

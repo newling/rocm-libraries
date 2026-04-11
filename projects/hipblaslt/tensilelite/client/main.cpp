@@ -62,7 +62,10 @@
 #endif
 
 #ifdef HIPBLASLT_HAS_RACE_EMULATOR
+#include "race-emulator/Arch.h"
+#include "race-emulator/CodeObject.h"
 #include "race-emulator/Emulator.h"
+#include "race-emulator/Parsing.h"
 #endif
 
 #include <chrono>
@@ -83,63 +86,54 @@ namespace
 #ifdef HIPBLASLT_HAS_RACE_EMULATOR
     namespace fs = std::filesystem;
 
-    std::string getAsmFilename(const std::string& yamlFilename, const std::string& kernelName)
+    /// Find the .s source file for a kernel. Tensile generates per-kernel .s
+    /// files in build_tmp/.../assembly/. We search by content because the
+    /// filenames are mangled hashes.
+    std::string findAssemblySource(const std::string& yamlFilename,
+                                   const std::string& kernelName)
     {
         fs::path yamlPath(yamlFilename);
-        // From: .../source/library/TensileLibrary.yaml
-        // To:   .../source/build_tmp/SOURCE/assembly/
         if(!yamlPath.has_parent_path())
-        {
             throw std::runtime_error("Invalid filename path structure: " + yamlFilename);
-        }
 
-        // yamlPath.parent_path() -> .../source/library
-        // .parent_path()         -> .../source
         auto sourceDir = yamlPath.parent_path().parent_path();
         auto searchDir = sourceDir / "build_tmp" / "SOURCE" / "assembly";
         if(!fs::exists(searchDir) || !fs::is_directory(searchDir))
-        {
             throw std::runtime_error("Assembly directory not found at: " + searchDir.string());
-        }
 
-        // Iterate through .s files and search for kernelName (mangled filenames make this a requirement).
         for(const auto& entry : fs::directory_iterator(searchDir))
         {
-            if(entry.is_regular_file() && entry.path().extension() == ".s")
-            {
+            if(!entry.is_regular_file() || entry.path().extension() != ".s")
+                continue;
 
+            // Match by filename (custom kernels) or by content (generated kernels).
+            bool match = entry.path().stem().string() == kernelName;
+            if(!match)
+            {
                 std::ifstream file(entry.path());
                 if(!file.is_open())
-                {
-                    continue; // Skip files we can't read
-                }
+                    continue;
 
                 std::string line;
-                size_t      lineCount = 0;
-
-                // Search first 100 lines only (we expect to find kernel name at start of file).
-                while(std::getline(file, line) && lineCount < 100)
+                for(size_t i = 0; std::getline(file, line) && i < 100; ++i)
                 {
                     if(line.find(kernelName) != std::string::npos)
                     {
-                        return entry.path().string();
+                        match = true;
+                        break;
                     }
-                    lineCount++;
                 }
+            }
+
+            if(match)
+            {
+                std::ifstream src(entry.path());
+                return std::string((std::istreambuf_iterator<char>(src)),
+                                   std::istreambuf_iterator<char>());
             }
         }
 
-        // 4. Throw if not found after checking all files
         throw std::runtime_error("No assembly file found containing kernel: " + kernelName);
-    };
-
-    std::string loadAsmString(const std::string& asmFilename)
-    {
-        std::ifstream asmFile(asmFilename);
-        if(!asmFile.is_open())
-            throw std::runtime_error("Failed to open assembly file: " + asmFilename);
-        return std::string((std::istreambuf_iterator<char>(asmFile)),
-                           std::istreambuf_iterator<char>());
     }
 
     struct TargetArchHardware
@@ -164,15 +158,69 @@ namespace
         return {hardware, arch};
     }
 
+    /// Run a shell command, return stdout. Throws on failure.
+    std::string captureCommand(const std::string& cmd)
+    {
+        auto tmpPath = fs::temp_directory_path() / "race_emu_cmd.txt";
+        int status = std::system((cmd + " > " + tmpPath.string() + " 2>&1").c_str());
+        std::ifstream ifs(tmpPath);
+        std::string result((std::istreambuf_iterator<char>(ifs)),
+                            std::istreambuf_iterator<char>());
+        fs::remove(tmpPath);
+        if(status != 0)
+            throw std::runtime_error("Command failed: " + cmd + "\n" + result);
+        return result;
+    }
+
+    /// Assemble .s source to a temporary .co, parse metadata and disassemble,
+    /// then construct an Emulator. All temp files are cleaned up.
+    raceemulator::Emulator emulatorFromAssembly(
+        std::string_view assembly,
+        std::shared_ptr<raceemulator::Architecture> arch)
+    {
+        auto sPath = fs::temp_directory_path() / "race_emu.s";
+        auto coPath = fs::temp_directory_path() / "race_emu.co";
+        { std::ofstream ofs(sPath); ofs << assembly; }
+
+        captureCommand(std::string(LLVM_MC_PATH) +
+                       " -triple=amdgcn-amd-amdhsa -mcpu=" + arch->getName() +
+                       " -filetype=obj " + sPath.string() +
+                       " -o " + coPath.string());
+
+        // Read .co bytes for metadata parsing.
+        std::ifstream ifs(coPath, std::ios::binary | std::ios::ate);
+        auto size = static_cast<size_t>(ifs.tellg());
+        std::vector<uint8_t> coData(size);
+        ifs.seekg(0);
+        ifs.read(reinterpret_cast<char*>(coData.data()), size);
+
+        auto metaResult = raceemulator::parseCodeObjectMetadata(
+            coData.data(), coData.size());
+        if(std::holds_alternative<std::string>(metaResult))
+            throw std::runtime_error("Failed to parse code object: " +
+                                     std::get<std::string>(metaResult));
+
+        // Disassemble the .co.
+        std::string disasm = captureCommand(
+            std::string(LLVM_OBJDUMP_PATH) + " -d --show-all-symbols " +
+            coPath.string());
+
+        fs::remove(sPath);
+        fs::remove(coPath);
+
+        return raceemulator::Emulator(
+            std::get<raceemulator::KernelInfo>(std::move(metaResult)),
+            disasm, std::move(arch));
+    }
+
     void runEmulatorOnKernel(const TensileLite::KernelInvocation&        kernel,
                              const std::string&                          libraryFilename,
                              std::shared_ptr<raceemulator::Architecture> arch,
                              const std::vector<raceemulator::Dim3d>&     workgroupIds,
                              const raceemulator::RunConfig&              config)
     {
-        auto asmString = loadAsmString(
-            getAsmFilename(libraryFilename, kernel.kernelName));
-        auto emulator = raceemulator::Emulator(asmString, arch);
+        auto assembly = findAssemblySource(libraryFilename, kernel.kernelName);
+        auto emulator = emulatorFromAssembly(assembly, arch);
         emulator.addAllKernargs(kernel.args.data());
 
         int blockSize = kernel.workGroupSize.x
@@ -1463,6 +1511,27 @@ int main(int argc, const char* argv[])
                                     }
                                 }
 
+                                // Race checking runs before GPU warmup (no GPU needed).
+                                if(args["check-for-races"].as<int>() != 0)
+                                {
+                                    ScopedTimer timer("check_for_races");
+#ifdef HIPBLASLT_HAS_RACE_EMULATOR
+                                    bool ran = checkForRaces(
+                                        kernels, filename, hardware->archName());
+                                    if(!ran)
+                                    {
+                                        throw std::runtime_error(
+                                            "Failed to run race checks (multi-kernel "
+                                            "GEMM?)");
+                                    }
+#else
+                                    throw std::runtime_error(
+                                        "Race checking requested (--check-for-races) "
+                                        "but this build was compiled without "
+                                        "HIPBLASLT_ENABLE_RACE_EMULATOR");
+#endif
+                                }
+
                                 size_t       warmupInvocations = listeners.numWarmupRuns();
                                 size_t       warmupEventCount  = kernels[0].size();
                                 TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
@@ -1483,29 +1552,6 @@ int main(int argc, const char* argv[])
                                         ScopedTimer timer("validate_warmups");
                                         listeners.validateWarmups(
                                             inputs, warmupStartEvents, warmupStopEvents);
-                                    }
-                                    {
-
-                                        ScopedTimer timer("check_for_races");
-                                        // If race checks are enabled, do race checking after first warmup
-                                        if(args["check-for-races"].as<int>() != 0)
-                                        {
-#ifdef HIPBLASLT_HAS_RACE_EMULATOR
-                                            bool ran = checkForRaces(
-                                                kernels, filename, hardware->archName());
-                                            if(!ran)
-                                            {
-                                                throw std::runtime_error(
-                                                    "Failed to run race checks (multi-kernel "
-                                                    "GEMM?)");
-                                            }
-#else
-                                            throw std::runtime_error(
-                                                "Race checking requested (--check-for-races) "
-                                                "but this build was compiled without "
-                                                "HIPBLASLT_ENABLE_RACE_EMULATOR");
-#endif
-                                        }
                                     }
 
                                     {

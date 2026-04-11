@@ -64,6 +64,11 @@ if(HIPBLASLT_ENABLE_RACE_EMULATOR)
             roc::race-emulator
             GTest::gtest_main
     )
+    find_program(LLVM_MC llvm-mc REQUIRED)
+    target_compile_definitions(race-emulator-integration-test PRIVATE
+        LLVM_MC_PATH="${LLVM_MC}"
+        LLVM_OBJDUMP_PATH="${LLVM_OBJDUMP}"
+    )
     gtest_discover_tests(race-emulator-integration-test TIMEOUT 30)
 endif()
 
