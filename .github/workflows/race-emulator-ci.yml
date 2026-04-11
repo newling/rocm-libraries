@@ -60,7 +60,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Install dependencies
-        run: sudo apt-get install -y ninja-build
+        run: sudo apt-get install -y ninja-build llvm
 
       - name: Configure
         env:
@@ -91,7 +91,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Install dependencies
-        run: sudo apt-get install -y ninja-build
+        run: sudo apt-get install -y ninja-build llvm
 
       # Build as a static library so that all instrumented code ends up in
       # the test executable. With a shared library, llvm-cov would only see
@@ -153,7 +153,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Install dependencies
-        run: sudo apt-get install -y ninja-build clang-tidy
+        run: sudo apt-get install -y ninja-build clang-tidy llvm
 
       # CMAKE_CXX_CLANG_TIDY integrates clang-tidy into the build: each
       # source file is analyzed as it compiles. Findings are controlled by
@@ -183,6 +183,9 @@ jobs:
       # Set up MSVC compiler environment (cl.exe, link.exe, etc. in PATH).
       - name: Configure MSVC
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      - name: Install LLVM
+        run: choco install llvm --yes
 
       # Static library because MSVC shared libraries need dllexport/dllimport
       # annotations to generate the .lib import library. On Linux the default

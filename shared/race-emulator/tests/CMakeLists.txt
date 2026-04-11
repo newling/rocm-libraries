@@ -16,6 +16,24 @@ if(NOT GTest_FOUND)
     FetchContent_MakeAvailable(googletest)
 endif()
 
+# Find LLVM tools required for assembling and disassembling test kernels.
+# Search for both unsuffixed and version-suffixed names (e.g. llvm-mc-18).
+find_program(LLVM_MC
+    NAMES llvm-mc llvm-mc-18 llvm-mc-19 llvm-mc-20
+    HINTS ENV LLVM_BIN_DIR
+    DOC "Path to llvm-mc (required for race-emulator tests)")
+find_program(LLVM_OBJDUMP
+    NAMES llvm-objdump llvm-objdump-18 llvm-objdump-19 llvm-objdump-20
+    HINTS ENV LLVM_BIN_DIR
+    DOC "Path to llvm-objdump (required for race-emulator tests)")
+
+if(NOT LLVM_MC OR NOT LLVM_OBJDUMP)
+    message(FATAL_ERROR
+        "llvm-mc and llvm-objdump are required for race-emulator tests.\n"
+        "Set -DLLVM_MC=/path/to/llvm-mc -DLLVM_OBJDUMP=/path/to/llvm-objdump\n"
+        "or add them to PATH or set LLVM_BIN_DIR environment variable.")
+endif()
+
 add_executable(race-emulator-tests
     e2e_hip_general.cpp
     e2e_hip_kittens.cpp
@@ -32,21 +50,6 @@ add_executable(race-emulator-tests
     util_tests.cpp
     float_types_tests.cpp
 )
-
-# Find LLVM tools required for assembling and disassembling test kernels.
-find_program(LLVM_MC llvm-mc
-    HINTS ENV LLVM_BIN_DIR
-    DOC "Path to llvm-mc (required for race-emulator tests)")
-find_program(LLVM_OBJDUMP llvm-objdump
-    HINTS ENV LLVM_BIN_DIR
-    DOC "Path to llvm-objdump (required for race-emulator tests)")
-
-if(NOT LLVM_MC OR NOT LLVM_OBJDUMP)
-    message(FATAL_ERROR
-        "llvm-mc and llvm-objdump are required for race-emulator tests.\n"
-        "Set -DLLVM_MC=/path/to/llvm-mc -DLLVM_OBJDUMP=/path/to/llvm-objdump\n"
-        "or add them to PATH or set LLVM_BIN_DIR environment variable.")
-endif()
 message(STATUS "race-emulator tests: llvm-mc=${LLVM_MC}")
 message(STATUS "race-emulator tests: llvm-objdump=${LLVM_OBJDUMP}")
 
