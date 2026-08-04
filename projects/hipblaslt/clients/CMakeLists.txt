@@ -93,6 +93,7 @@ endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
         roc::hipblaslt
+        roc::host-validation-adapters
         OpenMP::OpenMP_CXX
         ${LAPACK_LIBRARIES}
         ${HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES}
@@ -145,7 +146,12 @@ target_link_libraries(hipblaslt-api-overhead PRIVATE hipblaslt-clients-common hi
 target_include_directories(hipblaslt-api-overhead PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/samples/common")
 
 add_executable(hipblaslt-bench-groupedgemm-fixed-mk "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_groupedgemm_fixed_mk.cpp")
-target_link_libraries(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE hipblaslt-clients-common hip::device)
+target_link_libraries(hipblaslt-bench-groupedgemm-fixed-mk
+    PRIVATE
+        hipblaslt-clients-common
+        hip::device
+        roc::host-validation
+)
 
 add_executable(hipblaslt-bench-extop-layernorm "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_layernorm.cpp")
 target_link_libraries(hipblaslt-bench-extop-layernorm PRIVATE hipblaslt-clients-common hip::device)
@@ -213,6 +219,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common
+            roc::host-validation
             roc::tensilelite-host
             GTest::gtest
             OpenMP::OpenMP_CXX
