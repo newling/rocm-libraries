@@ -1149,9 +1149,16 @@ namespace TensileLite
                 return false;
             if (problem.boundIndices()[0].aMirror || problem.boundIndices()[0].bMirror)
                 return false;
-            if (problem.useGradient() || problem.outputAmaxD() || problem.useE() ||
-                problem.useScaleCD() || problem.useGateResidual())
+            if (problem.useGradient() && !problem.useE()) return false;
+            if (problem.useGradient() && problem.useBias() &&
+                problem.biasSrc() != ContractionProblemGemm::A &&
+                problem.biasSrc() != ContractionProblemGemm::B &&
+                problem.biasSrc() != ContractionProblemGemm::D)
                 return false;
+            const bool useStandaloneEpilogue = problem.useGradient() ||
+                                               problem.outputAmaxD() || problem.useE() ||
+                                               problem.useScaleCD() ||
+                                               problem.useGateResidual();
             if ((problem.mxBlockA() > 0) != (problem.mxBlockB() > 0)) return false;
             if ((problem.useBias() && inputs.bias == nullptr) ||
                 (problem.useScaleAlphaVec() && inputs.scaleAlphaVec == nullptr) ||
@@ -1159,10 +1166,18 @@ namespace TensileLite
                  (inputs.scaleA == nullptr || inputs.scaleB == nullptr)) ||
                 (problem.mxBlockA() > 0 && (inputs.mxsa == nullptr || inputs.mxsb == nullptr)))
                 return false;
+            if ((problem.useE() && inputs.e == nullptr) ||
+                (problem.outputAmaxD() && inputs.amaxD == nullptr) ||
+                (problem.useScaleCD() &&
+                 (inputs.scaleC == nullptr || inputs.scaleD == nullptr)) ||
+                (problem.useGateResidual() && inputs.gateResidual == nullptr))
+                return false;
             if (inputs.a == nullptr || inputs.b == nullptr || inputs.c == nullptr ||
                 inputs.d == nullptr || inputs.batchA != nullptr || inputs.batchB != nullptr ||
-                inputs.batchC != nullptr || inputs.batchD != nullptr || inputs.batchOffsetA != 0 ||
-                inputs.batchOffsetB != 0 || inputs.batchOffsetC != 0 || inputs.batchOffsetD != 0)
+                inputs.batchC != nullptr || inputs.batchD != nullptr ||
+                inputs.batchBias != nullptr || inputs.batchGateResidual != nullptr ||
+                inputs.batchOffsetA != 0 || inputs.batchOffsetB != 0 ||
+                inputs.batchOffsetC != 0 || inputs.batchOffsetD != 0)
                 return false;
             if (problem.a().dataType() == rocisa::DataType::Float6 ||
                 problem.a().dataType() == rocisa::DataType::BFloat6 ||
@@ -1177,12 +1192,14 @@ namespace TensileLite
             ScalarType accumulatorType;
             ScalarType computeTypeA;
             ScalarType computeTypeB;
+            ScalarType betaType;
             try {
                 typeA = toHostValidationScalarType(problem.a().dataType());
                 typeB = toHostValidationScalarType(problem.b().dataType());
                 typeC = toHostValidationScalarType(problem.c().dataType());
                 typeD = toHostValidationScalarType(problem.d().dataType());
                 accumulatorType = toHostValidationScalarType(problem.computeType());
+                betaType = toHostValidationScalarType(problem.betaType());
                 computeTypeA = problem.computeInputTypeA() == rocisa::DataType::None
                                    ? typeA
                                    : toHostValidationScalarType(problem.computeInputTypeA());
@@ -1193,8 +1210,13 @@ namespace TensileLite
                 return false;
             }
             if (accumulatorType != ScalarType::Float32 && accumulatorType != ScalarType::Float64 &&
+                accumulatorType != ScalarType::Int32 &&
                 accumulatorType != ScalarType::ComplexFloat32 &&
                 accumulatorType != ScalarType::ComplexFloat64)
+                return false;
+            if (useStandaloneEpilogue &&
+                (accumulatorType == ScalarType::ComplexFloat32 ||
+                 accumulatorType == ScalarType::ComplexFloat64))
                 return false;
             if ((problem.useScaleAB() == "Scalar" || problem.useScaleAB() == "Vector") &&
                 (computeTypeA != typeA || computeTypeB != typeB))
@@ -1208,6 +1230,8 @@ namespace TensileLite
                         return {constVariantCast<float>(value), 0.0};
                     case rocisa::DataType::Double:
                         return {constVariantCast<double>(value), 0.0};
+                    case rocisa::DataType::Int32:
+                        return {static_cast<double>(constVariantCast<int32_t>(value)), 0.0};
                     case rocisa::DataType::ComplexFloat: {
                         auto converted = constVariantCast<std::complex<float>>(value);
                         return {converted.real(), converted.imag()};
@@ -1266,6 +1290,13 @@ namespace TensileLite
                 alpha *= scalarFromStorage(alphaType, inputs.scaleA) *
                          scalarFromStorage(alphaType, inputs.scaleB);
 
+            std::complex<double> outputScale = {1.0, 0.0};
+            if (problem.useScaleCD()) {
+                if (beta != std::complex<double>(0.0, 0.0))
+                    beta *= scalarFromStorage(betaType, inputs.scaleC);
+                outputScale = scalarFromStorage(betaType, inputs.scaleD);
+            }
+
             double activationParameter0 = 0.0;
             double activationParameter1 = 0.0;
             try {
@@ -1302,11 +1333,11 @@ namespace TensileLite
             const size_t n = problem.freeSizeB(0);
             const size_t k = problem.boundSize(0);
             const size_t batches = problem.batchSize(0);
-            if (problem.useBias() && problem.useScaleAlphaVec() && m == n) return false;
             const OutputSelection globalSelection
                 = OutputSelection::primeStride(problem.d().totalLogicalElements(),
                                                problem.d().totalAllocatedElements(),
                                                elementsToValidate);
+            if (useStandaloneEpilogue && !globalSelection.selectsAll()) return false;
             std::vector<std::vector<size_t>> selectedByBatch;
             if(!globalSelection.selectsAll())
             {
@@ -1342,6 +1373,7 @@ namespace TensileLite
                                                        problem.d().totalAllocatedBytes());
             std::optional<ScalarType> biasType;
             std::span<const std::byte> biasStorage;
+            std::span<std::byte> biasOutputStorage;
             if (problem.useBias()) {
                 try {
                     biasType = toHostValidationScalarType(problem.bias().dataType());
@@ -1350,6 +1382,50 @@ namespace TensileLite
                 }
                 biasStorage = std::span<const std::byte>(static_cast<const std::byte*>(inputs.bias),
                                                          problem.bias().totalAllocatedBytes());
+                if (problem.useGradient())
+                    biasOutputStorage = std::span<std::byte>(
+                        static_cast<std::byte*>(const_cast<void*>(inputs.bias)),
+                        problem.bias().totalAllocatedBytes());
+            }
+            std::optional<ScalarType> auxiliaryType;
+            std::span<std::byte> auxiliaryStorage;
+            if (problem.useE()) {
+                auto const& auxiliary =
+                    problem.tensors()[ContractionProblemGemm::TENSOR::E];
+                try {
+                    auxiliaryType = toHostValidationScalarType(auxiliary.dataType());
+                } catch (std::invalid_argument const&) {
+                    return false;
+                }
+                auxiliaryStorage = std::span<std::byte>(
+                    static_cast<std::byte*>(inputs.e), auxiliary.totalAllocatedBytes());
+            }
+            std::optional<ScalarType> gateType;
+            std::span<const std::byte> gateStorage;
+            if (problem.useGateResidual()) {
+                auto const& gate =
+                    problem.tensors()[ContractionProblemGemm::TENSOR::GATE_RESIDUAL];
+                try {
+                    gateType = toHostValidationScalarType(gate.dataType());
+                } catch (std::invalid_argument const&) {
+                    return false;
+                }
+                gateStorage = std::span<const std::byte>(
+                    static_cast<const std::byte*>(inputs.gateResidual),
+                    gate.totalAllocatedBytes());
+            }
+            std::optional<ScalarType> amaxType;
+            std::span<std::byte> amaxStorage;
+            if (problem.outputAmaxD()) {
+                auto const& amax =
+                    problem.tensors()[ContractionProblemGemm::TENSOR::AMAXD];
+                try {
+                    amaxType = toHostValidationScalarType(amax.dataType());
+                } catch (std::invalid_argument const&) {
+                    return false;
+                }
+                amaxStorage = std::span<std::byte>(
+                    static_cast<std::byte*>(inputs.amaxD), amax.totalAllocatedBytes());
             }
             const size_t scaleAlphaLength = problem.getParams().factorDim() == 0 ? m : n;
             std::span<const std::byte> scaleAlphaStorage;
@@ -1418,6 +1494,22 @@ namespace TensileLite
                     operandB.blockScale = BlockScaleBinding{runtimeScaleB->view(), mxBlockB};
                 }
 
+                const TensorView logicalA = operandA.values;
+                const TensorView logicalB = operandB.values;
+                MutableTensorView productOutput(
+                    typeD,
+                    Layout(Shape{m, n},
+                           {static_cast<ptrdiff_t>(problem.d().strides()[indexMD]),
+                            static_cast<ptrdiff_t>(problem.d().strides()[indexND])},
+                           offsetD),
+                    dStorage);
+                std::optional<Tensor> intermediate;
+                MutableTensorView gemmOutput = productOutput;
+                if (useStandaloneEpilogue) {
+                    intermediate.emplace(accumulatorType, Shape{m, n});
+                    gemmOutput = intermediate->mutableView();
+                }
+
                 GemmProblem runtimeProblem(
                     std::move(operandA), std::move(operandB),
                     TensorView(typeC,
@@ -1426,19 +1518,15 @@ namespace TensileLite
                                        static_cast<ptrdiff_t>(problem.c().strides()[indexND])},
                                       offsetC),
                                cStorage),
-                    MutableTensorView(
-                        typeD,
-                        Layout(Shape{m, n},
-                               {static_cast<ptrdiff_t>(problem.d().strides()[indexMD]),
-                                static_cast<ptrdiff_t>(problem.d().strides()[indexND])},
-                               offsetD),
-                        dStorage),
+                    gemmOutput,
                     accumulatorType);
                 runtimeProblem.epilogue.alpha = alpha;
                 runtimeProblem.epilogue.beta = beta;
-                runtimeProblem.epilogue.activation = activation;
-                runtimeProblem.epilogue.activationParameter0 = activationParameter0;
-                runtimeProblem.epilogue.activationParameter1 = activationParameter1;
+                if (!useStandaloneEpilogue) {
+                    runtimeProblem.epilogue.activation = activation;
+                    runtimeProblem.epilogue.activationParameter0 = activationParameter0;
+                    runtimeProblem.epilogue.activationParameter1 = activationParameter1;
+                }
                 if (problem.useScaleAlphaVec())
                     runtimeProblem.epilogue.scaleAlpha = VectorBinding{
                         TensorView(alphaType, Layout::contiguous(Shape{scaleAlphaLength}),
@@ -1451,22 +1539,28 @@ namespace TensileLite
                     runtimeProblem.epilogue.scaleB =
                         TensorView(alphaType, Layout::contiguous(Shape{n}), scaleBStorage);
                 }
+                std::optional<VectorBinding> runtimeBias;
+                ptrdiff_t runtimeBiasOffset = 0;
+                size_t runtimeBiasLength = 0;
+                MatrixAxis runtimeBiasAxis = MatrixAxis::Row;
                 if (problem.useBias()) {
                     std::vector<int64_t> biasCoordinate(problem.bias().dimensions(), 0);
                     if (biasCoordinate.size() > 2) biasCoordinate[2] = static_cast<int64_t>(batch);
-                    const ptrdiff_t biasOffset =
+                    runtimeBiasOffset =
                         static_cast<ptrdiff_t>(problem.bias().index(biasCoordinate));
-                    const size_t biasLength = problem.bias().sizes()[0];
-                    MatrixAxis biasAxis =
+                    runtimeBiasLength = problem.bias().sizes()[0];
+                    runtimeBiasAxis =
                         problem.getParams().factorDim() == 0 ? MatrixAxis::Row : MatrixAxis::Column;
-                    if (biasLength == m && biasLength != n)
-                        biasAxis = MatrixAxis::Row;
-                    else if (biasLength == n && biasLength != m)
-                        biasAxis = MatrixAxis::Column;
-                    runtimeProblem.epilogue.bias = VectorBinding{
-                        TensorView(*biasType, Layout(Shape{biasLength}, {1}, biasOffset),
+                    if (runtimeBiasLength == m && runtimeBiasLength != n)
+                        runtimeBiasAxis = MatrixAxis::Row;
+                    else if (runtimeBiasLength == n && runtimeBiasLength != m)
+                        runtimeBiasAxis = MatrixAxis::Column;
+                    runtimeBias = VectorBinding{
+                        TensorView(*biasType,
+                                   Layout(Shape{runtimeBiasLength}, {1}, runtimeBiasOffset),
                                    biasStorage),
-                        biasAxis};
+                        runtimeBiasAxis};
+                    if (!useStandaloneEpilogue) runtimeProblem.epilogue.bias = runtimeBias;
                 }
                 runtimeProblem.mathMode =
                     accumulatorType == ScalarType::Float32 &&
@@ -1477,6 +1571,80 @@ namespace TensileLite
                     runtimeProblem.outputSelection
                         = OutputSelection::explicitIndices(selectedByBatch[batch]);
                 referenceGemm(runtimeProblem);
+
+                if (useStandaloneEpilogue) {
+                    EpilogueProblem epilogue(
+                        intermediate->view(), productOutput, accumulatorType);
+                    if (!problem.useGradient()) epilogue.bias = runtimeBias;
+                    epilogue.activation = activation;
+                    epilogue.activationParameter0 = activationParameter0;
+                    epilogue.activationParameter1 = activationParameter1;
+                    epilogue.outputScale = outputScale;
+                    std::optional<Tensor> biasWorkspace;
+                    if (problem.useGradient() && problem.useBias() &&
+                        problem.biasSrc() == ContractionProblemGemm::D) {
+                        biasWorkspace.emplace(accumulatorType, Shape{m, n});
+                        epilogue.rawOutput = biasWorkspace->mutableView();
+                    }
+                    if (problem.useE()) {
+                        auto const& auxiliary =
+                            problem.tensors()[ContractionProblemGemm::TENSOR::E];
+                        const ptrdiff_t offsetE =
+                            static_cast<ptrdiff_t>(batch * auxiliary.strides()[batchD]);
+                        const Layout auxiliaryLayout(
+                            Shape{m, n},
+                            {static_cast<ptrdiff_t>(auxiliary.strides()[indexMD]),
+                             static_cast<ptrdiff_t>(auxiliary.strides()[indexND])},
+                            offsetE);
+                        if (problem.useGradient()) {
+                            epilogue.auxiliaryInput = TensorView(
+                                *auxiliaryType, auxiliaryLayout, auxiliaryStorage);
+                            epilogue.activationApplication = ActivationApplication::Gradient;
+                        } else {
+                            epilogue.auxiliaryOutput = MutableTensorView(
+                                *auxiliaryType, auxiliaryLayout, auxiliaryStorage);
+                        }
+                    }
+                    if (problem.useGateResidual()) {
+                        auto const& gate = problem.tensors()
+                            [ContractionProblemGemm::TENSOR::GATE_RESIDUAL];
+                        const ptrdiff_t offsetGate =
+                            static_cast<ptrdiff_t>(batch * gate.strides()[batchD]);
+                        epilogue.gateResidual = TensorView(
+                            *gateType,
+                            Layout(Shape{m, n},
+                                   {static_cast<ptrdiff_t>(gate.strides()[indexMD]),
+                                    static_cast<ptrdiff_t>(gate.strides()[indexND])},
+                                   offsetGate),
+                            gateStorage);
+                    }
+                    if (problem.outputAmaxD()) {
+                        epilogue.amax = MutableTensorView(
+                            *amaxType, Layout::contiguous(Shape{1}), amaxStorage);
+                        epilogue.accumulateAmax = batch != 0;
+                    }
+                    referenceEpilogue(epilogue);
+
+                    if (problem.useGradient() && problem.useBias()) {
+                        MutableTensorView biasOutput(
+                            *biasType,
+                            Layout(Shape{runtimeBiasLength}, {1}, runtimeBiasOffset),
+                            biasOutputStorage);
+                        if (problem.biasSrc() == ContractionProblemGemm::D) {
+                            referenceSum(ReductionProblem(
+                                biasWorkspace->view(),
+                                biasOutput,
+                                accumulatorType,
+                                {runtimeBiasAxis == MatrixAxis::Row ? size_t(1) : size_t(0)}));
+                        } else if (problem.biasSrc() == ContractionProblemGemm::A) {
+                            referenceSum(ReductionProblem(
+                                logicalA, biasOutput, accumulatorType, {1}));
+                        } else {
+                            referenceSum(ReductionProblem(
+                                logicalB, biasOutput, accumulatorType, {0}));
+                        }
+                    }
+                }
             }
             return true;
         }
