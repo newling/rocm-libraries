@@ -3430,25 +3430,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleE)
                 CHECK_HIP_ERROR(synchronize(dScaleE[i], hScaleE[i]));
 
-            //// copy data from CPU to device end
-            if(size_D_copy[i])
-            {
-                // BLAS computes in place in D_gold, so seed beta*C using D's
-                // layout even when C and D have different leading dimensions or strides.
-                const size_t elementBytes = realDataTypeSize(To);
-                std::memset(hD_gold[i].buf(), 0, hD_gold[i].getNumBytes());
-                hipblaslt_copy_matrix(hC[i].as<char>(),
-                                       hD_gold[i].as<char>(),
-                                       M[i] * elementBytes,
-                                       N[i],
-                                       ldc[i] * elementBytes,
-                                       ldd[i] * elementBytes,
-                                       stride_c[i] * elementBytes,
-                                       stride_d[i] * elementBytes,
-                                       num_batches[i]);
-                if(epilogue_on[i])
-                    transform_buf(hD_gold[i], hD_gold_epl[i], To, Talpha);
-            }
             if(epilogue_on[i])
             {
                 EXPECT_HIPBLAS_STATUS(
@@ -3757,20 +3738,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                     swizzle_tensor_type(
                         tmp, hB[batchCount], TiB, arg, 1, N[i], K[i], ldb[i], false);
                     CHECK_HIP_ERROR(synchronize(dB[batchCount], tmp, block_count));
-                }
-                //// copy data from CPU to device end
-                if(size_D_copy[i])
-                {
-                    // Each pointer-array entry contains one matrix. Seed the
-                    // in-place BLAS reference using D's leading dimension.
-                    const size_t elementBytes = realDataTypeSize(To);
-                    std::memset(hD_gold[batchCount].buf(), 0, hD_gold[batchCount].getNumBytes());
-                    hipblaslt_copy_matrix(hC[batchCount].as<char>(),
-                                          hD_gold[batchCount].as<char>(),
-                                          M[i] * elementBytes,
-                                          N[i],
-                                          ldc[i] * elementBytes,
-                                          ldd[i] * elementBytes);
                 }
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
@@ -5173,6 +5140,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   + stride_b[gemmIdx] * batchIdx * realDataTypeSize(TiB),
                         ldb[gemmIdx],
                         betaTemp,
+                        hC[gemmIdx].as<char>()
+                            + stride_c[gemmIdx] * batchIdx * realDataTypeSize(To),
+                        ldc[gemmIdx],
                         hD_gold_epl[gemmIdx].as<char>()
                             + stride_d[gemmIdx] * batchIdx * realDataTypeSize(Talpha),
                         ldd[gemmIdx],
@@ -5184,7 +5154,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         (arg.scaleB == hipblaslt_scaling_format::Vector),
                         isScaleAMXFormat ? HIP_R_32F : TiA,
                         isScaleBMXFormat ? HIP_R_32F : TiB,
-                        Tc,
+                        To,
+                        Talpha,
                         Tc,
                         isScaleAMXFormat ? HIP_R_32F : TciA,
                         isScaleBMXFormat ? HIP_R_32F : TciB,
@@ -5334,6 +5305,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                ptrB,
                                ldb[gemmIdx],
                                betaTemp,
+                               hC[batchIdx].as<char>(),
+                               ldc[gemmIdx],
                                hD_gold[batchIdx].as<char>(),
                                ldd[gemmIdx],
                                nullptr,
@@ -5344,6 +5317,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                (arg.scaleB == hipblaslt_scaling_format::Vector),
                                isScaleAMXFormat ? HIP_R_32F : TiA,
                                isScaleBMXFormat ? HIP_R_32F : TiB,
+                               To,
                                To,
                                Tc,
                                isScaleAMXFormat ? HIP_R_32F : TciA,
@@ -5375,6 +5349,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   + stride_b[gemmIdx] * batchIdx * realDataTypeSize(TiB),
                         ldb[gemmIdx],
                         betaTemp,
+                        hC[gemmIdx].as<char>()
+                            + stride_c[gemmIdx] * batchIdx * realDataTypeSize(To),
+                        ldc[gemmIdx],
                         hD_gold[gemmIdx].as<char>()
                             + stride_d[gemmIdx] * batchIdx * realDataTypeSize(To),
                         ldd[gemmIdx],
@@ -5386,6 +5363,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         (arg.scaleB == hipblaslt_scaling_format::Vector),
                         isScaleAMXFormat ? HIP_R_32F : TiA,
                         isScaleBMXFormat ? HIP_R_32F : TiB,
+                        To,
                         To,
                         Tc,
                         isScaleAMXFormat ? HIP_R_32F : TciA,
