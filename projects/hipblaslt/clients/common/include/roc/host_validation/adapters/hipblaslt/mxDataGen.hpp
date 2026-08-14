@@ -33,21 +33,20 @@ MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
 #include <hipblaslt/hipblaslt-types.h>
 #include <stdint.h>
 
+#include <span>
 #include <vector>
 
 // integer_exact supports fp8 data. With swizzled scales it currently requires K along
 // stored rows (transposed A or non-transposed B); other orientations throw before writing.
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,
-                                   void*                  data,
-                                   void*                  scale,
+                                   std::span<uint8_t>     data,
+                                   std::span<uint8_t>     scale,
                                    uint64_t               row,
                                    uint64_t               col,
                                    uint64_t               stride,
-                                   bool                   isTranspose,
                                    int const              scaleBlockRowSize,
                                    int const              scaleBlockColSize,
-                                   bool                   isMatrixA,
                                    MXScaleLayout          scaleLayout     = MXScaleLayout::None,
                                    std::string_view const initMethod      = "Bounded",
                                    float                  min_val         = -1.0f,
@@ -58,10 +57,10 @@ std::vector<float> generateMXInput(hipDataType            dataType,
 // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
 // on gfx950 pad ceil(K/mxBlock) up to a multiple of 8. K-fast layouts need this
 // in-place restride before scale swizzle / H2D (see tensile DataInitialization).
-void restrideMXScaleBufferKFast(uint8_t* buffer,
-                                size_t   compactFreeDim,
-                                size_t   compactKBlocks,
-                                size_t   paddedKBlocks,
-                                size_t   elemBytes);
+void restrideMXScaleBufferKFast(std::span<uint8_t> buffer,
+                                size_t             compactFreeDim,
+                                size_t             compactKBlocks,
+                                size_t             paddedKBlocks,
+                                size_t             elemBytes);
 
 #endif
