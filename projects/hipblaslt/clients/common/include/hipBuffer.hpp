@@ -31,12 +31,10 @@
 #include "hip_placement.hpp"
 #include "hipblaslt_ostream.hpp"
 #include <algorithm>
+#include <complex>
 #include <memory>
 #include <roc/host_validation/tensor.hpp>
 #include <span>
-
-#include <complex>
-#include <memory>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -80,10 +78,11 @@ public:
     // in memory it no longer owns, which for a placed buffer is not mapped.
     HipDeviceBuffer(HipDeviceBuffer&& other) noexcept
         : d_vector_type(std::move(other))
-        , numBytes(other.numBytes)
+        , numBytes(std::exchange(other.numBytes, 0))
         , placed(std::move(other.placed))
         , buffer(std::exchange(other.buffer, nullptr))
     {
+        other.reset_after_move();
     }
 
     HipDeviceBuffer& operator=(HipDeviceBuffer&& other) noexcept
@@ -91,10 +90,13 @@ public:
         if(this != &other)
         {
             this->device_vector_teardown(placed ? nullptr : static_cast<char*>(buffer));
+            buffer = nullptr;
+
             d_vector_type::operator=(std::move(other));
-            numBytes = other.numBytes;
+            numBytes = std::exchange(other.numBytes, 0);
             placed   = std::move(other.placed);
             buffer   = std::exchange(other.buffer, nullptr);
+            other.reset_after_move();
         }
         return *this;
     }
@@ -248,6 +250,9 @@ inline hipError_t synchronize(HipDeviceBuffer&     dBuf,
                               std::size_t          block_count = 1,
                               hipStream_t          stream      = nullptr)
 {
+    if(block_count == 0)
+        return hipErrorInvalidValue;
+
     hipError_t hip_err;
 
     // Perform async copy for all blocks
@@ -270,6 +275,9 @@ inline hipError_t synchronize(HipDeviceBuffer&     dBuf,
 
 inline hipError_t broadcast(HipDeviceBuffer& dBuf, std::size_t repeats)
 {
+    if(repeats == 0)
+        return hipErrorInvalidValue;
+
     hipError_t hip_err = hipSuccess;
     for(size_t i = 1; i < repeats; ++i)
     {
@@ -299,7 +307,7 @@ inline hipError_t synchronize(HipHostBuffer&         hBuf,
     // lda is only used by the swizzled row-by-row copy below; the plain copy path
     // ignores it, so only the swizzle path can have an out-of-range leading dimension.
     if(needSwizzle && row > lda)
-        hipblaslt_cerr << "invalid values of lda in synchronize()" << std::endl;
+        return hipErrorInvalidValue;
     hipError_t hip_err;
 
     // Synchronize to ensure prior work is complete
