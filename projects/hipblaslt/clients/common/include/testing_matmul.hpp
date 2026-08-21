@@ -45,6 +45,7 @@
 #endif
 #include "near.hpp"
 #include "norm.hpp"
+#include "repeatability_check.hpp"
 #include "ulp.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -5534,6 +5535,34 @@ void testing_matmul_with_bias(const Arguments& arg,
                                     : 0;
         int number_hot_calls = arg.iters;
 
+        auto repeatability_config
+            = hipblaslt_bench::repeatability_check_config_from_environment();
+        if(repeatability_config.enabled
+           && (do_grouped_gemm || arg.use_ext
+               || batchMode != HIPBLASLT_BATCH_MODE_STRIDED || gemm_count != 1 || arg.adaptive
+               || number_cold_calls < 1))
+        {
+            hipblaslt_cerr
+                << "error: repeatability checking currently requires one non-grouped, strided, "
+                   "C-API GEMM with adaptive timing disabled and at least one cold iteration"
+                << std::endl;
+            CHECK_SUCCESS(false);
+        }
+        hipblaslt_bench::RepeatabilityChecker repeatability_checker(
+            repeatability_config, size_D[0], realDataTypeSize(To), To == HIP_R_16BF);
+        if(repeatability_checker.enabled())
+        {
+            hipblaslt_cout << "Repeatability check enabled: mode="
+                           << hipblaslt_bench::repeatability_mode_name(
+                                  repeatability_config.mode)
+                           << " scan_every=" << repeatability_config.scan_every;
+            if(repeatability_config.exact_enabled())
+                hipblaslt_cout << "; call 1 is the exact D golden";
+            hipblaslt_cout << "; device observations are stream-ordered and reported timing "
+                              "includes the checker."
+                           << std::endl;
+        }
+
         // Adaptive timing configuration shared by every solution measured below.
         // Adaptive timing is gated on --adaptive; the per-knob settings apply only then.
         hipblaslt_bench::TimingConfig timingCfg;
@@ -5608,6 +5637,12 @@ void testing_matmul_with_bias(const Arguments& arg,
             // Reset per-solution so an aborted/empty measurement can't report the prior
             // solution's stats (run_measurement leaves `out` untouched on early return).
             timing = {};
+            uint64_t repeatability_call_ordinal = 0;
+            CHECK_HIP_ERROR(repeatability_checker.reset(stream));
+            auto observe_repeatability = [&](void* output) {
+                CHECK_HIP_ERROR(repeatability_checker.observe(
+                    output, ++repeatability_call_ordinal, stream));
+            };
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
@@ -5819,6 +5854,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 workspace_size,
                                 stream),
                             HIPBLAS_STATUS_SUCCESS);
+                        observe_repeatability(
+                            (*dDp)[0].as<char>()
+                            + (i % block_count) * size_D[0] * realDataTypeSize(To));
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
                             copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                     }
@@ -5870,6 +5908,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                     workspace_size,
                                     stream),
                                 HIPBLAS_STATUS_SUCCESS);
+                            observe_repeatability(
+                                (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To));
                             if(arg.flush)
                                 hipLaunchKernelGGL(
                                     flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
@@ -6010,6 +6050,100 @@ void testing_matmul_with_bias(const Arguments& arg,
                         timingAbort);
                     gpu_time_used = timing.median_us;
                     perf_monitor->stop();
+                }
+            }
+
+            if(repeatability_checker.enabled())
+            {
+                hipblaslt_bench::RepeatabilityMismatch mismatch;
+                CHECK_HIP_ERROR(repeatability_checker.finish(mismatch, stream));
+
+                const auto& config = repeatability_checker.config();
+                if(config.mutate_call > repeatability_call_ordinal)
+                {
+                    hipblaslt_cerr << "error: requested repeatability mutation call "
+                                   << config.mutate_call << " exceeds executed call count "
+                                   << repeatability_call_ordinal << std::endl;
+                    CHECK_SUCCESS(false);
+                }
+                if(config.mutate_nonfinite_call > repeatability_call_ordinal)
+                {
+                    hipblaslt_cerr << "error: requested non-finite mutation call "
+                                   << config.mutate_nonfinite_call
+                                   << " exceeds executed call count "
+                                   << repeatability_call_ordinal << std::endl;
+                    CHECK_SUCCESS(false);
+                }
+
+                uint64_t observations
+                    = repeatability_checker.observation_count(repeatability_call_ordinal);
+                if(config.exact_enabled() && mismatch.call_ordinal == 0)
+                {
+                    hipblaslt_cout << "Repeatability check PASS: "
+                                   << (observations - 1)
+                                   << " outputs matched call 1 exactly" << std::endl;
+                    if(config.expect_mismatch)
+                    {
+                        hipblaslt_cerr
+                            << "error: repeatability checker expected a mismatch but found none"
+                            << std::endl;
+                        CHECK_SUCCESS(false);
+                    }
+                }
+                else if(config.exact_enabled())
+                {
+                    size_t element_index
+                        = mismatch.byte_offset / repeatability_checker.element_bytes();
+                    size_t byte_in_element
+                        = mismatch.byte_offset % repeatability_checker.element_bytes();
+                    hipblaslt_cout << "Repeatability check MISMATCH: call="
+                                   << mismatch.call_ordinal << " element=" << element_index
+                                   << " byte_in_element=" << byte_in_element << " expected_byte=0x"
+                                   << std::hex << mismatch.expected << " actual_byte=0x"
+                                   << mismatch.actual << std::dec << std::endl;
+
+                    bool expected_exact_mutation
+                        = config.expect_mismatch
+                          && (config.mutate_call == 0
+                              || (mismatch.call_ordinal == config.mutate_call
+                                  && element_index == config.mutate_element));
+                    if(!expected_exact_mutation)
+                        CHECK_SUCCESS(false);
+                    hipblaslt_cout
+                        << "Repeatability positive control PASS: expected mismatch observed"
+                        << std::endl;
+                }
+
+                if(config.nonfinite_enabled() && mismatch.nonfinite_call_ordinal == 0)
+                {
+                    hipblaslt_cout << "Repeatability non-finite check PASS: " << observations
+                                   << " BF16 outputs were finite" << std::endl;
+                    if(config.expect_nonfinite)
+                    {
+                        hipblaslt_cerr << "error: repeatability checker expected a non-finite "
+                                          "output but found none"
+                                       << std::endl;
+                        CHECK_SUCCESS(false);
+                    }
+                }
+                else if(config.nonfinite_enabled())
+                {
+                    hipblaslt_cout << "Repeatability check NONFINITE: call="
+                                   << mismatch.nonfinite_call_ordinal
+                                   << " element=" << mismatch.nonfinite_element << " bits=0x"
+                                   << std::hex << mismatch.nonfinite_bits << std::dec << std::endl;
+                    bool expected_nonfinite
+                        = config.expect_nonfinite
+                          && (config.mutate_nonfinite_call == 0
+                              || (mismatch.nonfinite_call_ordinal
+                                      == config.mutate_nonfinite_call
+                                  && mismatch.nonfinite_element
+                                         == config.mutate_nonfinite_element));
+                    if(!expected_nonfinite)
+                        CHECK_SUCCESS(false);
+                    hipblaslt_cout << "Repeatability non-finite positive control PASS: expected "
+                                      "non-finite output observed"
+                                   << std::endl;
                 }
             }
 
