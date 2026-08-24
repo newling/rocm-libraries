@@ -97,6 +97,13 @@ namespace TensileLite
             return coFilename;
         }
 
+        std::string normalizedCodeObjectFile(std::string const& path)
+        {
+            size_t start = path.rfind('/');
+            start        = (start == std::string::npos) ? 0 : start + 1;
+            return removeXnack(path.substr(start));
+        }
+
         hipError_t SolutionAdapter::loadCodeObjectFile(std::string const& path)
         {
             Debug::Instance().markerStart("loadCodeObjectFile", path);
@@ -149,6 +156,8 @@ namespace TensileLite
                 m_loadedModuleNames.clear();
                 m_loadedCOFiles.clear();
                 m_kernels.clear();
+                m_fileModules.clear();
+                m_fileKernels.clear();
                 m_extraModuleCopies.clear();
                 m_extraKernels.clear();
                 m_currentRotationCopy.store(0);
@@ -186,10 +195,9 @@ namespace TensileLite
                 m_modules.push_back(module);
                 m_loadedModuleNames.push_back(concatenate("File ", path));
 
-                //Isolate filename
-                size_t start = path.rfind('/');
-                start        = (start == std::string::npos) ? 0 : start + 1;
-                m_loadedCOFiles.insert(removeXnack(std::string(path.begin() + start, path.end())));
+                auto normalized = normalizedCodeObjectFile(path);
+                m_loadedCOFiles.insert(normalized);
+                m_fileModules[normalized] = module;
             }
             Debug::Instance().markerStop();
             return hipSuccess;
@@ -373,6 +381,39 @@ namespace TensileLite
             return err;
         }
 
+        hipError_t SolutionAdapter::getKernel(hipFunction_t&     rv,
+                                              std::string const& name,
+                                              std::string const& codeObjectFile)
+        {
+            if(m_currentRotationCopy.load() != 0)
+                return hipErrorInvalidValue;
+
+            auto normalized = normalizedCodeObjectFile(codeObjectFile);
+            auto cacheKey   = normalized + '\n' + name;
+
+            std::unique_lock<std::mutex> guard(m_access);
+            auto cached = m_fileKernels.find(cacheKey);
+            if(cached != m_fileKernels.end())
+            {
+                rv = cached->second;
+                return hipSuccess;
+            }
+
+            auto module = m_fileModules.find(normalized);
+            if(module == m_fileModules.end())
+                return hipErrorNotFound;
+
+            auto error = hipModuleGetFunction(&rv, module->second, name.c_str());
+            if(error == hipSuccess)
+            {
+                m_fileKernels[cacheKey] = rv;
+                return error;
+            }
+            if(error == hipErrorNotFound)
+                (void)hipGetLastError();
+            return error;
+        }
+
         hipError_t
             SolutionAdapter::loadCodeObjectFileExtraCopies(std::string const& path,
                                                            int                extraCopies)
@@ -548,9 +589,14 @@ namespace TensileLite
             }
 
             hipFunction_t function;
-            HIP_CHECK_RETURN_WITH_LOG(getKernel(function, kernel.kernelName),
+            auto getKernelResult
+                = kernel.codeObjectFile.empty()
+                      ? getKernel(function, kernel.kernelName)
+                      : getKernel(function, kernel.kernelName, kernel.codeObjectFile);
+            HIP_CHECK_RETURN_WITH_LOG(getKernelResult,
                 [&](hipError_t error) {
                     std::cerr << "getKernel failed: " << kernel.kernelName << std::endl
+                            << " from code object: " << kernel.codeObjectFile << std::endl
                             << " with workgroup size: " << kernel.workGroupSize << std::endl
                             << " with numWorkGroups : " << kernel.numWorkGroups << std::endl
                             << " with numWorkItems : " << kernel.numWorkItems << std::endl

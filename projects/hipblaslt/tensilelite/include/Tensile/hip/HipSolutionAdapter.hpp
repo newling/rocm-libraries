@@ -111,11 +111,16 @@ namespace TensileLite
 
         private:
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
+            hipError_t getKernel(hipFunction_t&     rv,
+                                 std::string const& name,
+                                 std::string const& codeObjectFile);
 
             std::mutex m_access;
 
             std::vector<hipModule_t>                       m_modules;
             std::unordered_map<std::string, hipFunction_t> m_kernels;
+            std::unordered_map<std::string, hipModule_t>   m_fileModules;
+            std::unordered_map<std::string, hipFunction_t> m_fileKernels;
             bool                                           m_debug           = false;
             bool                                           m_debugSkipLaunch = false;
             std::string                                    m_name            = "HipSolutionAdapter";
@@ -150,4 +155,3 @@ namespace TensileLite
         std::ostream& operator<<(std::ostream& stream, std::shared_ptr<SolutionAdapter> const& ptr);
     } // namespace hip
 } // namespace TensileLite
-
