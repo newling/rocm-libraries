@@ -5454,6 +5454,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # Kernel Body
   ##############################################################################
+  @staticmethod
+  def preLoopLocalReadWait(kernel, numItersPLR, waitAlreadyEmitted):
+    """Wait for unsynchronized pre-loop local reads used by the CMS loop."""
+    module = Module("Pre-loop local read wait")
+    if (numItersPLR and kernel["UseCustomMainLoopSchedule"] and
+        kernel["ForceUnrollSubIter"] and not waitAlreadyEmitted):
+      module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                          comment="Wait for pre-loop local reads to complete"))
+    return module
+
   def kernelBody( self, kernel, tensorParametersA, tensorParametersB ):
     # Store tensor params so emitters (e.g. multi-wave TDMSplit increment
     # recompute) can access both A and B outside their own call context.
@@ -5507,6 +5517,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # InitCIterWmma is resolved to 0/1 in SolutionStructs/Solution.py (-1 auto path).
     initCIterWmma = bool(kernel["InitCIterWmma"])
+    preLoopLocalReadWaitEmitted = False
 
     if kernel["PrefetchGlobalRead"]:
       if self.states.doShadowInit:
@@ -5776,7 +5787,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # Gather A, B conversion code based on scheduling order
           packPrePrefetchItems = []
           self._interleavePackAB(kernel, packPrePrefetchA.flatitems(), packPrePrefetchB.flatitems(), packPrePrefetchItems, prefetch=True)
-          if len(packPrePrefetchItems) > 0:
+          preLoopLocalReadWaitEmitted = len(packPrePrefetchItems) > 0
+          if preLoopLocalReadWaitEmitted:
             module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete (for pre Pack code)"))
 
             module.addItems(packPrePrefetchItems)
@@ -5852,6 +5864,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment2("Unrolled Loop(s) - Begin")
       if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
         module.add(SBarrier(comment="TDM PGR=0: prime barrier before loop"))
+      module.add(self.preLoopLocalReadWait(kernel, self.states.numItersPLR,
+                                           preLoopLocalReadWaitEmitted))
       module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False, nta=nta, ntb=ntb))
 
       loop = Module("loopBody")
