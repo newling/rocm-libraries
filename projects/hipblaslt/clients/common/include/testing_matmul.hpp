@@ -1073,11 +1073,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         ldb(problem_count), ldc(problem_count), ldd(problem_count), lde(problem_count);
     std::vector<computeTypeInterface> h_alpha(problem_count, computeTypeInterface{}),
         h_beta(problem_count, computeTypeInterface{});
-    std::vector<int64_t> A_row(problem_count), A_col(problem_count), B_row(problem_count), B_col(problem_count);
     std::vector<int64_t> stride_a(problem_count), stride_da(problem_count), stride_b(problem_count),
         stride_db(problem_count), stride_c(problem_count), stride_d(problem_count), stride_e(problem_count);
-    std::vector<bool>   do_batched(problem_count), epilogue_on(problem_count, false);
-    std::vector<int>    num_batches(problem_count);
+    std::vector<bool> epilogue_on(problem_count, false);
     std::vector<size_t> size_A(problem_count), size_dA(problem_count), size_B(problem_count),
         size_dB(problem_count), size_C(problem_count), size_D(problem_count), size_D_copy(problem_count),
         size_E(problem_count), size_bias(problem_count), size_scaleAlphaVec(problem_count),
@@ -1135,29 +1133,22 @@ void testing_matmul_with_bias(const Arguments& arg,
         ldd[i] = testCase.d.leadingDimension();
         lde[i] = testCase.auxiliary ? testCase.auxiliary->leadingDimension() : arg.lde[i];
 
-        A_row[i] = testCase.a.rows();
-        A_col[i] = testCase.a.columns();
-        B_row[i] = testCase.b.rows();
-        B_col[i] = testCase.b.columns();
-
-        do_batched[i]  = testCase.batchCount > 1;
-        num_batches[i] = testCase.batchCount;
-
         stride_a[i] = testCase.a.batchStride();
         stride_b[i] = testCase.b.batchStride();
         stride_c[i] = testCase.c.batchStride();
         stride_d[i] = testCase.d.batchStride();
         stride_e[i] = testCase.auxiliary
                           ? testCase.auxiliary->batchStride()
-                          : (batchMode == HIPBLASLT_BATCH_MODE_STRIDED && do_batched[i]
+                          : (batchMode == HIPBLASLT_BATCH_MODE_STRIDED
+                                     && matmulCases[i].batchCount > 1
                                  ? arg.stride_e[i]
                                  : lde[i] * N[i]);
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            size_A[i] = stride_a[i] == 0        ? lda[i] * A_col[i] * num_batches[i]
-                        : lda[i] <= stride_a[i] ? stride_a[i] * num_batches[i]
-                                                : lda[i] * A_col[i];
+            size_A[i] = stride_a[i] == 0        ? lda[i] * matmulCases[i].a.columns() * matmulCases[i].batchCount
+                        : lda[i] <= stride_a[i] ? stride_a[i] * matmulCases[i].batchCount
+                                                : lda[i] * matmulCases[i].a.columns();
         }
         else
         {
@@ -1173,23 +1164,23 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_t  K_block = MiK * PackK;
             int64_t stride_swizzle
                 = ((M[i] + MiM - 1) / MiM) * MiM * ((K[i] + K_block - 1) / K_block) * K_block;
-            if(do_batched[i] && stride_a[i] != 0)
+            if((matmulCases[i].batchCount > 1) && stride_a[i] != 0)
             {
                 stride_da[i] = stride_swizzle;
 
                 //TODO: support arbitrary stride_a for both hipblaslt-bench and hipblaslt-test when swizzled
-                if(stride_a[i] != lda[i] * A_col[i] && stride_a[i] != stride_swizzle)
+                if(stride_a[i] != lda[i] * matmulCases[i].a.columns() && stride_a[i] != stride_swizzle)
                     hipblaslt_cerr << "Warning: swizzle_a does not yet support arbitrary stride_a!"
                                    << std::endl;
             }
-            size_dA[i] = (batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) ? stride_swizzle : (num_batches[i] * stride_swizzle);
+            size_dA[i] = (batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) ? stride_swizzle : (matmulCases[i].batchCount * stride_swizzle);
         }
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            size_B[i] = stride_b[i] == 0        ? ldb[i] * B_col[i] * num_batches[i]
-                        : ldb[i] <= stride_b[i] ? stride_b[i] * num_batches[i]
-                                                : ldb[i] * B_col[i];
+            size_B[i] = stride_b[i] == 0        ? ldb[i] * matmulCases[i].b.columns() * matmulCases[i].batchCount
+                        : ldb[i] <= stride_b[i] ? stride_b[i] * matmulCases[i].batchCount
+                                                : ldb[i] * matmulCases[i].b.columns();
         }
         else
         {
@@ -1205,27 +1196,27 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_t  K_block = MiK * PackK;
             int64_t stride_swizzle
                 = ((N[i] + MiN - 1) / MiN) * MiN * ((K[i] + K_block - 1) / K_block) * K_block;
-            if(do_batched[i] && stride_b[i] != 0)
+            if((matmulCases[i].batchCount > 1) && stride_b[i] != 0)
             {
                 stride_db[i] = stride_swizzle;
 
                 //TODO: support arbitrary stride_b for both hipblaslt-bench and hipblaslt-test when swizzled
-                if(stride_b[i] != ldb[i] * B_col[i] && stride_b[i] != stride_swizzle)
+                if(stride_b[i] != ldb[i] * matmulCases[i].b.columns() && stride_b[i] != stride_swizzle)
                     hipblaslt_cerr << "Warning: swizzle_b does not yet support arbitrary stride_b!"
                                    << std::endl;
             }
-            size_dB[i] = (batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) ? stride_swizzle : (num_batches[i] * stride_swizzle);
+            size_dB[i] = (batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) ? stride_swizzle : (matmulCases[i].batchCount * stride_swizzle);
         }
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
-            size_C[i] = stride_c[i] == 0        ? ldc[i] * N[i] * num_batches[i]
-                        : ldc[i] <= stride_c[i] ? stride_c[i] * num_batches[i]
+            size_C[i] = stride_c[i] == 0        ? ldc[i] * N[i] * matmulCases[i].batchCount
+                        : ldc[i] <= stride_c[i] ? stride_c[i] * matmulCases[i].batchCount
                                                 : ldc[i] * N[i];
-            size_D[i] = stride_d[i] == 0        ? ldd[i] * N[i] * num_batches[i]
-                        : ldd[i] <= stride_d[i] ? stride_d[i] * num_batches[i]
+            size_D[i] = stride_d[i] == 0        ? ldd[i] * N[i] * matmulCases[i].batchCount
+                        : ldd[i] <= stride_d[i] ? stride_d[i] * matmulCases[i].batchCount
                                                 : ldd[i] * N[i];
-            size_E[i] = arg.use_e ? (stride_e[i] == 0        ? lde[i] * N[i] * num_batches[i]
-                                     : lde[i] <= stride_e[i] ? stride_e[i] * num_batches[i]
+            size_E[i] = arg.use_e ? (stride_e[i] == 0        ? lde[i] * N[i] * matmulCases[i].batchCount
+                                     : lde[i] <= stride_e[i] ? stride_e[i] * matmulCases[i].batchCount
                                                              : lde[i] * N[i])
                                   : 0;
         }
@@ -1259,12 +1250,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_t dimk        = 128 / MXBlock_A;
                     size_t scaleA_r
                         = transA == HIPBLAS_OP_T
-                              ? divideRoundUp(static_cast<size_t>(A_row[i]), MXBlock_A)
-                              : static_cast<size_t>(A_row[i]);
+                              ? divideRoundUp(static_cast<size_t>(matmulCases[i].a.rows()), MXBlock_A)
+                              : static_cast<size_t>(matmulCases[i].a.rows());
                     size_t scaleA_c
                         = transA == HIPBLAS_OP_T
-                              ? static_cast<size_t>(A_col[i])
-                              : divideRoundUp(static_cast<size_t>(A_col[i]), MXBlock_A);
+                              ? static_cast<size_t>(matmulCases[i].a.columns())
+                              : divideRoundUp(static_cast<size_t>(matmulCases[i].a.columns()), MXBlock_A);
                     bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
                     size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
                     size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
@@ -1274,7 +1265,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
-                    size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
+                    size_scaleAVec[i] = scaleBufferSize(matmulCases[i].a.rows(), matmulCases[i].a.columns(), arg.scaleA);
                 }
             }
             else
@@ -1292,12 +1283,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_t dimk        = 128 / MXBlock_B;
                     size_t scaleB_r
                         = transB == HIPBLAS_OP_T
-                              ? static_cast<size_t>(B_row[i])
-                              : divideRoundUp(static_cast<size_t>(B_row[i]), MXBlock_B);
+                              ? static_cast<size_t>(matmulCases[i].b.rows())
+                              : divideRoundUp(static_cast<size_t>(matmulCases[i].b.rows()), MXBlock_B);
                     size_t scaleB_c
                         = transB == HIPBLAS_OP_T
-                              ? divideRoundUp(static_cast<size_t>(B_col[i]), MXBlock_B)
-                              : static_cast<size_t>(B_col[i]);
+                              ? divideRoundUp(static_cast<size_t>(matmulCases[i].b.columns()), MXBlock_B)
+                              : static_cast<size_t>(matmulCases[i].b.columns());
                     bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
                     size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
                     size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
@@ -1307,7 +1298,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
-                    size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
+                    size_scaleBVec[i] = scaleBufferSize(matmulCases[i].b.rows(), matmulCases[i].b.columns(), arg.scaleB);
                 }
             }
             else
@@ -1348,7 +1339,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                 if(arg.bias_stride > 0)
                 {
-                    size_bias[i] = arg.bias_stride * num_batches[i];
+                    size_bias[i] = arg.bias_stride * matmulCases[i].batchCount;
                 }
             }
             else
@@ -1375,10 +1366,10 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             // For General Batched GEMM, the Matrices aren't stored in a continuous buffer across batches.
             // Hence size_dA doesn't account for all batches.
-            totalRotatingSizeNeeded += size_dA[i] * realDataTypeSize(TiA) * num_batches[i]
-                                       + size_dB[i] * realDataTypeSize(TiB) * num_batches[i]
-                                       + sizeC * num_batches[i]
-                                       + size_D[i] * realDataTypeSize(To) * num_batches[i]
+            totalRotatingSizeNeeded += size_dA[i] * realDataTypeSize(TiA) * matmulCases[i].batchCount
+                                       + size_dB[i] * realDataTypeSize(TiB) * matmulCases[i].batchCount
+                                       + sizeC * matmulCases[i].batchCount
+                                       + size_D[i] * realDataTypeSize(To) * matmulCases[i].batchCount
                                        + biasSize + size_scaleAlphaVec[i] * realDataTypeSize(Talpha)
                                        + size_scaleAVec[i] * realDataTypeSize(Talpha)
                                        + size_scaleBVec[i] * realDataTypeSize(Talpha);
@@ -1396,13 +1387,13 @@ void testing_matmul_with_bias(const Arguments& arg,
             arg, batchMode, do_swizzle_a || do_swizzle_b, TiA, TiB, To, Tc);
         for(int i = 0; i < gemm_count && why.empty(); i++)
         {
-            if(isBlockScaling(arg.scaleA) && (lda[i] != A_row[i] || ldb[i] != B_row[i]))
+            if(isBlockScaling(arg.scaleA) && (lda[i] != matmulCases[i].a.rows() || ldb[i] != matmulCases[i].b.rows()))
                 why = "fast_check with MX scales requires lda and ldb equal to the rows stored";
-            else if(lda[i] < A_row[i] || ldb[i] < B_row[i] || ldc[i] < M[i] || ldd[i] < M[i])
+            else if(lda[i] < matmulCases[i].a.rows() || ldb[i] < matmulCases[i].b.rows() || ldc[i] < M[i] || ldd[i] < M[i])
                 why = "fast_check requires each leading dimension to be at least the number of "
                       "rows stored";
-            else if(num_batches[i] > 1
-                    && (stride_a[i] < lda[i] * A_col[i] || stride_b[i] < ldb[i] * B_col[i]
+            else if(matmulCases[i].batchCount > 1
+                    && (stride_a[i] < lda[i] * matmulCases[i].a.columns() || stride_b[i] < ldb[i] * matmulCases[i].b.columns()
                         || stride_c[i] < ldc[i] * N[i] || stride_d[i] < ldd[i] * N[i]))
                 why = "fast_check requires batch strides that do not overlap";
         }
@@ -1536,17 +1527,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                     + (arg.c_equal_d ? 0 : size_C[i]) * sizeTo + size_D[i] * sizeTo
                     + size_E[i] * realDataTypeSize(Taux) + size_bias[i] * realDataTypeSize(Tbias)
                     + (size_scaleAlphaVec[i]
-                       + (size_scaleAVec[i] + size_scaleBVec[i]) * num_batches[i])
+                       + (size_scaleAVec[i] + size_scaleBVec[i]) * matmulCases[i].batchCount)
                           * sizeAlpha)
                    * size_t(block_count);
             // MX keeps both a float reference and a float copy for fast_check.
             // Other inputs keep only the compact copy in their original type.
             const bool mxA = isBlockScaling(arg.scaleA), mxB = isBlockScaling(arg.scaleB);
-            hostBytes += size_t(A_row[i] * A_col[i] * num_batches[i])
+            hostBytes += size_t(matmulCases[i].a.rows() * matmulCases[i].a.columns() * matmulCases[i].batchCount)
                              * (mxA ? 2 * sizeof(float) : realDataTypeSize(TiA))
-                         + size_t(B_row[i] * B_col[i] * num_batches[i])
+                         + size_t(matmulCases[i].b.rows() * matmulCases[i].b.columns() * matmulCases[i].batchCount)
                                * (mxB ? 2 * sizeof(float) : realDataTypeSize(TiB))
-                         + size_t(M[i] * N[i] * num_batches[i]) * sizeTo;
+                         + size_t(M[i] * N[i] * matmulCases[i].batchCount) * sizeTo;
             // The host buffers: MX generation also retains its packed host operands,
             // even in fast_check_only mode. Count the remaining buffers as before.
             if(!fast_check_only || mxA)
@@ -1559,7 +1550,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                          + 2 * size_bias[i] * realDataTypeSize(Tbias)
                          + size_E[i] * realDataTypeSize(Taux) * (arg.use_e && !arg.gradient ? 2 : 1)
                          + (size_scaleAlphaVec[i]
-                            + (size_scaleAVec[i] + size_scaleBVec[i]) * num_batches[i])
+                            + (size_scaleAVec[i] + size_scaleBVec[i]) * matmulCases[i].batchCount)
                                * sizeAlpha;
         }
         // scaleC, scaleD and scaleE are one value each, and amaxD two on the host (result and
@@ -1587,9 +1578,9 @@ void testing_matmul_with_bias(const Arguments& arg,
     for(int i = 0; i < problem_count; i++)
     {
         CHECK_HIPBLASLT_ERROR(
-            hipblasLtMatrixLayoutCreate(&(matA[i]), arg.a_type, A_row[i], A_col[i], lda[i]));
+            hipblasLtMatrixLayoutCreate(&(matA[i]), arg.a_type, matmulCases[i].a.rows(), matmulCases[i].a.columns(), lda[i]));
         CHECK_HIPBLASLT_ERROR(
-            hipblasLtMatrixLayoutCreate(&(matB[i]), arg.b_type, B_row[i], B_col[i], ldb[i]));
+            hipblasLtMatrixLayoutCreate(&(matB[i]), arg.b_type, matmulCases[i].b.rows(), matmulCases[i].b.columns(), ldb[i]));
         CHECK_HIPBLASLT_ERROR(
             hipblasLtMatrixLayoutCreate(&(matC[i]), arg.c_type, M[i], N[i], ldc[i]));
         CHECK_HIPBLASLT_ERROR(
@@ -1609,23 +1600,23 @@ void testing_matmul_with_bias(const Arguments& arg,
                 matB[i], HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderB, sizeof(orderB)));
         }
 
-        if(do_batched[i] || batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+        if((matmulCases[i].batchCount > 1) || batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
         {
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matA[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(num_batches[i]), sizeof(int)),
+                    matA[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(matmulCases[i].batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matB[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(num_batches[i]), sizeof(int)),
+                    matB[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(matmulCases[i].batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matC[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(num_batches[i]), sizeof(int)),
+                    matC[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(matmulCases[i].batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(
-                    matD[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(num_batches[i]), sizeof(int)),
+                    matD[i], HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &(matmulCases[i].batchCount), sizeof(int)),
                 HIPBLAS_STATUS_SUCCESS);
 
             EXPECT_HIPBLAS_STATUS(
@@ -1820,13 +1811,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(!strcmp(arg.placement, "scale_a"))
                     CHECK_PLACEMENT(allocate(dScaleA,
                                              HIP_R_8I,
-                                             size_scaleAVec[i] * num_batches[i] * block_count,
+                                             size_scaleAVec[i] * matmulCases[i].batchCount * block_count,
                                              "scale_a"),
                                     placement_unsupported,
                                     placement_why);
                 else
                     dScaleA.emplace_back(
-                        HIP_R_8U, size_scaleAVec[i] * num_batches[i] * block_count, HMM);
+                        HIP_R_8U, size_scaleAVec[i] * matmulCases[i].batchCount * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
@@ -1841,13 +1832,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(!strcmp(arg.placement, "scale_b"))
                     CHECK_PLACEMENT(allocate(dScaleB,
                                              HIP_R_8I,
-                                             size_scaleBVec[i] * num_batches[i] * block_count,
+                                             size_scaleBVec[i] * matmulCases[i].batchCount * block_count,
                                              "scale_b"),
                                     placement_unsupported,
                                     placement_why);
                 else
                     dScaleB.emplace_back(
-                        HIP_R_8U, size_scaleBVec[i] * num_batches[i] * block_count, HMM);
+                        HIP_R_8U, size_scaleBVec[i] * matmulCases[i].batchCount * block_count, HMM);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
             if(arg.scaleC)
@@ -1900,7 +1891,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleA))
             {
-                hScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * num_batches[i]);
+                hScaleA.emplace_back(HIP_R_8U, size_scaleAVec[i] * matmulCases[i].batchCount);
             }
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
                || arg.scaleB == hipblaslt_scaling_format::Vector)
@@ -1909,7 +1900,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(isBlockScaling(arg.scaleB))
             {
-                hScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * num_batches[i]);
+                hScaleB.emplace_back(HIP_R_8U, size_scaleBVec[i] * matmulCases[i].batchCount);
             }
             if(arg.scaleC)
                 hScaleC.emplace_back(Talpha, 1);
@@ -2123,11 +2114,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             MXScaleLayout const scaleLayoutA
                 = mxScaleLayoutForFormat(arg.scaleA, mxProp.gcnArchName);
-            size_t dataBatchBytesA  = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
-            size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
+            size_t dataBatchBytesA  = (matmulCases[i].batchCount > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
+            size_t scaleBatchBytesA = (matmulCases[i].batchCount > 1) ? size_scaleAVec[i] : 0;
             std::vector<float> refAAll;
-            refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
-            for(int64_t b = 0; b < num_batches[i]; b++)
+            refAAll.reserve(static_cast<size_t>(matmulCases[i].a.rows()) * matmulCases[i].a.columns() * matmulCases[i].batchCount);
+            for(int64_t b = 0; b < matmulCases[i].batchCount; b++)
             {
                 auto dataOutputA = mxBatchOutput(hA[i], b * dataBatchBytesA, dataBatchBytesA);
                 auto scaleOutputA
@@ -2136,8 +2127,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                 scaleDataType(arg.scaleA),
                                                 dataOutputA,
                                                 scaleOutputA,
-                                                A_row[i],
-                                                A_col[i],
+                                                matmulCases[i].a.rows(),
+                                                matmulCases[i].a.columns(),
                                                 lda[i],
                                                 scaleA_row,
                                                 scaleA_col,
@@ -2168,28 +2159,28 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       arg.initialization,
                                       alpha_isnan_type(arg, Talpha),
                                       dA[i].buf(),
-                                      A_row[i],
-                                      A_col[i],
-                                      (do_swizzle_a) ? A_row[i] : lda[i],
+                                      matmulCases[i].a.rows(),
+                                      matmulCases[i].a.columns(),
+                                      (do_swizzle_a) ? matmulCases[i].a.rows() : lda[i],
                                       TiA,
-                                      (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
+                                      (do_swizzle_a && stride_a[i] != 0) ? matmulCases[i].a.rows() * matmulCases[i].a.columns()
                                                                          : stride_a[i],
-                                      num_batches[i],
+                                      matmulCases[i].batchCount,
                                       positiveOnlyInitialization);
             }
             else
             {
-                for(int batchCount = 0; batchCount < num_batches[i]; batchCount++)
+                for(int batchCount = 0; batchCount < matmulCases[i].batchCount; batchCount++)
                 {
                     hipblaslt_init_device(ABC_dims::A,
                                           arg.initialization,
                                           alpha_isnan_type(arg, Talpha),
                                           dA[batchCount].buf(),
-                                          A_row[i],
-                                          A_col[i],
-                                          (do_swizzle_a) ? A_row[i] : lda[i],
+                                          matmulCases[i].a.rows(),
+                                          matmulCases[i].a.columns(),
+                                          (do_swizzle_a) ? matmulCases[i].a.rows() : lda[i],
                                           TiA,
-                                          (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
+                                          (do_swizzle_a && stride_a[i] != 0) ? matmulCases[i].a.rows() * matmulCases[i].a.columns()
                                                                              : stride_a[i],
                                           1,
                                           positiveOnlyInitialization);
@@ -2234,11 +2225,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             MXScaleLayout const scaleLayoutB
                 = mxScaleLayoutForFormat(arg.scaleB, mxProp.gcnArchName);
-            size_t dataBatchBytesB  = (num_batches[i] > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
-            size_t scaleBatchBytesB = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
+            size_t dataBatchBytesB  = (matmulCases[i].batchCount > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
+            size_t scaleBatchBytesB = (matmulCases[i].batchCount > 1) ? size_scaleBVec[i] : 0;
             std::vector<float> refBAll;
-            refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
-            for(int64_t b = 0; b < num_batches[i]; b++)
+            refBAll.reserve(static_cast<size_t>(matmulCases[i].b.rows()) * matmulCases[i].b.columns() * matmulCases[i].batchCount);
+            for(int64_t b = 0; b < matmulCases[i].batchCount; b++)
             {
                 auto dataOutputB = mxBatchOutput(hB[i], b * dataBatchBytesB, dataBatchBytesB);
                 auto scaleOutputB
@@ -2247,8 +2238,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                 scaleDataType(arg.scaleB),
                                                 dataOutputB,
                                                 scaleOutputB,
-                                                B_row[i],
-                                                B_col[i],
+                                                matmulCases[i].b.rows(),
+                                                matmulCases[i].b.columns(),
                                                 ldb[i],
                                                 scaleB_row,
                                                 scaleB_col,
@@ -2279,28 +2270,28 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       arg.initialization,
                                       alpha_isnan_type(arg, Talpha),
                                       dB[i].buf(),
-                                      B_row[i],
-                                      B_col[i],
-                                      (do_swizzle_b) ? B_row[i] : ldb[i],
+                                      matmulCases[i].b.rows(),
+                                      matmulCases[i].b.columns(),
+                                      (do_swizzle_b) ? matmulCases[i].b.rows() : ldb[i],
                                       TiB,
-                                      (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i]
+                                      (do_swizzle_b && stride_b[i] != 0) ? matmulCases[i].b.rows() * matmulCases[i].b.columns()
                                                                          : stride_b[i],
-                                      num_batches[i],
+                                      matmulCases[i].batchCount,
                                       positiveOnlyInitialization);
             }
             else
             {
-                for(int batchCount = 0; batchCount < num_batches[i]; batchCount++)
+                for(int batchCount = 0; batchCount < matmulCases[i].batchCount; batchCount++)
                 {
                     hipblaslt_init_device(ABC_dims::B,
                                           arg.initialization,
                                           alpha_isnan_type(arg, Talpha),
                                           dB[batchCount].buf(),
-                                          B_row[i],
-                                          B_col[i],
-                                          (do_swizzle_b) ? B_row[i] : ldb[i],
+                                          matmulCases[i].b.rows(),
+                                          matmulCases[i].b.columns(),
+                                          (do_swizzle_b) ? matmulCases[i].b.rows() : ldb[i],
                                           TiB,
-                                          (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i]
+                                          (do_swizzle_b && stride_b[i] != 0) ? matmulCases[i].b.rows() * matmulCases[i].b.columns()
                                                                              : stride_b[i],
                                           1,
                                           positiveOnlyInitialization);
@@ -2319,7 +2310,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   ldc[i],
                                   To,
                                   stride_c[i],
-                                  num_batches[i],
+                                  matmulCases[i].batchCount,
                                   positiveOnlyInitialization);
 
         // generateMXInput already produced the reference floats and the
@@ -2327,35 +2318,35 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.fast_check)
             {
                 CHECK_HIP_ERROR(fast_check_poison_padding_device(
-                    {dA[i].buf(), TiA, A_row[i], A_col[i], lda[i], stride_a[i]},
-                    num_batches[i],
+                    {dA[i].buf(), TiA, matmulCases[i].a.rows(), matmulCases[i].a.columns(), lda[i], stride_a[i]},
+                    matmulCases[i].batchCount,
                     size_A[i],
                     stream));
                 CHECK_HIP_ERROR(fast_check_poison_padding_device(
-                    {dB[i].buf(), TiB, B_row[i], B_col[i], ldb[i], stride_b[i]},
-                    num_batches[i],
+                    {dB[i].buf(), TiB, matmulCases[i].b.rows(), matmulCases[i].b.columns(), ldb[i], stride_b[i]},
+                    matmulCases[i].batchCount,
                     size_B[i],
                     stream));
                 CHECK_HIP_ERROR(fast_check_poison_padding_device(
                     {dC[i].buf(), To, M[i], N[i], ldc[i], stride_c[i]},
-                    num_batches[i],
+                    matmulCases[i].batchCount,
                     size_C[i],
                     stream));
                 CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
                 fcA[i].reset(
-                    new char[size_t(A_row[i] * A_col[i] * num_batches[i]) * realDataTypeSize(TiA)]);
+                    new char[size_t(matmulCases[i].a.rows() * matmulCases[i].a.columns() * matmulCases[i].batchCount) * realDataTypeSize(TiA)]);
                 fcB[i].reset(
-                    new char[size_t(B_row[i] * B_col[i] * num_batches[i]) * realDataTypeSize(TiB)]);
+                    new char[size_t(matmulCases[i].b.rows() * matmulCases[i].b.columns() * matmulCases[i].batchCount) * realDataTypeSize(TiB)]);
                 CHECK_HIP_ERROR(fast_check_copy_region_to_host(
                     fcA[i].get(),
-                    {dA[i].buf(), TiA, A_row[i], A_col[i], lda[i], stride_a[i]},
-                    num_batches[i],
+                    {dA[i].buf(), TiA, matmulCases[i].a.rows(), matmulCases[i].a.columns(), lda[i], stride_a[i]},
+                    matmulCases[i].batchCount,
                     stream));
                 CHECK_HIP_ERROR(fast_check_copy_region_to_host(
                     fcB[i].get(),
-                    {dB[i].buf(), TiB, B_row[i], B_col[i], ldb[i], stride_b[i]},
-                    num_batches[i],
+                    {dB[i].buf(), TiB, matmulCases[i].b.rows(), matmulCases[i].b.columns(), ldb[i], stride_b[i]},
+                    matmulCases[i].batchCount,
                     stream));
                 fcTypeA[i] = TiA;
                 fcTypeB[i] = TiB;
@@ -2376,11 +2367,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 // fast_check reads C only when beta is nonzero.
                 if(get_computeInterface(h_beta[i], Tc) != 0)
                 {
-                    fcC[i].reset(new char[size_t(M[i] * N[i] * num_batches[i]) * realDataTypeSize(To)]);
+                    fcC[i].reset(new char[size_t(M[i] * N[i] * matmulCases[i].batchCount) * realDataTypeSize(To)]);
                     CHECK_HIP_ERROR(fast_check_copy_region_to_host(
                         fcC[i].get(),
                         {dC[i].buf(), To, M[i], N[i], ldc[i], stride_c[i]},
-                        num_batches[i],
+                        matmulCases[i].batchCount,
                         stream));
                 }
                 if(fast_check_only && arg.c_equal_d)
@@ -2397,9 +2388,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 CHECK_HIP_ERROR(synchronize(hA[i],
                                             dA[i],
-                                            num_batches[i],
-                                            A_row[i],
-                                            A_col[i],
+                                            matmulCases[i].batchCount,
+                                            matmulCases[i].a.rows(),
+                                            matmulCases[i].a.columns(),
                                             lda[i],
                                             realDataTypeSize(TiA),
                                             do_swizzle_a,
@@ -2407,7 +2398,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 // B is always stored as K×N in memory; use (K, N, ldb) not (B_row, B_col) to avoid row > lda when transB=T
                 CHECK_HIP_ERROR(synchronize(hB[i],
                                             dB[i],
-                                            num_batches[i],
+                                            matmulCases[i].batchCount,
                                             K[i],
                                             N[i],
                                             ldb[i],
@@ -2418,7 +2409,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                 if(arg.dump_matrix)
                 {
-                    for(int batchId = 0; batchId < num_batches[i]; batchId++){
+                    for(int batchId = 0; batchId < matmulCases[i].batchCount; batchId++){
                         hipblasltDispatchValuesToFile(transA,
                                                     TiA,
                                                     M[i],
@@ -2448,7 +2439,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 HipHostBuffer tmp(TiA, size_dA[i]);
                 swizzle_tensor_type(
-                    tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], lda[i], false);
+                    tmp, hA[i], TiA, arg, matmulCases[i].batchCount, M[i], K[i], lda[i], false);
                 CHECK_HIP_ERROR(synchronize(dA[i], tmp, block_count));
             }
 
@@ -2456,20 +2447,20 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 HipHostBuffer tmp(TiB, size_dB[i]);
                 swizzle_tensor_type(
-                    tmp, hB[i], TiB, arg, num_batches[i], N[i], K[i], ldb[i], false);
+                    tmp, hB[i], TiB, arg, matmulCases[i].batchCount, N[i], K[i], ldb[i], false);
                 CHECK_HIP_ERROR(synchronize(dB[i], tmp, block_count));
             }
 
             if(arg.gradient && arg.use_e)
             {
-                hipblaslt_init(hE[i].buf(), M[i], N[i], lde[i], Taux, stride_e[i], num_batches[i]);
+                hipblaslt_init(hE[i].buf(), M[i], N[i], lde[i], Taux, stride_e[i], matmulCases[i].batchCount);
             }
 
             if(arg.bias_vector)
             {
                 // Filling up unique bias values for each batch in Strided Batch
                 if(arg.bias_stride > 0)
-                    hipblaslt_init(hBias[i].buf(), arg.bias_stride, 1, arg.bias_stride, Tbias, arg.bias_stride, num_batches[i]);
+                    hipblaslt_init(hBias[i].buf(), arg.bias_stride, 1, arg.bias_stride, Tbias, arg.bias_stride, matmulCases[i].batchCount);
                 else
                     hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
             }
@@ -2542,7 +2533,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     fast_check_poison_padding_device(
                         {dBias[i].buf(), Tbias, M[i], 1, arg.bias_stride, arg.bias_stride},
-                        num_batches[i],
+                        matmulCases[i].batchCount,
                         size_bias[i],
                         stream);
                     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
@@ -2571,8 +2562,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                            HIP_R_32F,
                                                            dScaleA[i].buf(),
                                                            dA[i].buf(),
-                                                           A_row[i],
-                                                           A_col[i],
+                                                           matmulCases[i].a.rows(),
+                                                           matmulCases[i].a.columns(),
                                                            stream));
 
                     CHECK_HIP_ERROR(synchronize(hScaleA[i], dScaleA[i]));
@@ -2590,8 +2581,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                            HIP_R_32F,
                                                            dScaleB[i].buf(),
                                                            dB[i].buf(),
-                                                           B_row[i],
-                                                           B_col[i],
+                                                           matmulCases[i].b.rows(),
+                                                           matmulCases[i].b.columns(),
                                                            stream));
                     CHECK_HIP_ERROR(synchronize(hScaleB[i], dScaleB[i]));
                 }
@@ -2769,7 +2760,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         else
         {
             alpha_in[i] = &(h_alpha[i]);
-            for(int batchCount = 0; batchCount < num_batches[i]; batchCount++)
+            for(int batchCount = 0; batchCount < matmulCases[i].batchCount; batchCount++)
             {
                 hipblaslt_init_device(ABC_dims::C,
                                       arg.initialization,
@@ -2793,16 +2784,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIP_ERROR(synchronize(hA[batchCount],
                                                 dA[batchCount],
                                                 1,
-                                                A_row[i],
-                                                A_col[i],
+                                                matmulCases[i].a.rows(),
+                                                matmulCases[i].a.columns(),
                                                 lda[i],
                                                 realDataTypeSize(TiA),
                                                 do_swizzle_a));
                     CHECK_HIP_ERROR(synchronize(hB[batchCount],
                                                 dB[batchCount],
                                                 1,
-                                                B_row[i],
-                                                B_col[i],
+                                                matmulCases[i].b.rows(),
+                                                matmulCases[i].b.columns(),
                                                 ldb[i],
                                                 realDataTypeSize(TiB),
                                                 do_swizzle_b));
@@ -2901,8 +2892,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                            HIP_R_32F,
                                                            dScaleA[i].buf(),
                                                            dA[i].buf(),
-                                                           A_row[i],
-                                                           A_col[i],
+                                                           matmulCases[i].a.rows(),
+                                                           matmulCases[i].a.columns(),
                                                            stream));
 
                     CHECK_HIP_ERROR(synchronize(hScaleA[i], dScaleA[i]));
@@ -2919,8 +2910,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                            HIP_R_32F,
                                                            dScaleB[i].buf(),
                                                            dB[i].buf(),
-                                                           B_row[i],
-                                                           B_col[i],
+                                                           matmulCases[i].b.rows(),
+                                                           matmulCases[i].b.columns(),
                                                            stream));
                     CHECK_HIP_ERROR(synchronize(hScaleB[i], dScaleB[i]));
                 }
@@ -3335,7 +3326,10 @@ void testing_matmul_with_bias(const Arguments& arg,
     {
         if(arg.use_ext_setproblem)
         {
-            auto batchCounts = std::vector<int64_t>{num_batches.begin(), num_batches.end()};
+            std::vector<int64_t> batchCounts;
+            batchCounts.reserve(matmulCases.size());
+            for(const auto& testCase : matmulCases)
+                batchCounts.push_back(testCase.batchCount);
             for(int32_t block = 0; block < block_count; ++block)
             {
                 CHECK_HIPBLASLT_ERROR(groupedGemmVec[block].setProblem(M,
@@ -3392,7 +3386,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 CHECK_HIPBLASLT_ERROR(gemmVec[block].setProblem(M[0],
                                                                 N[0],
                                                                 K[0],
-                                                                num_batches[0],
+                                                                matmulCases[0].batchCount,
                                                                 lda[0],
                                                                 ldb[0],
                                                                 ldc[0],
@@ -3728,7 +3722,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             bool const isScaleAMXFormat = isBlockScaling(arg.scaleA);
             bool const isScaleBMXFormat = isBlockScaling(arg.scaleB);
 
-            for(int batchIdx = 0; batchIdx < num_batches[gemmIdx]; batchIdx++)
+            for(int batchIdx = 0; batchIdx < matmulCases[gemmIdx].batchCount; batchIdx++)
             {
                 if(epilogue_on[gemmIdx])
                 {
@@ -3838,7 +3832,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                               : roc::host_validation::ActivationApplication::Forward;
                     hipblaslt::host_validation::referenceEpilogue(epilogue);
 
-                    if(arg.gradient && arg.bias_vector && batchIdx == num_batches[gemmIdx] - 1)
+                    if(arg.gradient && arg.bias_vector && batchIdx == matmulCases[gemmIdx].batchCount - 1)
                     {
                         auto* hBias_gold_buf = hBias_gold[gemmIdx].buf();
                         if(arg.bias_stride > 0 && hBias_gold_buf != nullptr)
@@ -4117,8 +4111,8 @@ void testing_matmul_with_bias(const Arguments& arg,
               {
                   MatmulValidationCase testCase;
                   testCase.pointwiseTolerance = pointwiseTolerances.front();
-                  testCase.outputs.reserve(num_batches.front());
-                  for(int batch = 0; batch < num_batches.front(); ++batch)
+                  testCase.outputs.reserve(matmulCases.front().batchCount);
+                  for(int batch = 0; batch < matmulCases.front().batchCount; ++batch)
                   {
                       testCase.outputs.push_back(output(M.front(),
                                                         N.front(),
@@ -4142,7 +4136,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     N[gemmIdx],
                                                     ldd[gemmIdx],
                                                     stride_d[gemmIdx],
-                                                    num_batches[gemmIdx],
+                                                    matmulCases[gemmIdx].batchCount,
                                                     hD_gold[gemmIdx].buf(),
                                                     hD_1[gemmIdx].buf(),
                                                     To));
@@ -4152,7 +4146,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                             1,
                                             1,
                                             1,
-                                            num_batches[gemmIdx],
+                                            matmulCases[gemmIdx].batchCount,
                                             hAmaxD_gold[gemmIdx].buf(),
                                             hAmaxD[gemmIdx].buf(),
                                             Talpha);
@@ -4165,7 +4159,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                             N[gemmIdx],
                                             lde[gemmIdx],
                                             stride_e[gemmIdx],
-                                            num_batches[gemmIdx],
+                                            matmulCases[gemmIdx].batchCount,
                                             hE_gold[gemmIdx].buf(),
                                             hE[gemmIdx].buf(),
                                             Taux);
@@ -4178,7 +4172,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               1,
                                               size_bias[gemmIdx],
                                               size_bias[gemmIdx],
-                                              num_batches[gemmIdx],
+                                              matmulCases[gemmIdx].batchCount,
                                               hBias_gold[gemmIdx].buf(),
                                               hBias[gemmIdx].buf(),
                                               Tbias);
@@ -4186,7 +4180,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                          1,
                                          M[gemmIdx],
                                          M[gemmIdx],
-                                         num_batches[gemmIdx],
+                                         matmulCases[gemmIdx].batchCount,
                                          hBias_gold[gemmIdx].buf(),
                                          hBias[gemmIdx].buf(),
                                          Tbias);
@@ -4220,11 +4214,11 @@ void testing_matmul_with_bias(const Arguments& arg,
             fp.M           = M[i];
             fp.N           = N[i];
             fp.K           = K[i];
-            fp.batch_count = num_batches[i];
+            fp.batch_count = matmulCases[i].batchCount;
             fp.transA      = transA != HIPBLAS_OP_N;
             fp.transB      = transB != HIPBLAS_OP_N;
-            fp.A = {fcA[i].get(), fcTypeA[i], A_row[i], A_col[i], A_row[i], A_row[i] * A_col[i]};
-            fp.B = {fcB[i].get(), fcTypeB[i], B_row[i], B_col[i], B_row[i], B_row[i] * B_col[i]};
+            fp.A = {fcA[i].get(), fcTypeA[i], matmulCases[i].a.rows(), matmulCases[i].a.columns(), matmulCases[i].a.rows(), matmulCases[i].a.rows() * matmulCases[i].a.columns()};
+            fp.B = {fcB[i].get(), fcTypeB[i], matmulCases[i].b.rows(), matmulCases[i].b.columns(), matmulCases[i].b.rows(), matmulCases[i].b.rows() * matmulCases[i].b.columns()};
             fp.C           = {fcC[i].get(), To, M[i], N[i], M[i], M[i] * N[i]};
             fp.D           = d_dev;
             fp.compute_type = Tc;
@@ -4481,7 +4475,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                 // The self-test corrupts one element of the last batch of D after the launch,
                 // so only this iteration's result is wrong.
-                const int64_t injRow = M[0] / 2, injCol = N[0] / 2, injBatch = num_batches[0] - 1;
+                const int64_t injRow = M[0] / 2, injCol = N[0] / 2, injBatch = matmulCases[0].batchCount - 1;
                 if(iter == arg.fast_check_inject)
                     CHECK_HIP_ERROR(fast_check_corrupt_element_device(
                         {(*dDp)[0].buf(), To, M[0], N[0], ldd[0], stride_d[0]},
@@ -4518,7 +4512,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     FastCheckMatrix d_dev{(*dDp)[i].buf(), To, M[i], N[i], ldd[i], stride_d[i]};
                     FastCheckResult scan = fast_check_scan_padding_device(
-                        d_dev, num_batches[i], size_D[i], arg.c_equal_d, stream);
+                        d_dev, matmulCases[i].batchCount, size_D[i], arg.c_equal_d, stream);
 
                     FastCheckProblem fp = fcProblem(i, d_dev);
                     // With an activation D is not linear in the inputs; it is checked through E.
@@ -4529,7 +4523,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     {
                         FastCheckProblem fpE   = fcProblemE(i);
                         FastCheckResult  scanE = fast_check_scan_padding_device(
-                            fpE.D, num_batches[i], size_E[i], false, stream);
+                            fpE.D, matmulCases[i].batchCount, size_E[i], false, stream);
                         FastCheckResult resE
                             = fast_check_result_device(fpE, fcExpectedE[i], stream);
                         if(!scanE.passed || !resE.passed)
@@ -4538,7 +4532,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         {
                             res = fast_check_activation_device(d_dev,
                                                                fpE.D,
-                                                               num_batches[i],
+                                                               matmulCases[i].batchCount,
                                                                fp.scale_d,
                                                                fpE.scale_d,
                                                                fcActivation,
@@ -4554,7 +4548,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         if(fcActivation != FastCheckActivation::none)
                             fast_check_activation_device(d_dev,
                                                          fcProblemE(i).D,
-                                                         num_batches[i],
+                                                         matmulCases[i].batchCount,
                                                          fp.scale_d,
                                                          fcProblemE(i).scale_d,
                                                          fcActivation,
@@ -4564,7 +4558,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                          &want);
                         else
                             want
-                                = fast_check_amax_device(d_dev, num_batches[i], fp.scale_d, stream);
+                                = fast_check_amax_device(d_dev, matmulCases[i].batchCount, fp.scale_d, stream);
                         double got = 0;
                         CHECK_HIP_ERROR(
                             synchronize(hAmaxD[i], dAmaxD[i], 0, 0, 0, 0, 1, false, stream));
@@ -4609,10 +4603,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                         // MX scales are one byte each, and either can be placed.
                         if(isBlockScaling(arg.scaleA))
                             buffers.push_back(
-                                {"scale_a", dScaleA[i].buf(), size_scaleAVec[i] * num_batches[i]});
+                                {"scale_a", dScaleA[i].buf(), size_scaleAVec[i] * matmulCases[i].batchCount});
                         if(isBlockScaling(arg.scaleB))
                             buffers.push_back(
-                                {"scale_b", dScaleB[i].buf(), size_scaleBVec[i] * num_batches[i]});
+                                {"scale_b", dScaleB[i].buf(), size_scaleBVec[i] * matmulCases[i].batchCount});
                         reportFailure("fast_check",
                                       scan.message + res.message
                                           + fast_check_describe_buffers(buffers));
@@ -5245,7 +5239,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 if(arg.dump_matrix)
                 {
-                    for(int batchId = 0; batchId < num_batches[0]; batchId++)
+                    for(int batchId = 0; batchId < matmulCases[0].batchCount; batchId++)
                     {
                         hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
                                                     To,
