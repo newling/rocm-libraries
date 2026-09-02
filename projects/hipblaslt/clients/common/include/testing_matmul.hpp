@@ -35,20 +35,6 @@
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_test.hpp"
-#include <hipblaslt/client/MatmulPreparation.hpp>
-#include <hipblaslt/client/MatmulProblem.hpp>
-#include <hipblaslt/host_numerics/Epilogue.hpp>
-#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_numerics/HipblasltReferenceGemm.hpp>
-#include <hipblaslt/host_numerics/MatmulValidation.hpp>
-#include <hipblaslt/host_numerics/Reduction.hpp>
-#include <hipblaslt/host_numerics/hipblaslt_init.hpp>
-#include <hipblaslt/host_numerics/hipblaslt_vector.hpp>
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
-#include <roc/host_numerics/mx.hpp>
-#endif
-#include <roc/host_numerics/backends/blas.hpp>
 #include "utility.hpp"
 #include <algorithm>
 #include <array>
@@ -56,9 +42,18 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <hipblaslt/client/MatmulPreparation.hpp>
+#include <hipblaslt/client/MatmulProblem.hpp>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/host_numerics/Epilogue.hpp>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/HipblasltReferenceGemm.hpp>
+#include <hipblaslt/host_numerics/MatmulValidation.hpp>
+#include <hipblaslt/host_numerics/Reduction.hpp>
+#include <hipblaslt/host_numerics/hipblaslt_init.hpp>
+#include <hipblaslt/host_numerics/hipblaslt_vector.hpp>
 #include <hipblaslt/host_numerics/near.hpp>
 #include <iomanip>
 #include <limits>
@@ -67,6 +62,9 @@
 #include <numeric>
 #include <omp.h>
 #include <optional>
+#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
+#include <roc/host_numerics/backends/blas.hpp>
+#include <roc/host_numerics/mx.hpp>
 #include <set>
 #include <span>
 #include <vector>
@@ -1524,7 +1522,6 @@ void testing_matmul_with_bias(const Arguments&                                  
                   || arg.initialization == hipblaslt_initialization::trig_float);
         set_integer_exact_pattern_state(iePattern, size_t(matmulProblems[i].k), transA != HIPBLAS_OP_N);
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
         hipDeviceProp_t mxProp{};
         if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
             CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProp, 0));
@@ -1582,13 +1579,10 @@ void testing_matmul_with_bias(const Arguments&                                  
                       std::as_writable_bytes(std::span<float>(reference.data(), reference.size())));
                   return reference;
               };
-#endif
-
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
         if(isBlockScaling(arg.scaleA))
         {
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01
@@ -1648,17 +1642,6 @@ void testing_matmul_with_bias(const Arguments&                                  
             refA.emplace_back(std::move(refAAll));
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
-#else
-#ifdef GOOGLE_TEST
-            GTEST_SKIP() << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON "
-                            "at build time";
-#else
-            hipblaslt_cout << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON "
-                              "at build time"
-                           << std::endl;
-            return;
-#endif
-#endif
         }
         else
         {
@@ -1705,7 +1688,6 @@ void testing_matmul_with_bias(const Arguments&                                  
         size_t scaleB_col = ((transB == HIPBLAS_OP_T) ? blockSize(arg.scaleB) : 1);
         if(isBlockScaling(arg.scaleB))
         {
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
             // MX B always goes through host numerics (mirrors the A side above).
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
@@ -1766,17 +1748,6 @@ void testing_matmul_with_bias(const Arguments&                                  
             refB.emplace_back(std::move(refBAll));
             CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
-#else
-#ifdef GOOGLE_TEST
-            GTEST_SKIP() << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON "
-                            "at build time";
-#else
-            hipblaslt_cout << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON "
-                              "at build time"
-                           << std::endl;
-            return;
-#endif
-#endif
         }
         else
         {
