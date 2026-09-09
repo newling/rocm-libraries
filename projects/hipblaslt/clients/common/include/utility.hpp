@@ -29,7 +29,6 @@
 #include "d_vector.hpp"
 #include "device_vector.hpp"
 #include "host_vector.hpp"
-#include <hipblaslt/host_numerics/hipblaslt_init.hpp>
 #include <cstdio>
 #include <hipblaslt/hipblaslt.h>
 #include <iomanip>
