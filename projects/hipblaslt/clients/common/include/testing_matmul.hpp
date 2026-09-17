@@ -6176,8 +6176,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                         // through the algo accessor instead.
 #ifdef HIPBLASLT_ENABLE_TUNING_CACHE
                         if(tuningEnv)
+                        {
+                            solutionName = hipblaslt_ext::getSolutionNameFromAlgo(
+                                handle, heuristicResult[sol].algo);
                             kernelName = hipblaslt_ext::getKernelNameFromAlgo(
                                 handle, heuristicResult[sol].algo);
+                        }
 #endif
                     }
                     else

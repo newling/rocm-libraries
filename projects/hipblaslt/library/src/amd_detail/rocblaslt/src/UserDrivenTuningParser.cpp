@@ -701,8 +701,10 @@ namespace TensileLite
         // Permissive defaults remain solely for schema-less v0 rows.
         bool hasRequiredCurrentColumns(const std::map<std::string, std::string>& row)
         {
-            if((str(row, "transA") != "N" && str(row, "transA") != "T")
-               || (str(row, "transB") != "N" && str(row, "transB") != "T"))
+            const auto validOperation = [](const std::string& value) {
+                return value == "N" || value == "T" || value == "C";
+            };
+            if(!validOperation(str(row, "transA")) || !validOperation(str(row, "transB")))
                 return false;
 
             static const char* const requiredText[]
@@ -719,10 +721,12 @@ namespace TensileLite
                                                       "ldb",
                                                       "ldc",
                                                       "ldd",
+                                                      "lde",
                                                       "stride_a",
                                                       "stride_b",
                                                       "stride_c",
                                                       "stride_d",
+                                                      "stride_e",
                                                       "required_workspace"};
             for(const char* name : nonNegative)
             {
@@ -759,7 +763,8 @@ namespace TensileLite
                                                      "scaleAlphaVec",
                                                      "amaxD",
                                                      "swizzle_a",
-                                                     "swizzle_b"};
+                                                     "swizzle_b",
+                                                     "uniform_summation_order"};
             for(const char* name : boolFields)
             {
                 const auto value = exactNum(row, name);
@@ -767,10 +772,10 @@ namespace TensileLite
                     return false;
             }
 
-            const bool hasName
-                = (has(row, "kernel_name") && !str(row, "kernel_name").empty())
-                  || (has(row, "solution_name") && !str(row, "solution_name").empty());
-            if(!hasName)
+            const bool hasKernelName = has(row, "kernel_name") && !str(row, "kernel_name").empty();
+            const bool hasSolutionName
+                = has(row, "solution_name") && !str(row, "solution_name").empty();
+            if(!hasKernelName || !hasSolutionName)
                 return false;
 
             return true;
@@ -807,8 +812,16 @@ namespace TensileLite
 
         ProblemOverride po;
 
-        po.transA = str(row, "transA", "N") != "N";
-        po.transB = str(row, "transB", "N") != "N";
+        const auto operationCode = [&](const char* name) {
+            const std::string value = str(row, name, "N");
+            if(value == "N")
+                return int32_t{0};
+            if(schemaVersion == TuningSchemaVersion::Current && value == "C")
+                return int32_t{2};
+            return int32_t{1};
+        };
+        po.operationA = operationCode("transA");
+        po.operationB = operationCode("transB");
 
         po.m         = static_cast<size_t>(num(row, "m"));
         po.n         = static_cast<size_t>(num(row, "n"));
@@ -857,10 +870,12 @@ namespace TensileLite
         po.colStrideB   = static_cast<size_t>(num(row, "ldb"));
         po.colStrideC   = static_cast<size_t>(num(row, "ldc"));
         po.colStrideD   = static_cast<size_t>(num(row, "ldd"));
+        po.colStrideE   = static_cast<size_t>(num(row, "lde"));
         po.batchStrideA = static_cast<size_t>(num(row, "stride_a"));
         po.batchStrideB = static_cast<size_t>(num(row, "stride_b"));
         po.batchStrideC = static_cast<size_t>(num(row, "stride_c"));
         po.batchStrideD = static_cast<size_t>(num(row, "stride_d"));
+        po.batchStrideE = static_cast<size_t>(num(row, "stride_e"));
         po.batchMode    = static_cast<int32_t>(num(row, "batch_mode"));
 
         po.epilogue   = static_cast<int32_t>(num(row, "epilogue"));
@@ -884,6 +899,7 @@ namespace TensileLite
         po.swizzleB              = flag(row, "swizzle_b");
         po.streamkTileScheduling = static_cast<int32_t>(num(row, "streamk_tile_scheduling"));
         po.smCountTarget         = static_cast<int32_t>(num(row, "sm_count_target"));
+        po.uniformSummationOrder = static_cast<int32_t>(num(row, "uniform_summation_order"));
 
         // Kept unstripped. The library's own rocblaslt_internal_get_arch_name()
         // truncates at the first colon, which would discard sramecc and xnack;
@@ -979,6 +995,19 @@ namespace TensileLite
                 return "f32_r";
             }
         }
+
+        const char* operationToString(hipblasOperation_t operation)
+        {
+            switch(operation)
+            {
+            case HIPBLAS_OP_N:
+                return "N";
+            case HIPBLAS_OP_C:
+                return "C";
+            default:
+                return "T";
+            }
+        }
     } // namespace
 
 #ifdef HIPBLASLT_ENABLE_TUNING_CACHE
@@ -1027,8 +1056,8 @@ namespace TensileLite
         column("schema_version", static_cast<uint32_t>(TuningSchemaVersion::Current));
         column("git_version", currentBuildStamp());
 
-        column("transA", problem.trans_a == HIPBLAS_OP_N ? "N" : "T");
-        column("transB", problem.trans_b == HIPBLAS_OP_N ? "N" : "T");
+        column("transA", operationToString(problem.trans_a));
+        column("transB", operationToString(problem.trans_b));
         column("m", problem.m);
         column("n", problem.n);
         column("k", problem.k);
@@ -1046,10 +1075,12 @@ namespace TensileLite
         column("ldb", problem.col_stride_b);
         column("ldc", problem.col_stride_c);
         column("ldd", problem.col_stride_d);
+        column("lde", problem.col_stride_e);
         column("stride_a", problem.batch_stride_a);
         column("stride_b", problem.batch_stride_b);
         column("stride_c", problem.batch_stride_c);
         column("stride_d", problem.batch_stride_d);
+        column("stride_e", problem.batch_stride_e);
         column("batch_mode", static_cast<int32_t>(problem.batchMode));
 
         column("epilogue", static_cast<int32_t>(problem.epilogue));
@@ -1073,6 +1104,7 @@ namespace TensileLite
         column("swizzle_b", problem.swizzleB ? 1 : 0);
         column("streamk_tile_scheduling", problem.streamk_tile_scheduling_ext);
         column("sm_count_target", problem.sm_count_target);
+        column("uniform_summation_order", problem.uniform_summation_order);
 
         // From the canonical builder rather than a fresh device query, so the
         // arch recorded here is byte-identical to what a later lookup compares.
@@ -1081,6 +1113,7 @@ namespace TensileLite
 
         column("solution_index", entry.solutionIndex);
         column("kernel_name", entry.kernelName.value_or(std::string{}));
+        column("solution_name", entry.solutionName.value_or(std::string{}));
         column("required_workspace", entry.requiredWorkspaceBytes);
         column("us", entry.winnerTimeUs);
 

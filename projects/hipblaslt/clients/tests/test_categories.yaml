@@ -49,6 +49,7 @@ test_categories:
       # patterns above can select them and they would otherwise never run.
       # The whole fixture is about ten seconds.
       - "TuningCache.*"
+      - "TuningCacheMap.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -64,6 +65,7 @@ test_categories:
       - "*pre_checkin*"
       - "*nightly*"
       - "TuningCache.*"
+      - "TuningCacheMap.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -80,6 +82,7 @@ test_categories:
       - "*nightly*"
       - "*HMM*"
       - "TuningCache.*"
+      - "TuningCacheMap.*"
     exclude:
       - "*known_bug*"
     labels:

@@ -326,11 +326,9 @@ public:
             name_list << delim << "solution_index";
             value_list << delim << solution_index;
 #ifdef HIPBLASLT_ENABLE_TUNING_CACHE
-            // Record the name beside the index so replay can confirm the index
-            // still identifies the kernel that was actually tuned. The kernel
-            // name rather than the solution name, because that is the field the
-            // library validates against and it leaves out the solution-level
-            // GSU/WGM defaults.
+            // Record both levels of identity beside the index. The kernel name
+            // identifies the compiled kernel; the solution name also captures
+            // launch-shaping defaults such as GSU and WGM.
             //
             // Only when the library can act on it. A build without the tuning
             // cache validates offline files on the build stamp alone, exactly as
@@ -339,6 +337,8 @@ public:
             // were produced for.
             name_list << delim << "kernel_name";
             value_list << delim << hipblaslt_strip_custom_tuning_suffix(kernel_name);
+            name_list << delim << "solution_name";
+            value_list << delim << hipblaslt_strip_custom_tuning_suffix(solution_name);
 #endif
 
             const char*   tuningEnv  = getenv("HIPBLASLT_TUNING_FILE");

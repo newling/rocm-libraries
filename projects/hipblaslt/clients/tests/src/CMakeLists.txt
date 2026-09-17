@@ -27,6 +27,14 @@ if(HIPBLASLT_ENABLE_TUNING_CACHE)
     target_sources(hipblaslt-test
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/tuning_cache_test.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/tuning_cache_map_test.cpp
+    )
+
+    # Keep the internal include path scoped to the map test. Adding it to the
+    # whole target shadows the clients' unrelated utility.hpp.
+    set_source_files_properties(tuning_cache_map_test.cpp PROPERTIES
+        INCLUDE_DIRECTORIES
+            "${PROJECT_SOURCE_DIR}/library/src/amd_detail/include;${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include;${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include"
     )
 endif()
 

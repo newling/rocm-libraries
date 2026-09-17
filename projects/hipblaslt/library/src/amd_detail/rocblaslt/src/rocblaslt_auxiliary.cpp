@@ -194,33 +194,41 @@ namespace
                                       const rocblaslt_matmul_heuristic_result& resolved)
     {
         // Each name is checked against the accessor it was written from.
-        // kernel_name is what new rows carry; solution_name is only still read
-        // so files written before the switch keep validating rather than all
-        // failing at once.
+        // Current rows carry both; legacy rows can carry either one or neither.
         //
         // Both accessors give the bare name. getSolutionNameFromData decorates
         // with GSU/WGM suffixes when they differ from the solution defaults,
         // which would never round-trip against what the writer stored.
+        std::string identityKind;
         std::string recorded;
         std::string currentName;
 
         if(entry.kernelName.has_value())
         {
-            recorded    = *entry.kernelName;
-            currentName = getKernelNameFromAlgoIndex(handle, resolved.algo);
-        }
-        else if(entry.solutionName.has_value())
-        {
-            recorded    = *entry.solutionName;
-            currentName = getSolutionNameFromAlgoIndex(handle, resolved.algo);
-        }
-        else
-        {
-            return true;
+            const std::string current = getKernelNameFromAlgoIndex(handle, resolved.algo);
+            if(current != *entry.kernelName)
+            {
+                identityKind = "kernel";
+                recorded     = *entry.kernelName;
+                currentName  = current;
+            }
         }
 
-        if(currentName == recorded)
+        if(identityKind.empty() && entry.solutionName.has_value())
+        {
+            const std::string current = getSolutionNameFromAlgoIndex(handle, resolved.algo);
+            if(current != *entry.solutionName)
+            {
+                identityKind = "solution";
+                recorded     = *entry.solutionName;
+                currentName  = current;
+            }
+        }
+
+        if(identityKind.empty())
+        {
             return true;
+        }
 
         auto& counters = TensileLite::TuningCounters::instance();
 
@@ -244,9 +252,9 @@ namespace
 #endif
         {
             std::ostringstream msg;
-            msg << "tuning-cache: cache-invalid index=" << entry.solutionIndex
-                << " now resolves to '" << currentName << "', recorded '" << recorded << "' ["
-                << counters.summary() << "]";
+            msg << "tuning-cache: cache-invalid index=" << entry.solutionIndex << " "
+                << identityKind << " now resolves to '" << currentName << "', recorded '"
+                << recorded << "' [" << counters.summary() << "]";
             log_info(__func__, msg.str());
         }
 

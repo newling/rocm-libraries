@@ -32,6 +32,7 @@
 #include <Tensile/DataTypes.hpp>
 #include <shared_mutex>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -214,7 +215,7 @@ namespace TensileLite
     enum class TuningSchemaVersion : uint32_t
     {
         Legacy  = 0,
-        Current = 1,
+        Current = 2,
     };
 
     /**
@@ -272,8 +273,11 @@ namespace TensileLite
         ProblemOverride() = default;
 
         // Orientation and shape
-        bool   transA     = false;
-        bool   transB     = false;
+        // N, T and C are distinct in the current schema. The historical file
+        // format collapsed every non-N operation to T; legacyKey() retains that
+        // behavior without weakening current rows.
+        int32_t operationA = 0;
+        int32_t operationB = 0;
         size_t m          = 0;
         size_t n          = 0;
         size_t k          = 0;
@@ -294,10 +298,12 @@ namespace TensileLite
         size_t colStrideB   = 0;
         size_t colStrideC   = 0;
         size_t colStrideD   = 0;
+        size_t  colStrideE   = 0;
         size_t batchStrideA = 0;
         size_t batchStrideB = 0;
         size_t batchStrideC = 0;
         size_t batchStrideD = 0;
+        size_t  batchStrideE = 0;
         int32_t batchMode   = 0;
 
         // Epilogue. The enum is kept whole rather than decomposed into an
@@ -327,6 +333,7 @@ namespace TensileLite
         bool    swizzleB               = false;
         int32_t streamkTileScheduling  = 0;
         int32_t smCountTarget          = 0;
+        int32_t uniformSummationOrder  = 0;
 
         // Device identity. Entries are scoped to the architecture they were
         // measured on; replaying a gfx942 winner on gfx950 is meaningless.
@@ -340,8 +347,8 @@ namespace TensileLite
          */
         auto key_tuple() const
         {
-            return std::tie(transA,
-                            transB,
+            return std::tie(operationA,
+                            operationB,
                             m,
                             n,
                             k,
@@ -357,10 +364,12 @@ namespace TensileLite
                             colStrideB,
                             colStrideC,
                             colStrideD,
+                            colStrideE,
                             batchStrideA,
                             batchStrideB,
                             batchStrideC,
                             batchStrideD,
+                            batchStrideE,
                             batchMode,
                             epilogue,
                             gradient,
@@ -381,6 +390,7 @@ namespace TensileLite
                             swizzleB,
                             streamkTileScheduling,
                             smCountTarget,
+                            uniformSummationOrder,
                             archName,
                             cuCount);
         }
@@ -397,8 +407,8 @@ namespace TensileLite
         ProblemOverride legacyKey() const
         {
             ProblemOverride k;
-            k.transA      = transA;
-            k.transB      = transB;
+            k.operationA  = operationA == 0 ? 0 : 1;
+            k.operationB  = operationB == 0 ? 0 : 1;
             k.m           = m;
             k.n           = n;
             k.k           = k_dim();
@@ -431,12 +441,12 @@ namespace TensileLite
         // the entry; both absent means a legacy row with nothing to check but
         // the build stamp.
         //
-        // kernelName is what new rows carry. It names the compiled kernel and
-        // leaves out the solution-level defaults (GSU, staggerU, WGM) that
-        // solutionName also encodes, so it is both shorter and stable across a
-        // build that only retunes those defaults. solutionName is still read so
-        // files written before the switch keep validating, against the field
-        // they were actually written from.
+        // Current rows carry both names. kernelName identifies the compiled
+        // kernel, while solutionName also captures solution-level defaults such
+        // as GSU, staggerU and WGM. Requiring both prevents a rebuild that keeps
+        // the same kernel but changes its launch configuration from replaying a
+        // measurement made under the old defaults. Either field may still appear
+        // alone in a legacy row and is validated against what that row recorded.
         std::optional<std::string> kernelName;
         std::optional<std::string> solutionName;
 
@@ -772,7 +782,13 @@ namespace TensileLite
         }
 
         /**
-         * Copy out every entry matching a key.
+         * Copy out every current-schema entry matching a key in replay order.
+         *
+         * Complete entries precede partial entries, and each group is newest
+         * first. The managed cache is append-only, so this makes a completed
+         * top-up supersede the partial row it followed instead of leaving the
+         * older row permanently first. Legacy rows retain their historical file
+         * order in findLegacy().
          *
          * Returns values rather than iterators on purpose. The previous
          * signature returned an equal_range pair after its shared_lock had gone
@@ -786,8 +802,11 @@ namespace TensileLite
 
             std::vector<TunedEntry> found;
             auto                    range = m_override.equal_range(prob_key);
-            for(auto it = range.first; it != range.second; ++it)
-                found.push_back(it->second);
+            for(auto it = range.second; it != range.first;)
+                found.push_back((--it)->second);
+
+            std::stable_partition(
+                found.begin(), found.end(), [](const TunedEntry& entry) { return entry.complete; });
 
             return found;
         }

@@ -762,9 +762,13 @@ namespace
         ASSERT_TRUE(std::ifstream(m_path).good()) << "tune mode recorded nothing";
 
         EXPECT_TRUE(fileHasColumn(m_path, "kernel_name"));
+        EXPECT_TRUE(fileHasColumn(m_path, "solution_name"));
         EXPECT_TRUE(fileHasColumn(m_path, "schema_version"));
         EXPECT_TRUE(fileHasColumn(m_path, "compute_input_type_a"));
         EXPECT_TRUE(fileHasColumn(m_path, "gcnArchName"));
+        EXPECT_TRUE(fileHasColumn(m_path, "lde"));
+        EXPECT_TRUE(fileHasColumn(m_path, "stride_e"));
+        EXPECT_TRUE(fileHasColumn(m_path, "uniform_summation_order"));
 
         // Nothing reads these back, so writing them would commit the format to
         // data with no consumer.
@@ -875,6 +879,44 @@ namespace
         const auto c = counters();
         EXPECT_GE(c.invalidated, 1u);
         EXPECT_EQ(c.hits, 0u);
+    }
+
+    // A matching compiled kernel is not enough: solution-level defaults such
+    // as GSU and WGM are part of the launch that was measured.
+    TEST_F(TuningCache, TamperedSolutionNameIsRejected)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+
+        ASSERT_GT(valueRowCount(m_path), 0u) << "tune mode recorded nothing";
+        ASSERT_TRUE(rewriteColumn(m_path, "solution_name", "NotARealSolutionName"));
+
+        enterMode("cache", m_path);
+        EXPECT_TRUE(runGemm(1024, 512, 1024)) << "rejecting an entry must not fail the call";
+
+        const auto c = counters();
+        EXPECT_GE(c.invalidated, 1u);
+        EXPECT_EQ(c.hits, 0u);
+    }
+
+    // Every current-schema field that affects solution selection must be part
+    // of the lookup key. Changing one in the persisted row must make it miss.
+    TEST_F(TuningCache, AddedSemanticKeyFieldsAreMatched)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_GT(valueRowCount(m_path), 0u) << "tune mode recorded nothing";
+
+        ASSERT_TRUE(rewriteColumn(m_path, "uniform_summation_order", "1"));
+        ASSERT_TRUE(rewriteColumn(m_path, "lde", "1"));
+        ASSERT_TRUE(rewriteColumn(m_path, "stride_e", "1"));
+
+        enterMode("cache", m_path);
+        EXPECT_TRUE(runGemm(1024, 512, 1024));
+
+        const auto c = counters();
+        EXPECT_EQ(c.hits, 0u);
+        EXPECT_GE(c.misses, 1u);
     }
 
     // Re-tuning must be possible once every entry for a shape has gone stale,

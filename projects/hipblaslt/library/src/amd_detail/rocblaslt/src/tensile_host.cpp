@@ -3210,8 +3210,15 @@ TensileLite::ProblemOverride
 {
     TensileLite::ProblemOverride po;
 
-    po.transA    = problem.trans_a != HIPBLAS_OP_N;
-    po.transB    = problem.trans_b != HIPBLAS_OP_N;
+    const auto operationCode = [](hipblasOperation_t operation) {
+        if(operation == HIPBLAS_OP_N)
+            return int32_t{0};
+        if(operation == HIPBLAS_OP_C)
+            return int32_t{2};
+        return int32_t{1};
+    };
+    po.operationA = operationCode(problem.trans_a);
+    po.operationB = operationCode(problem.trans_b);
     po.m         = problem.m;
     po.n         = problem.n;
     po.k         = problem.k;
@@ -3235,10 +3242,12 @@ TensileLite::ProblemOverride
     po.colStrideB   = problem.col_stride_b;
     po.colStrideC   = problem.col_stride_c;
     po.colStrideD   = problem.col_stride_d;
+    po.colStrideE   = problem.col_stride_e;
     po.batchStrideA = problem.batch_stride_a;
     po.batchStrideB = problem.batch_stride_b;
     po.batchStrideC = problem.batch_stride_c;
     po.batchStrideD = problem.batch_stride_d;
+    po.batchStrideE = problem.batch_stride_e;
     po.batchMode    = static_cast<int32_t>(problem.batchMode);
 
     po.epilogue   = static_cast<int32_t>(problem.epilogue);
@@ -3262,6 +3271,7 @@ TensileLite::ProblemOverride
     po.swizzleB              = problem.swizzleB;
     po.streamkTileScheduling = problem.streamk_tile_scheduling_ext;
     po.smCountTarget         = problem.sm_count_target;
+    po.uniformSummationOrder = problem.uniform_summation_order;
 
     const auto& device = getDeviceIdentity();
     po.archName        = device.archName;
@@ -3299,7 +3309,10 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
     {
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(data)
+        {
             data->problem.setParams().setStreamKTileSchedulingMode(mode);
+            data->tuningKey.streamkTileScheduling = mode;
+        }
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
@@ -3329,7 +3342,9 @@ void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
         if(data)
         {
             const bool existing = data->problem.getParams().uniformSummationOrder();
-            data->problem.setParams().setUniformSummationOrder(existing || value);
+            const bool effective = existing || value;
+            data->problem.setParams().setUniformSummationOrder(effective);
+            data->tuningKey.uniformSummationOrder = effective ? 1 : 0;
         }
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
@@ -4776,6 +4791,7 @@ namespace
                 // index, so the name written here is the name replay will
                 // compare against via getKernelNameFromAlgoIndex.
                 winnerOut.kernelName = solution->kernelName;
+                winnerOut.solutionName = solution->solutionName;
             }
         }
 

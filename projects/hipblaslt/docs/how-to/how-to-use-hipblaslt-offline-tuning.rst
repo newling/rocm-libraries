@@ -70,8 +70,8 @@ To find and use the best GEMM kernel for a problem, follow these steps:
       ./hipblaslt-bench --api_method c -m 1024 -n 512 -k 1024 --lda 1024 --ldb 1024 --ldc 1024 --ldd 1024  --stride_a 0 --stride_b 0 --stride_c 0 --stride_d 0  --alpha 1.000000 --beta 1.000000 --transA N --transB N --batch_count 1  --a_type f16_r --b_type f16_r --c_type f16_r --d_type f16_r --scale_type f32_r --bias_type f32_r   --compute_type f32_r --algo_method index --solution_index 56073
 
       Winner:
-      transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,solution_index,kernel_name
-      N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,66613.8,363.509,16.1189,56537,<kernel_name>
+      transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,solution_index,kernel_name,solution_name
+      N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,66613.8,363.509,16.1189,56537,<kernel_name>,<solution_name>
 
 
 #. Set the environment variable ``HIPBLASLT_TUNING_OVERRIDE_FILE=<file_name>`` to load the tuning file and override
@@ -90,22 +90,23 @@ To find and use the best GEMM kernel for a problem, follow these steps:
 
       ./hipblaslt-bench --api_method c -m 1024 -n 512 -k 1024 --lda 1024 --ldb 1024 --ldc 1024 --ldd 1024  --stride_a 0 --stride_b 0 --stride_c 0 --stride_d 0  --alpha 1.000000 --beta 1.000000 --transA N --transB N --batch_count 1  --a_type f16_r --b_type f16_r --c_type f16_r --d_type f16_r --scale_type f32_r --bias_type f32_r   --compute_type f32_r --algo_method heuristic --requested_solution 1 --print_kernel_info
 
-      transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,solution_index,kernel_name
+      transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,solution_index,kernel_name,solution_name
       [0]:
-      N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,37575.2,205.047,28.5758,56537,<kernel_name>
+      N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,37575.2,205.047,28.5758,56537,<kernel_name>,<solution_name>
 
 How tuned entries are validated
 ===============================
 
-A tuning file records a ``kernel_name`` next to each ``solution_index``. When the file is replayed,
-the index is treated as a lookup hint: hipBLASLt resolves it in the current library and uses it only
-if it still names the same kernel. If it does not, that entry is rejected and the problem falls back
-to normal heuristic selection.
+A tuning file records ``kernel_name`` and ``solution_name`` next to each ``solution_index``. When the
+file is replayed, the index is treated as a lookup hint: hipBLASLt resolves it in the current library
+and uses it only if both names still match. The kernel name identifies the compiled kernel, while the
+solution name also covers launch-shaping defaults such as GSU and WGM. A mismatch rejects the entry
+and falls back to normal heuristic selection.
 
 Validation is per entry, so upgrading hipBLASLt thins a tuning file rather than discarding it, and
-only the shapes that failed need re-tuning. Files written by an older hipBLASLt may carry a
-``solution_name`` instead, which is validated the same way, and files older still carry no name at
-all; those last are used only when the file was produced by the running build.
+only the shapes that failed need re-tuning. Files written by an older hipBLASLt may carry only one of
+those names, which is validated against the corresponding current value, and files older still carry
+no name at all; those last are used only when the file was produced by the running build.
 
 Runtime tuning
 ==============
@@ -134,7 +135,7 @@ matmul, and appends the winner to the cache file. ``cache`` only replays what th
 contains, validating each entry as described above. ``off`` is the default and changes nothing.
 
 The cache file uses the same header/value-row format as an offline tuning file, so a file produced by
-one can be read by the other. Runtime-tuned rows include a schema version and use the complete problem
+one can be read by the other. Runtime-tuned rows include a schema version and use an expanded problem
 key. Rows produced by the current ``hipblaslt-bench`` writer have no schema version and retain the
 historical matching behavior: they distinguish transpose, shape and the principal datatypes, but not
 leading dimensions, batch strides, epilogue details or device identity. Do not put offline-tuned
