@@ -904,10 +904,10 @@ endif()
 # ~6.5 MB shared library without pulling hipblaslt's ~1.6 GB of Tensile kernel
 # binaries. See AIHPBLAS-4434.
 #
-# Guard on the target TYPE rather than BUILD_SHARED_LIBS: that variable is not
-# reliably set at this scope (it is assigned further down, near line 805), so
-# testing it here would silently skip the component in a shared build.
-if(TARGET tensilelite-host)
+# Inspect the target: hipBLASLt and TensileLite have independent shared/static
+# options. ASAN packaging keeps both shared libraries in runtime because
+# rocm-cmake excludes other components from ASAN packages.
+if(TARGET tensilelite-host AND NOT ENABLE_ASAN_PACKAGING)
     get_target_property(_tensilelite_host_type tensilelite-host TYPE)
     if(_tensilelite_host_type STREQUAL "SHARED_LIBRARY")
         rocm_package_setup_component(tensilelite
@@ -940,11 +940,7 @@ if(TARGET tensilelite-host)
                 DEPENDS "${CPACK_RPM_PACKAGE_REQUIRES}")
         endif()
         if(ROCM_DEP_ROCMCORE)
-            if(ENABLE_ASAN_PACKAGING)
-                rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core-asan")
-            else()
-                rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core")
-            endif()
+            rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core")
         endif()
 
         # hipBLASLt's own libhipblaslt.so carries DT_NEEDED on this soname, so
@@ -982,11 +978,7 @@ if(TARGET tensilelite-host)
                 DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
         endif()
         if(ROCM_DEP_ROCMCORE)
-            if(ENABLE_ASAN_PACKAGING)
-                rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core-asan")
-            else()
-                rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core")
-            endif()
+            rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core")
         endif()
 
         rocm_package_add_rpm_dependencies(COMPONENT runtime

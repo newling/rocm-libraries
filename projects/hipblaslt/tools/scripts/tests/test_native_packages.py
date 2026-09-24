@@ -116,6 +116,25 @@ rocm_create_package(NAME hipblaslt DESCRIPTION "Native package test"
         version = self.check_dependency(self.build_packages("-DCPACK_DEBIAN_PACKAGE_EPOCH=2"))
         self.assertEqual(version, "2:1.5.0.70002-99")
 
+    def test_asan_runtime_contains_both_libraries(self):
+        build = self.build_packages("-DENABLE_ASAN_PACKAGING=ON")
+        packages = list(build.glob("*.deb"))
+        self.assertEqual(len(packages), 1)
+        self.assertEqual(self.run_command("dpkg-deb", "-f", packages[0], "Package"), "hipblaslt-asan")
+        contents = self.run_command("dpkg-deb", "-c", packages[0])
+        self.assertIn("libhipblaslt.so", contents)
+        self.assertIn("libtensilelite-host.so.1.0", contents)
+        depends = self.run_command("dpkg-deb", "-f", packages[0], "Depends")
+        self.assertIn("rocm-core-asan", depends)
+        self.assertNotIn("tensilelite-host", depends)
+
+    def test_shared_host_library_has_its_own_package(self):
+        build = self.build_packages()
+        runtime = next(build.glob("hipblaslt_*.deb"))
+        host = next(build.glob("tensilelite-host_*.deb"))
+        self.assertNotIn("libtensilelite-host.so", self.run_command("dpkg-deb", "-c", runtime))
+        self.assertIn("libtensilelite-host.so.1.0", self.run_command("dpkg-deb", "-c", host))
+
 
 if __name__ == "__main__":
     unittest.main()

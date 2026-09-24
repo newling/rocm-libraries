@@ -199,10 +199,15 @@ if(TENSILELITE_ENABLE_HOST)
     # binaries it does not use. See AIHPBLAS-4434.
     # The static archive and headers stay in devel: they are build-time only,
     # and hipsparselt-devel already depends on hipblaslt-devel.
+    # rocm-cmake only packages runtime for ASAN, so keep the host library there.
+    set(_tensilelite_host_component tensilelite)
+    if(ENABLE_ASAN_PACKAGING)
+        set(_tensilelite_host_component runtime)
+    endif()
     install(TARGETS tensilelite-host
         EXPORT hipblaslt-targets
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT tensilelite
-        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT tensilelite
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT ${_tensilelite_host_component}
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT ${_tensilelite_host_component}
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
         FILE_SET tensilelite_public_headers
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
@@ -211,6 +216,7 @@ if(TENSILELITE_ENABLE_HOST)
         FILE_SET rocisa_public_headers
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
     )
+    unset(_tensilelite_host_component)
 
     if(BUILD_SHARED_LIBS)
         set_property(TARGET tensilelite-host APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
