@@ -19,6 +19,7 @@
 # SOFTWARE.
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -474,6 +475,19 @@ def _resolve_fortran_compiler(explicit, rocm: Path):
 # invoke tasks
 # ---------------------------------------------------------------------------
 
+def _package_arguments(build_subdir: Path, extension: str, *, include_host: bool) -> str:
+    patterns = [f"hipblaslt[-_]*.{extension}"]
+    if include_host:
+        patterns.append(f"tensilelite-host[-_]*.{extension}")
+    packages = []
+    for pattern in patterns:
+        matches = sorted(path for path in build_subdir.glob(pattern) if path.is_file())
+        if not matches:
+            raise FileNotFoundError(f"No generated packages match {build_subdir / pattern}")
+        packages.extend(matches)
+    return " ".join(shlex.quote(str(path)) for path in packages)
+
+
 @task(
     help={
         "install_deps": "Install build dependencies before building.",
@@ -863,19 +877,21 @@ def build(
     if install_pkg:
         with c.cd(str(build_subdir)):
             c.run("make package")
-        # hipBLASLt does not only produce hipblaslt-* packages: libtensilelite-host.so
-        # ships as tensilelite-host (see CMakeLists.txt, rocm_package_setup_component).
-        # Globbing hipblaslt-* alone leaves the .so uninstalled, and a downstream
-        # find_package(hipblaslt) then fails on the imported roc::tensilelite-host
-        # target pointing at a file that was never installed.
-        if distro == "ubuntu":
-            _elevate(c, f"dpkg -i {build_subdir}/hipblaslt[-_]*.deb {build_subdir}/tensilelite-host[-_]*.deb")
-        elif distro in ("centos", "rhel", "almalinux"):
-            _elevate(c, f"rpm --nodeps -U {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm")
-        elif distro == "fedora":
-            _elevate(c, f"dnf install {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm")
-        elif distro in ("sles", "opensuse-leap"):
-            _elevate(c, f"zypper -n --no-gpg-checks install {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm")
+        # Static builds keep the host archive in hipblaslt's development package.
+        # Shared builds also require the separate tensilelite-host package.
+        installer = {
+            "ubuntu": "dpkg -i",
+            "centos": "rpm --nodeps -U",
+            "rhel": "rpm --nodeps -U",
+            "almalinux": "rpm --nodeps -U",
+            "fedora": "dnf install",
+            "sles": "zypper -n --no-gpg-checks install",
+            "opensuse-leap": "zypper -n --no-gpg-checks install",
+        }.get(distro)
+        if installer:
+            extension = "deb" if distro == "ubuntu" else "rpm"
+            packages = _package_arguments(build_subdir, extension, include_host=not static)
+            _elevate(c, f"{installer} {packages}")
 
 
 # ---------------------------------------------------------------------------

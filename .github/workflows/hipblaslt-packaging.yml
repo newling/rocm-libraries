@@ -13,6 +13,7 @@ on:
       - projects/hipblaslt/tensilelite/CMakeLists.txt
       - projects/hipblaslt/tasks.py
       - projects/hipblaslt/tools/scripts/tests/test_native_packages.py
+      - projects/hipblaslt/tools/scripts/tests/test_install_packages.py
   push:
     branches: [develop]
     paths:
@@ -22,6 +23,7 @@ on:
       - projects/hipblaslt/tensilelite/CMakeLists.txt
       - projects/hipblaslt/tasks.py
       - projects/hipblaslt/tools/scripts/tests/test_native_packages.py
+      - projects/hipblaslt/tools/scripts/tests/test_install_packages.py
 
 permissions:
   contents: read
@@ -40,7 +42,14 @@ jobs:
             /projects/hipblaslt/cmake/
             /projects/hipblaslt/tensilelite/CMakeLists.txt
             /projects/hipblaslt/tools/scripts/tests/test_native_packages.py
+            /projects/hipblaslt/tools/scripts/tests/test_install_packages.py
+      - name: Install task dependency
+        run: |
+          python3 -m venv "$RUNNER_TEMP/packaging-venv"
+          "$RUNNER_TEMP/packaging-venv/bin/pip" install invoke
       - name: Test generated native packages
         env:
           TMPDIR: ${{ runner.temp }}
-        run: python3 projects/hipblaslt/tools/scripts/tests/test_native_packages.py
+        run: |
+          "$RUNNER_TEMP/packaging-venv/bin/python" -B -m unittest discover \
+            -s projects/hipblaslt/tools/scripts/tests -p 'test_*packages.py'
