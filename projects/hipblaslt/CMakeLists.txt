@@ -947,8 +947,12 @@ if(TARGET tensilelite-host AND NOT ENABLE_ASAN_PACKAGING)
         # the runtime package must require it. Stated as the soname capability
         # rather than a package name: the dynamic linker enforces the same
         # string, and a SOVERSION bump updates both sides together.
-        rocm_package_add_rpm_dependencies(COMPONENT runtime
-            DEPENDS "libtensilelite-host.so.1()(64bit)")
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            get_target_property(_tensilelite_host_soversion tensilelite-host SOVERSION)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime
+                DEPENDS "libtensilelite-host.so.${_tensilelite_host_soversion}()(64bit)")
+            unset(_tensilelite_host_soversion)
+        endif()
 
         # Lockstep pin. The soname capability above is the correctness
         # mechanism; this is the release policy on top of it: hipblaslt,

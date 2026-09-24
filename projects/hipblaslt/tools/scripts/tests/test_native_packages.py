@@ -3,7 +3,7 @@
 
 """Exercise the native packaging rules without building GPU kernels.
 
-Run with Python's unittest runner. CMake, Ninja, Clang and dpkg-deb are required.
+Run with Python's unittest runner. CMake, Ninja, Clang, dpkg-deb and readelf are required.
 Set TMPDIR to an out-of-tree build directory. ROCM_CMAKE_DIR can select an
 existing rocm-cmake module directory; otherwise use the project's normal fetch.
 The fixture compiles two small libraries and executes the production packaging
@@ -72,7 +72,8 @@ if(TENSILELITE_BUILD_SHARED_LIBS)
 else()
     add_library(tensilelite-host STATIC host.c)
 endif()
-rocm_set_soversion(tensilelite-host "1.0")
+set(TEST_HOST_SOVERSION "1.0" CACHE STRING "Fixture host library version")
+rocm_set_soversion(tensilelite-host "${TEST_HOST_SOVERSION}")
 add_library(hipblaslt hipblaslt.c)
 target_link_libraries(hipblaslt PRIVATE tensilelite-host)
 install(TARGETS hipblaslt LIBRARY DESTINATION lib COMPONENT runtime
@@ -134,6 +135,17 @@ rocm_create_package(NAME hipblaslt DESCRIPTION "Native package test"
         host = next(build.glob("tensilelite-host_*.deb"))
         self.assertNotIn("libtensilelite-host.so", self.run_command("dpkg-deb", "-c", runtime))
         self.assertIn("libtensilelite-host.so.1.0", self.run_command("dpkg-deb", "-c", host))
+
+    def test_rpm_requirement_follows_host_soversion(self):
+        build = self.build_packages("-DTEST_HOST_SOVERSION=2.7")
+        dynamic = self.run_command("readelf", "-d", build / "libtensilelite-host.so.2.7")
+        soname = re.search(r"\(SONAME\).*\[([^]]+)\]", dynamic)
+        self.assertIsNotNone(soname, dynamic)
+        config = (build / "CPackConfig.cmake").read_text()
+        requires = re.search(r'^set\(CPACK_RPM_RUNTIME_PACKAGE_REQUIRES "([^"]*)"\)',
+                             config, re.MULTILINE)
+        self.assertIsNotNone(requires, config)
+        self.assertIn(f"{soname[1]}()(64bit)", requires[1].split(", "))
 
 
 if __name__ == "__main__":
