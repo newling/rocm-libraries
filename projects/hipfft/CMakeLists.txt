@@ -110,29 +110,45 @@ if(BUILD_ADDRESS_SANITIZER)
   add_compile_definitions(ADDRESS_SANITIZER)
 endif()
 
-# USE_CUDA: build hipFFT for the CUDA backend using nvcc directly.
-# Replaces the old ENV{HIP_PLATFORM} check (hipcc/hipconfig removed).
-option(USE_CUDA "Build hipFFT for the CUDA backend using nvcc directly (no hipcc)" OFF)
+# BUILD_WITH_LIB remains an accepted compatibility input. USE_CUDA is the
+# normalized backend option used by the rest of the project.
+string(TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB)
+set(_HIPFFT_USE_CUDA_DEFAULT OFF)
+if(BUILD_WITH_LIB STREQUAL "CUDA")
+  set(_HIPFFT_USE_CUDA_DEFAULT ON)
+elseif(NOT BUILD_WITH_LIB STREQUAL "ROCM")
+  message(FATAL_ERROR "BUILD_WITH_LIB must be ROCM or CUDA")
+endif()
+option(USE_CUDA "Build hipFFT for the CUDA backend without hipcc" ${_HIPFFT_USE_CUDA_DEFAULT})
+unset(_HIPFFT_USE_CUDA_DEFAULT)
 
-# Set internal BUILD_WITH_COMPILER.
-# Only use HIP-nvcc mode (which wraps flags with -Xcompiler=/-Xlinker=) when
-# the CXX compiler is nvcc or hipcc (which wraps nvcc when HIP_PLATFORM=nvidia).
-# Other compilers (g++, clang++) that target the CUDA backend link against
-# cufft directly and do not need nvcc flag wrapping.
-if( (USE_CUDA OR BUILD_WITH_LIB STREQUAL "CUDA") AND
-    (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR CMAKE_CXX_COMPILER MATCHES ".*hipcc$") )
-  set( BUILD_WITH_COMPILER "HIP-nvcc" )
-elseif(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
-  set( BUILD_WITH_COMPILER "HOST-default" )
+if(USE_CUDA)
+  set(BUILD_WITH_LIB "CUDA" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" FORCE)
+  set(HIP_PLATFORM nvidia)
 else()
-  set( BUILD_WITH_COMPILER "HIP-clang" )
-  if( NOT BUILD_WITH_LIB STREQUAL "ROCM" )
-    message( FATAL_ERROR "Detected HIP_COMPILER=clang, but BUILD_WITH_LIB is not ROCM!" )
+  set(BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" FORCE)
+  set(HIP_PLATFORM amd)
+endif()
+
+# Load the HIP host headers after defining their backend. This avoids a
+# hipconfig subprocess and makes hip::host agree with BUILD_WITH_LIB.
+find_package(hip CONFIG REQUIRED PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
+
+# HIP-nvcc mode wraps host flags for nvcc or a CUDA-backed hipcc. Plain host
+# compilers can build the wrapper library without those nvcc-only options.
+if(BUILD_WITH_LIB STREQUAL "CUDA")
+  if(CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR CMAKE_CXX_COMPILER MATCHES ".*hipcc$")
+    set(BUILD_WITH_COMPILER "HIP-nvcc")
+  else()
+    set(BUILD_WITH_COMPILER "HOST-default")
   endif()
+elseif(CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+")
+  set( BUILD_WITH_COMPILER "HIP-clang" )
+else()
+  set(BUILD_WITH_COMPILER "HOST-default")
 endif()
 
 string( TOUPPER "${BUILD_WITH_COMPILER}" BUILD_WITH_COMPILER )
-string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
 
 # nvc++ doesn't understand warning flags
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
@@ -146,8 +162,6 @@ endif()
 include(cmake/dependencies.cmake)
 
 if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
-  set (BUILD_WITH_LIB "CUDA")
-
   set( CMAKE_CXX_EXTENSIONS OFF )
 
   set( CMAKE_CXX_COMPILE_OPTIONS_PIC "-Xcompiler=${CMAKE_CXX_COMPILE_OPTIONS_PIC}" )
