@@ -1,0 +1,46 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+name: hipBLASLt native packaging
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/hipblaslt-packaging.yml
+      - projects/hipblaslt/CMakeLists.txt
+      - projects/hipblaslt/cmake/**
+      - projects/hipblaslt/tensilelite/CMakeLists.txt
+      - projects/hipblaslt/tasks.py
+      - projects/hipblaslt/tools/scripts/tests/test_native_packages.py
+  push:
+    branches: [develop]
+    paths:
+      - .github/workflows/hipblaslt-packaging.yml
+      - projects/hipblaslt/CMakeLists.txt
+      - projects/hipblaslt/cmake/**
+      - projects/hipblaslt/tensilelite/CMakeLists.txt
+      - projects/hipblaslt/tasks.py
+      - projects/hipblaslt/tools/scripts/tests/test_native_packages.py
+
+permissions:
+  contents: read
+
+jobs:
+  native-packages:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /projects/hipblaslt/CMakeLists.txt
+            /projects/hipblaslt/LICENSE.md
+            /projects/hipblaslt/tasks.py
+            /projects/hipblaslt/cmake/
+            /projects/hipblaslt/tensilelite/CMakeLists.txt
+            /projects/hipblaslt/tools/scripts/tests/test_native_packages.py
+      - name: Test generated native packages
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: python3 projects/hipblaslt/tools/scripts/tests/test_native_packages.py

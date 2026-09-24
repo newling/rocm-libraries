@@ -964,7 +964,7 @@ if(TARGET tensilelite-host)
         # (ROCMCreatePackage.cmake:281 and :296), which runs after this point,
         # so recompute the same value from the same inputs.
         #
-        # Note this pins VERSION only, not VERSION-RELEASE. Two builds from
+        # The RPM dependency pins VERSION only, not VERSION-RELEASE. Two builds from
         # different commits share a VERSION and differ only in RELEASE (the
         # git tag from rocm_get_git_commit_tag), so this does not detect
         # commit-level ABI drift. Only a SOVERSION bump does -- see D7.
@@ -991,8 +991,11 @@ if(TARGET tensilelite-host)
 
         rocm_package_add_rpm_dependencies(COMPONENT runtime
             DEPENDS "tensilelite-host = ${_tensilelite_pkg_version}")
-        rocm_package_add_deb_dependencies(COMPONENT runtime
-            DEPENDS "tensilelite-host (= ${_tensilelite_pkg_version})")
+        # CPack's Debian component dependencies use the final package version,
+        # including the release and epoch. Recomputing it here would omit the
+        # release that rocm_create_package derives from the Git tag or override.
+        set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS ON)
+        list(APPEND CPACK_COMPONENT_RUNTIME_DEPENDS tensilelite)
 
         unset(_tensilelite_rocm_patch)
         unset(_tensilelite_pkg_version)
