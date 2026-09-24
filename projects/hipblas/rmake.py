@@ -348,6 +348,9 @@ def config_cmd():
         nvcc_candidate = os.path.join(cuda_path, 'bin', 'nvcc')
         if not os.path.exists(nvcc_candidate):
             nvcc_candidate = which('nvcc') or ''
+            if nvcc_candidate:
+                nvcc_candidate = os.path.realpath(nvcc_candidate)
+                cuda_path = os.path.dirname(os.path.dirname(nvcc_candidate))
         if not nvcc_candidate:
             fatal("nvcc not found. Install the CUDA toolkit or pass "
                   "--cudapath=/path/to/cuda to specify its location.")
