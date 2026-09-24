@@ -32,6 +32,33 @@ import Tensile.Common as Common
 
 import os
 
+
+def _write_hip_version(root, relative_path, version):
+    path = root / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    major, minor, patch = version
+    if path.name == "version" and path.parent.name == "hip":
+        path.write_text(
+            f"HIP_VERSION_MAJOR={major}\n"
+            f"HIP_VERSION_MINOR={minor}\n"
+            f"HIP_VERSION_PATCH={patch}\n"
+        )
+    else:
+        path.write_text(
+            f"#define HIP_VERSION_MAJOR {major}\n"
+            f"#define HIP_VERSION_MINOR {minor}\n"
+            f"#define HIP_VERSION_PATCH {patch}\n"
+        )
+
+
+@pytest.fixture
+def isolated_version_sources(monkeypatch, tmp_path):
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
+    monkeypatch.setattr(Common, "_DEFAULT_ROCM_ROOT", tmp_path / "missing-default")
+    monkeypatch.setattr(Common.shutil, "which", lambda _name: None)
+
 def test_gfxArch():
     assert Common.gfxArch('gfx9') is None
 
@@ -100,9 +127,9 @@ def test_common_path_fallback_hip_version_h(
     exercises the PATH walk by unsetting all env vars and redirecting the
     default root to a non-existent path so the prefix loop falls through.
 
-    The walk prefers share/hip/version then include/hip/hip_version.h over
-    .info/version at each ancestor level. Two representative TheRock layouts
-    are exercised: dist/bin/ (1 level up) and dist/lib/llvm/bin/ (3 levels up).
+    The walk checks share/hip/version then include/hip/hip_version.h at each
+    ancestor level. Two representative TheRock layouts are exercised:
+    dist/bin/ (1 level up) and dist/lib/llvm/bin/ (3 levels up).
     """
     # Build a fake executable nested exe_depth directories under tmp_path.
     parts = ["sub"] * exe_depth + ["bin"]
@@ -136,3 +163,80 @@ def test_common_path_fallback_hip_version_h(
         pass  # Expected — subsequent config steps need more parameters.
 
     assert Common.globalParameters["HipClangVersion"] == expected_hip_clang
+
+
+def test_get_hip_version_prefers_explicit_value(
+    monkeypatch, tmp_path, isolated_version_sources
+):
+    _write_hip_version(tmp_path, "share/hip/version", (7, 2, 53211))
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    monkeypatch.setenv("ROCM_VERSION", "7.1.25424-4179531dcd")
+    assert Common._getHipVersion() == "7.1.25424"
+
+
+@pytest.mark.parametrize(
+    "version_string, expected",
+    [("10.1.0a20260813", "10.1.0"), ("7.2.1rc2", "7.2.1")],
+)
+def test_get_hip_version_parses_prerelease_suffix(monkeypatch, version_string, expected):
+    monkeypatch.setenv("ROCM_VERSION", version_string)
+    assert Common._getHipVersion() == expected
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    ["share/hip/version", "include/hip/hip_version.h"],
+)
+def test_get_hip_version_reads_build_metadata(
+    monkeypatch, tmp_path, isolated_version_sources, relative_path
+):
+    _write_hip_version(tmp_path, relative_path, (6, 4, 43482))
+    info_dir = tmp_path / ".info"
+    info_dir.mkdir()
+    (info_dir / "version").write_text("6.4.3")
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    assert Common._getHipVersion() == "6.4.43482"
+
+
+def test_get_hip_version_prefers_rocm_path(
+    monkeypatch, tmp_path, isolated_version_sources
+):
+    rocm_root = tmp_path / "rocm"
+    hip_root = tmp_path / "hip"
+    _write_hip_version(rocm_root, "share/hip/version", (7, 1, 25424))
+    _write_hip_version(hip_root, "share/hip/version", (7, 2, 53211))
+    monkeypatch.setenv("ROCM_PATH", str(rocm_root))
+    monkeypatch.setenv("HIP_PATH", str(hip_root))
+    assert Common._getHipVersion() == "7.1.25424"
+
+
+def test_get_hip_version_falls_back_to_hip_path(
+    monkeypatch, tmp_path, isolated_version_sources
+):
+    hip_root = tmp_path / "hip"
+    _write_hip_version(hip_root, "share/hip/version", (7, 2, 53211))
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path / "missing"))
+    monkeypatch.setenv("HIP_PATH", str(hip_root))
+    assert Common._getHipVersion() == "7.2.53211"
+
+
+def test_get_hip_version_rejects_release_only_prefix(
+    monkeypatch, tmp_path, isolated_version_sources
+):
+    info_dir = tmp_path / ".info"
+    info_dir.mkdir()
+    (info_dir / "version").write_text("6.4.3")
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    with pytest.raises(ValueError, match="Failed to get ROCm version"):
+        Common._getHipVersion()
+
+
+def test_get_hip_version_rejects_malformed_metadata(
+    monkeypatch, tmp_path, isolated_version_sources
+):
+    version_file = tmp_path / "share" / "hip" / "version"
+    version_file.parent.mkdir(parents=True)
+    version_file.write_text("HIP_VERSION_MAJOR=7\nHIP_VERSION_MINOR=2\n")
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    with pytest.raises(ValueError, match="Invalid HIP version file"):
+        Common._getHipVersion()

@@ -89,17 +89,12 @@ def _readHipBuildVersion(path: Path) -> Optional[str]:
 
 
 def _readHipVersionFromRoot(root: Path) -> Optional[str]:
-  """Read the HIP build version, with the ROCm release as a last fallback."""
+  """Read the HIP build version from metadata under a ROCm prefix."""
   for relativePath in (Path("share/hip/version"), Path("include/hip/hip_version.h")):
     versionString = _readHipBuildVersion(root / relativePath)
     if versionString:
       return versionString
-
-  try:
-    versionString = (root / ".info" / "version").read_text().strip()
-  except OSError:
-    return None
-  return versionString or None
+  return None
 
 
 def _getHipVersion() -> str:

@@ -81,37 +81,29 @@ def test_get_version_no_match_raises(monkeypatch):
 
 def test_get_rocm_version_uses_rocm_version_env(monkeypatch, tmp_path):
     """ROCM_VERSION env var takes priority over all other sources."""
+    version_file = tmp_path / "share" / "hip" / "version"
+    version_file.parent.mkdir(parents=True)
+    version_file.write_text(
+        "HIP_VERSION_MAJOR=7\nHIP_VERSION_MINOR=2\nHIP_VERSION_PATCH=53211\n"
+    )
     monkeypatch.setenv("ROCM_VERSION", "6.4.0")
-    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
     monkeypatch.delenv("HIP_PATH", raising=False)
     assert C.get_rocm_version() == SemanticVersion(6, 4, 0)
 
 
-@pytest.mark.parametrize(
-    "version_str, expected_version",
-    [
-        pytest.param(
-            "7.1.0",
-            SemanticVersion(7, 1, 0),
-            id="simple_version",
-        ),
-        pytest.param(
-            "7.1.25424-4179531dcd",
-            SemanticVersion(7, 1, 25424),
-            id="build_suffix",
-        ),
-    ],
-)
-def test_get_rocm_version_reads_info_version_file(
-    monkeypatch, tmp_path, version_str, expected_version
-):
-    """get_rocm_version reads .info/version when ROCM_VERSION is not set."""
+def test_get_rocm_version_rejects_release_only_prefix(monkeypatch, tmp_path):
+    """A ROCm release number cannot substitute for the HIP build number."""
     info_dir = tmp_path / ".info"
     info_dir.mkdir()
-    (info_dir / "version").write_text(version_str)
+    (info_dir / "version").write_text("6.4.3")
     monkeypatch.delenv("ROCM_VERSION", raising=False)
     monkeypatch.setenv("ROCM_PATH", str(tmp_path))
-    assert C.get_rocm_version() == expected_version
+    monkeypatch.delenv("HIP_PATH", raising=False)
+    monkeypatch.setattr(C, "_DEFAULT_ROCM_ROOT", tmp_path / "missing-default")
+    monkeypatch.setattr(C.shutil, "which", lambda _name: None)
+    with pytest.raises(RuntimeError, match="Failed to get ROCm version"):
+        C.get_rocm_version()
 
 
 @pytest.mark.parametrize(
@@ -139,7 +131,7 @@ def test_get_rocm_version_path_fallback_hip_version_h(
     In TheRock CI builds ROCm tools such as amdclang++ are on PATH but
     ROCM_PATH is not set and /opt/rocm does not exist. get_rocm_version()
     walks up from the found executable's directory (up to 5 levels) looking
-    for share/hip/version then include/hip/hip_version.h then .info/version.
+    for share/hip/version then include/hip/hip_version.h.
     Two typical layouts are exercised: dist/bin/ (1 level up to dist/) and
     dist/lib/llvm/bin/ (3 levels up to dist/).
     """

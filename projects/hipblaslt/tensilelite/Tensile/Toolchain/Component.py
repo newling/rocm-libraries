@@ -113,24 +113,19 @@ def _read_hip_build_version(path: Path) -> Optional[str]:
 
 
 def _read_version_from_root(root: Path) -> Optional[str]:
-    """Read the HIP build version, with the ROCm release as a last fallback."""
+    """Read the HIP build version from metadata under a ROCm prefix."""
     for relative_path in (Path("share/hip/version"), Path("include/hip/hip_version.h")):
         version_str = _read_hip_build_version(root / relative_path)
         if version_str:
             return version_str
-
-    try:
-        version_str = (root / ".info" / "version").read_text().strip()
-    except OSError:
-        return None
-    return version_str or None
+    return None
 
 
 def get_rocm_version() -> SemanticVersion:
     """Compute the HIP build version used by the selected ROCm toolchain.
 
     Reads ROCM_VERSION (set by CMake from hip_VERSION) first. Standalone
-    discovery prefers HIP's build-version metadata over the ROCm release file.
+    discovery reads HIP's build-version metadata from the selected prefix.
 
     Note: Python ROCm SDK (pip) version detection is intentionally omitted here;
     it will be handled by PR #11023 with proper feature-gating once the

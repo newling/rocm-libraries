@@ -939,32 +939,15 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     isaList = list(isaInfoMap.keys())
     validParameters["ISA"] = [IsaVersion(0, 0, 0), *isaList]
 
-    # For ubuntu platforms, call dpkg to grep the version of hip-clang.  This check is platform specific, and in the future
-    # additional support for yum, dnf zypper may need to be added.  On these other platforms, the default version of
-    # '0.0.0' will persist
+    # Import lazily to keep the global-parameter module independent from the
+    # toolchain classes during package initialization.
+    from Tensile.Toolchain.Component import get_rocm_version
 
-    # Due to platform.linux_distribution() being deprecated, just try to run dpkg regardless.
-    # The alternative would be to install the `distro` package.
-    # See https://docs.python.org/3.7/library/platform.html#platform.linux_distribution
-
-    # The following try except block computes the hipcc version
-    # TODO: hipcc is deprecated, this block should be removed.
-    try:
-        compiler = "hipcc"
-        output = subprocess.run(
-            [compiler, "--version"], check=True,
-            stdout=subprocess.PIPE,
-            # Avoids some warning spam on Windows.
-            stderr=subprocess.DEVNULL,
-        ).stdout.decode()
-
-        for line in output.split("\n"):
-            if "HIP version" in line:
-                globalParameters["HipClangVersion"] = line.split()[2]
-                print1("# Found hipcc version " + globalParameters["HipClangVersion"])
-
-    except (subprocess.CalledProcessError, OSError) as e:
-        printWarning("Error: {} running {} {} ".format("hipcc", "--version", e))
+    hip_version = get_rocm_version()
+    globalParameters["HipClangVersion"] = (
+        f"{hip_version.major}.{hip_version.minor}.{hip_version.patch}"
+    )
+    print1("# Found HIP version " + globalParameters["HipClangVersion"])
 
     ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
 
