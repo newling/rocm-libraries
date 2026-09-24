@@ -899,14 +899,7 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
     rocm_package_setup_client_component(samples)
 endif()
 
-# libtensilelite-host.so ships as its own package (tensilelite-host) instead of
-# inside hipblaslt's runtime component, so hipSPARSELt can depend on the one
-# ~6.5 MB shared library without pulling hipblaslt's ~1.6 GB of Tensile kernel
-# binaries. See AIHPBLAS-4434.
-#
-# Inspect the target: hipBLASLt and TensileLite have independent shared/static
-# options. ASAN packaging keeps both shared libraries in runtime because
-# rocm-cmake excludes other components from ASAN packages.
+# hipBLASLt and TensileLite have independent shared/static options.
 if(TARGET tensilelite-host AND NOT ENABLE_ASAN_PACKAGING)
     get_target_property(_tensilelite_host_type tensilelite-host TYPE)
     if(_tensilelite_host_type STREQUAL "SHARED_LIBRARY")
@@ -915,26 +908,11 @@ if(TARGET tensilelite-host AND NOT ENABLE_ASAN_PACKAGING)
             PACKAGE_NAME host
         )
 
-        # rocm-cmake's packaging defaults set CPACK_RPM_PACKAGE_AUTOREQPROV to
-        # Off for every ROCm library, so no package currently Provides or
-        # Requires a soname. Re-enable rpmbuild's ELF scanning for this one
-        # component: tensilelite-host then Provides
-        # libtensilelite-host.so.1()(64bit), derived from the binary rather
-        # than hand-written, so the capability tracks SOVERSION automatically.
-        # This is scoped to the component and does not change any other
-        # package's dependency surface.
+        # rocm-cmake disables RPM's automatic Provides/Requires by default.
         set(CPACK_RPM_TENSILELITE_PACKAGE_AUTOREQPROV "ON")
 
-        # CPack uses CPACK_RPM_<COMPONENT>_PACKAGE_REQUIRES *instead of* the
-        # global CPACK_RPM_PACKAGE_REQUIRES when the component-scoped variable
-        # is defined (CPackRPM.cmake:1098-1106). Defining a runtime-scoped
-        # dependency therefore drops every global one -- hipblaslt's runtime
-        # package silently lost "roctracer >= 1.0.0" and "rocm-core".
-        #
-        # Carry the global list into the component before adding anything, and
-        # add rocm-core explicitly because rocm_package_add_rocm_core_dependency
-        # appends it to the global list from inside rocm_create_package, which
-        # runs after this point.
+        # Component dependencies replace global dependencies. rocm_create_package
+        # adds rocm-core later, so include it here as well.
         if(CPACK_RPM_PACKAGE_REQUIRES)
             rocm_package_add_rpm_dependencies(COMPONENT runtime
                 DEPENDS "${CPACK_RPM_PACKAGE_REQUIRES}")
@@ -943,10 +921,6 @@ if(TARGET tensilelite-host AND NOT ENABLE_ASAN_PACKAGING)
             rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core")
         endif()
 
-        # hipBLASLt's own libhipblaslt.so carries DT_NEEDED on this soname, so
-        # the runtime package must require it. Stated as the soname capability
-        # rather than a package name: the dynamic linker enforces the same
-        # string, and a SOVERSION bump updates both sides together.
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             get_target_property(_tensilelite_host_soversion tensilelite-host SOVERSION)
             rocm_package_add_rpm_dependencies(COMPONENT runtime
@@ -954,20 +928,8 @@ if(TARGET tensilelite-host AND NOT ENABLE_ASAN_PACKAGING)
             unset(_tensilelite_host_soversion)
         endif()
 
-        # Lockstep pin. The soname capability above is the correctness
-        # mechanism; this is the release policy on top of it: hipblaslt,
-        # hipsparselt and tensilelite-host are intended to move together
-        # within one ROCm release, so the dependency is an exact version
-        # rather than a floor.
-        #
-        # CPACK_PACKAGE_VERSION is only computed inside rocm_create_package
-        # (ROCMCreatePackage.cmake:281 and :296), which runs after this point,
-        # so recompute the same value from the same inputs.
-        #
-        # The RPM dependency pins VERSION only, not VERSION-RELEASE. Two builds from
-        # different commits share a VERSION and differ only in RELEASE (the
-        # git tag from rocm_get_git_commit_tag), so this does not detect
-        # commit-level ABI drift. Only a SOVERSION bump does -- see D7.
+        # Match the version computed later by rocm_create_package, without the
+        # RPM release suffix.
         rocm_get_patch_version(_tensilelite_rocm_patch)
         set(_tensilelite_pkg_version
             "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
@@ -976,7 +938,6 @@ if(TARGET tensilelite-host AND NOT ENABLE_ASAN_PACKAGING)
                 "${_tensilelite_pkg_version}.${_tensilelite_rocm_patch}")
         endif()
 
-        # Same component-shadows-global rule applies on the Debian side.
         if(CPACK_DEBIAN_PACKAGE_DEPENDS)
             rocm_package_add_deb_dependencies(COMPONENT runtime
                 DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
@@ -987,9 +948,7 @@ if(TARGET tensilelite-host AND NOT ENABLE_ASAN_PACKAGING)
 
         rocm_package_add_rpm_dependencies(COMPONENT runtime
             DEPENDS "tensilelite-host = ${_tensilelite_pkg_version}")
-        # CPack's Debian component dependencies use the final package version,
-        # including the release and epoch. Recomputing it here would omit the
-        # release that rocm_create_package derives from the Git tag or override.
+        # CPack includes the Debian release and epoch in component dependencies.
         set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS ON)
         list(APPEND CPACK_COMPONENT_RUNTIME_DEPENDS tensilelite)
 

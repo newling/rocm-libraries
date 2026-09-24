@@ -40,11 +40,11 @@ class NativePackages(unittest.TestCase):
 
     def build_packages(self, *options):
         top = (PROJECT / "CMakeLists.txt").read_text()
-        start = top.index("# libtensilelite-host.so ships")
+        start = top.index("if(TARGET tensilelite-host AND NOT ENABLE_ASAN_PACKAGING)")
         end = top.index("\nif(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)", start)
         packaging = top[start:end]
         tensile = (PROJECT / "tensilelite/CMakeLists.txt").read_text()
-        start = tensile.index('    # The shared library ships')
+        start = tensile.index("    set(_tensilelite_host_component tensilelite)")
         end = tensile.index("        FILE_SET", start)
         # Header file sets are irrelevant to shared-library package ownership.
         install = tensile[start:end] + ")\n"

@@ -877,8 +877,6 @@ def build(
     if install_pkg:
         with c.cd(str(build_subdir)):
             c.run("make package")
-        # Static builds keep the host archive in hipblaslt's development package.
-        # Shared builds also require the separate tensilelite-host package.
         installer = {
             "ubuntu": "dpkg -i",
             "centos": "rpm --nodeps -U",

@@ -192,14 +192,7 @@ if(TENSILELITE_ENABLE_HOST)
     add_subdirectory(src)
     add_subdirectory(include)
 
-    # The shared library ships in its own "tensilelite" component (package
-    # tensilelite-host) rather than hipblaslt's runtime component. hipSPARSELt
-    # needs this one ~6.5 MB .so; bundling it in hipblaslt's runtime package
-    # would force every hipSPARSELt install to pull ~1.6 GB of Tensile kernel
-    # binaries it does not use. See AIHPBLAS-4434.
-    # The static archive and headers stay in devel: they are build-time only,
-    # and hipsparselt-devel already depends on hipblaslt-devel.
-    # rocm-cmake only packages runtime for ASAN, so keep the host library there.
+    # ASAN packaging includes only runtime.
     set(_tensilelite_host_component tensilelite)
     if(ENABLE_ASAN_PACKAGING)
         set(_tensilelite_host_component runtime)
