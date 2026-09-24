@@ -118,8 +118,7 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 
-# USE_CUDA: build hipSOLVER for the CUDA backend using nvcc directly.
-# Replaces the old hipcc/hipconfig-based HIP_PLATFORM flow.
+# USE_CUDA selects the library implementation and the HIP host-header backend.
 option(USE_CUDA "Build hipSOLVER for the CUDA backend using nvcc directly (no hipcc)" OFF)
 
 # Legacy compatibility: honour HIP_PLATFORM=nvidia so existing CUDA CI jobs
@@ -127,6 +126,14 @@ option(USE_CUDA "Build hipSOLVER for the CUDA backend using nvcc directly (no hi
 if(NOT USE_CUDA AND "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(USE_CUDA ON CACHE BOOL "Build hipSOLVER for the CUDA backend" FORCE)
   message(STATUS "USE_CUDA: enabled via legacy HIP_PLATFORM=nvidia")
+endif()
+
+# hip-config.cmake reads HIP_PLATFORM when it constructs hip::host. Derive the
+# value from the normalized option so package discovery never needs hipconfig.
+if(USE_CUDA)
+  set(HIP_PLATFORM nvidia)
+else()
+  set(HIP_PLATFORM amd)
 endif()
 
 find_package(hip CONFIG REQUIRED PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
@@ -467,4 +474,3 @@ if(BUILD_CODE_COVERAGE)
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
-
