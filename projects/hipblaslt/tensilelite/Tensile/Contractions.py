@@ -464,11 +464,8 @@ class TaskPredicate(Properties.Predicate):
     def ExtraPredicates(cls, state):
         rv = []
 
-        # LaunchLimits predicate checks that launch grid will not overflow hip API limits
-        # TODO This predicate could also verify limits on some kernel arguments
-        # Stream-k kernels currently do not need limit check since launch grid should be limited by the grid model
-        if ('StreamK' not in state) or (state['StreamK'] == 0):
-            rv += [cls('LaunchLimits')]
+        # Resolve the launch grid, including Stream-K's workspace-dependent fallback.
+        rv += [cls('LaunchLimits')]
 
         return rv
 

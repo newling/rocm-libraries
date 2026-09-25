@@ -2571,38 +2571,35 @@ namespace TensileLite
         numWorkGroups.y = CeilDivide(numWorkGroups.y, sizeMapping.macroTile.y);
     }
 
-    // Temporary: restored from develop. Builds the kernarg buffer via the
-    // hand-written per-feature path (singleCallArgs) rather than the generic
-    // CustomKernel.args iteration in generateCustomCall. Used for all
-    // Tensile-generated kernels (see gating in solve()) so their launch
-    // arguments are byte-identical to develop while generateCustomCall is
-    // validated for newer features.
-    template <bool T_Debug>
-    KernelInvocation
-        ContractionSolution::generateSingleCall(ContractionSolution::Problem const& problem,
-                                                ContractionInputs const&            inputs,
-                                                Hardware const&                     hardware,
-                                                StreamKSettings const&              sk,
-                                                GSUSettings const&                  gsuSettings) const
+    void ContractionSolution::calculateLaunchGrid(dim3&           workGroupSize,
+                                                  dim3&           numWorkGroups,
+                                                  Problem const&  problem,
+                                                  Hardware const& hardware) const
     {
-        KernelInvocation rv;
+        auto sk  = resolveStreamKSettings(problem, hardware);
+        auto gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu()
+                                                 : calculateAutoGSU(problem, &hardware);
+        if(handwrittenCustomKernel())
+        {
+            dim3 tiles;
+            calculateTiles(tiles, problem);
+            workGroupSize = customKernel.threads;
+            calculateCustomCallGrid(numWorkGroups, tiles, gsu, sk);
+        }
+        else
+        {
+            calculateGrid(workGroupSize, numWorkGroups, problem);
+            finalizeSingleCallGrid(numWorkGroups, gsu, sk);
+        }
+    }
 
-        rv.isSingleCall = true;
-
-        rv.args = KernelArguments(T_Debug);
-
-        rv.args.reserve(1024, 128);
-
-        rv.kernelName = kernelName;
-
-        calculateGrid(rv.workGroupSize, rv.numWorkGroups, problem);
-
-        dim3 problemNumGroupTiles = rv.numWorkGroups;
-
-        uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
-        uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+    void ContractionSolution::finalizeSingleCallGrid(dim3&                  numWorkGroups,
+                                                     uint32_t               gsu,
+                                                     StreamKSettings const& sk) const
+    {
+        dim3 problemNumGroupTiles = numWorkGroups;
         if(gsu > 0)
-            rv.numWorkGroups.y *= gsu;
+            numWorkGroups.y *= gsu;
 
         if(sizeMapping.streamK != 0)
         {
@@ -2616,15 +2613,15 @@ namespace TensileLite
                 // Cs X-peers of a cluster always land M-adjacent (sharing B). A 1-D
                 // [Cs, 1] cluster is the Ck == 1 case of the same launch. The
                 // round-up below pads non-multiple extents; sk.grid == tiles here.
-                rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0 (M-tiles)
-                // rv.numWorkGroups.y already = nWG1 * gsu (N-tiles); z stays batch.
+                numWorkGroups.x = problemNumGroupTiles.x; // nWG0 (M-tiles)
+                // numWorkGroups.y already = nWG1 * gsu (N-tiles); z stays batch.
             }
             else
             {
                 // Linear Stream-K launch (no cluster, or ForceDPOnly=0).
-                rv.numWorkGroups.x = sk.grid;
-                rv.numWorkGroups.y = 1;
-                rv.numWorkGroups.z = 1;
+                numWorkGroups.x = sk.grid;
+                numWorkGroups.y = 1;
+                numWorkGroups.z = 1;
             }
         }
 
@@ -2633,13 +2630,11 @@ namespace TensileLite
         {
             if(internalArgsSupport.version >= 1)
             {
-                rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
-                rv.numWorkGroups.y = 1;
-                rv.numWorkGroups.z = 1;
+                numWorkGroups.x *= (numWorkGroups.y * numWorkGroups.z);
+                numWorkGroups.y = 1;
+                numWorkGroups.z = 1;
             }
         }
-
-        rv.clusterDim = sizeMapping.clusterDim;
 
         // The HIP driver rejects a cluster launch whose grid is not divisible by
         // clusterDim, so round up. The grid set above holds the REAL extents and
@@ -2660,9 +2655,107 @@ namespace TensileLite
                                   && sizeMapping.streamKForceDPOnly != 0 && enableCluster;
         if(enableCluster && (sizeMapping.streamK == 0 || skClusterMulticast))
         {
-            rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
-            rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
+            numWorkGroups.x = RoundUpToMultiple(numWorkGroups.x, sizeMapping.clusterDim.x);
+            numWorkGroups.y = RoundUpToMultiple(numWorkGroups.y, sizeMapping.clusterDim.y);
         }
+    }
+
+    void ContractionSolution::calculateCustomCallGrid(dim3&                  numWorkGroups,
+                                                      dim3 const&            tiles,
+                                                      uint32_t               gsu,
+                                                      StreamKSettings const& sk) const
+    {
+        auto assignGridSize = [&](size_t& dim, CustomGridSize size) {
+            switch(size)
+            {
+            case CustomGridSize::One:
+                dim = 1;
+                break;
+            case CustomGridSize::TilesX:
+                dim = tiles.x;
+                break;
+            case CustomGridSize::TilesY:
+                dim = tiles.y;
+                break;
+            case CustomGridSize::Batch:
+                dim = tiles.z;
+                break;
+            case CustomGridSize::TilesXY:
+                dim = tiles.x * tiles.y;
+                break;
+            case CustomGridSize::TilesXYBatch:
+                dim = tiles.x * tiles.y * tiles.z;
+                break;
+            case CustomGridSize::TilesXYBatchGSU:
+                dim = tiles.x * tiles.y * tiles.z * (gsu > 0 ? gsu : 1);
+                break;
+            case CustomGridSize::StreamKWithBatch:
+                // generateCustomCall is only used for handwritten/external
+                // custom kernels; Tensile-generated kernels are routed to
+                // generateSingleCall in solve().  For a batched handwritten
+                // Stream-K custom kernel, sk.grid is per-batch and must be
+                // expanded by the batch tile count.
+                dim = sk.grid * tiles.z;
+                break;
+            case CustomGridSize::StreamKNoBatch:
+                dim = sk.grid;
+                break;
+            default:
+                throw std::runtime_error(
+                    concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
+                break;
+            }
+        };
+
+        assignGridSize(numWorkGroups.x, customKernel.grid.x);
+        assignGridSize(numWorkGroups.y, customKernel.grid.y);
+        assignGridSize(numWorkGroups.z, customKernel.grid.z);
+
+        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+        bool hasNumWorkGroupsArg
+            = std::any_of(customKernel.args.begin(), customKernel.args.end(), [](auto const& a) {
+                  return a.semantic == CustomArgSemantic::NumWorkGroups;
+              });
+        if(!enableCluster && hasNumWorkGroupsArg && internalArgsSupport.version >= 1)
+        {
+            numWorkGroups.x *= (numWorkGroups.y * numWorkGroups.z);
+            numWorkGroups.y = 1;
+            numWorkGroups.z = 1;
+        }
+    }
+
+    // Temporary: restored from develop. Builds the kernarg buffer via the
+    // hand-written per-feature path (singleCallArgs) rather than the generic
+    // CustomKernel.args iteration in generateCustomCall. Used for all
+    // Tensile-generated kernels (see gating in solve()) so their launch
+    // arguments are byte-identical to develop while generateCustomCall is
+    // validated for newer features.
+    template <bool T_Debug>
+    KernelInvocation
+        ContractionSolution::generateSingleCall(ContractionSolution::Problem const& problem,
+                                                ContractionInputs const&            inputs,
+                                                Hardware const&                     hardware,
+                                                StreamKSettings const&              sk,
+                                                GSUSettings const& gsuSettings) const
+    {
+        KernelInvocation rv;
+
+        rv.isSingleCall = true;
+
+        rv.args = KernelArguments(T_Debug);
+
+        rv.args.reserve(1024, 128);
+
+        rv.kernelName = kernelName;
+
+        calculateGrid(rv.workGroupSize, rv.numWorkGroups, problem);
+
+        dim3 problemNumGroupTiles = rv.numWorkGroups;
+
+        uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
+        uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+        finalizeSingleCallGrid(rv.numWorkGroups, gsu, sk);
+        rv.clusterDim = sizeMapping.clusterDim;
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
@@ -2875,61 +2968,7 @@ namespace TensileLite
             std::cout << "Tiles: " << tiles.x << ", " << tiles.y << ", " << tiles.z << std::endl;
         }
 
-        auto assignGridSize = [&](size_t& dim, CustomGridSize size) {
-            switch(size)
-            {
-                case CustomGridSize::One:
-                    dim = 1;
-                    break;
-                case CustomGridSize::TilesX:
-                    dim = tiles.x;
-                    break;
-                case CustomGridSize::TilesY:
-                    dim = tiles.y;
-                    break;
-                case CustomGridSize::Batch:
-                    dim = tiles.z;
-                    break;
-                case CustomGridSize::TilesXY:
-                    dim = tiles.x * tiles.y;
-                    break;
-                case CustomGridSize::TilesXYBatch:
-                    dim = tiles.x * tiles.y * tiles.z;
-                    break;
-                case CustomGridSize::TilesXYBatchGSU:
-                    dim = tiles.x * tiles.y * tiles.z * (gsu > 0 ? gsu : 1);
-                    break;
-                case CustomGridSize::StreamKWithBatch:
-                    // generateCustomCall is only used for handwritten/external
-                    // custom kernels; Tensile-generated kernels are routed to
-                    // generateSingleCall in solve().  For a batched handwritten
-                    // Stream-K custom kernel, sk.grid is per-batch and must be
-                    // expanded by the batch tile count.
-                    dim = sk.grid * tiles.z;
-                    break;
-                case CustomGridSize::StreamKNoBatch:
-                    dim = sk.grid;
-                    break;
-                default:
-                    throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
-                    break;
-            }
-        };
-
-        assignGridSize(rv.numWorkGroups.x, customKernel.grid.x);
-        assignGridSize(rv.numWorkGroups.y, customKernel.grid.y);
-        assignGridSize(rv.numWorkGroups.z, customKernel.grid.z);
-
-        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
-        bool hasNumWorkGroupsArg = std::any_of(
-            customKernel.args.begin(), customKernel.args.end(),
-            [](auto const& a) { return a.semantic == CustomArgSemantic::NumWorkGroups; });
-        if(!enableCluster && hasNumWorkGroupsArg && internalArgsSupport.version >= 1)
-        {
-            rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
-            rv.numWorkGroups.y = 1;
-            rv.numWorkGroups.z = 1;
-        }
+        calculateCustomCallGrid(rv.numWorkGroups, tiles, gsu, sk);
 
         if(T_Debug)
         {

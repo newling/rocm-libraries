@@ -33,6 +33,7 @@
 #include <Tensile/Predicates.hpp>
 #include <Tensile/Task.hpp>
 
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -68,47 +69,39 @@ namespace TensileLite
 
                 virtual bool operator()(Task const& task) const override
                 {
-                    if (task.solution.sizeMapping.streamK == 0)
-                    {
-                        // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items
-                        dim3 workGroupSize;
-                        dim3 numWorkGroups;
-                        task.solution.calculateGrid(workGroupSize, numWorkGroups, task.problem);
-                        uint64_t workItems = static_cast<uint64_t>(workGroupSize.x)
-                                           * static_cast<uint64_t>(workGroupSize.y)
-                                           * static_cast<uint64_t>(workGroupSize.z)
-                                           * static_cast<uint64_t>(numWorkGroups.x)
-                                           * static_cast<uint64_t>(numWorkGroups.y)
-                                           * static_cast<uint64_t>(numWorkGroups.z);
-                        return workItems <= std::numeric_limits<uint32_t>::max();
-                    }
-
-                    return true;
+                    return evaluate(task, nullptr);
                 }
 
                 virtual bool debugEval(Task const& task, std::ostream& stream) const override
                 {
-                    if (task.solution.sizeMapping.streamK == 0)
-                    {
-                        // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items
-                        dim3 workGroupSize;
-                        dim3 numWorkGroups;
-                        task.solution.calculateGrid(workGroupSize, numWorkGroups, task.problem);
-                        uint64_t workItems = static_cast<uint64_t>(workGroupSize.x)
-                                           * static_cast<uint64_t>(workGroupSize.y)
-                                           * static_cast<uint64_t>(workGroupSize.z)
-                                           * static_cast<uint64_t>(numWorkGroups.x)
-                                           * static_cast<uint64_t>(numWorkGroups.y)
-                                           * static_cast<uint64_t>(numWorkGroups.z);
-                        bool rv = (workItems <= std::numeric_limits<uint32_t>::max());
-                        std::ostringstream details;
-                        details << "workItems=" << workItems << " <= max=" << std::numeric_limits<uint32_t>::max();
-                        PredicateDebugger::printRow(stream, rv, this->type(), details.str());
-                        return rv;
-                    }
+                    return evaluate(task, &stream);
+                }
 
-                    PredicateDebugger::printRow(stream, true, this->type(), "stream-k handled by grid predictor");
-                    return true;
+            private:
+                bool evaluate(Task const& task, std::ostream* stream) const
+                {
+                    dim3 workGroupSize;
+                    dim3 numWorkGroups;
+                    task.solution.calculateLaunchGrid(
+                        workGroupSize, numWorkGroups, task.problem, task.hardware);
+
+                    // Work-item counts are 32-bit per axis. Divide before comparing
+                    // so even an oversized grid cannot overflow the check itself.
+                    constexpr size_t maxWorkItems = std::numeric_limits<uint32_t>::max();
+                    auto             fits         = [](size_t threads, size_t groups) {
+                        return threads > 0 && groups <= maxWorkItems / threads;
+                    };
+                    bool rv = fits(workGroupSize.x, numWorkGroups.x)
+                              && fits(workGroupSize.y, numWorkGroups.y)
+                              && fits(workGroupSize.z, numWorkGroups.z);
+                    if(stream)
+                    {
+                        std::ostringstream details;
+                        details << "threads=" << workGroupSize << " groups=" << numWorkGroups
+                                << " <= " << maxWorkItems << " work-items per axis";
+                        PredicateDebugger::printRow(*stream, rv, this->type(), details.str());
+                    }
+                    return rv;
                 }
             };
 

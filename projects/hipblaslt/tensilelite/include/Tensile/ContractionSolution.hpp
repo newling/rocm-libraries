@@ -899,6 +899,12 @@ namespace TensileLite
         void                 calculateGrid(dim3&                               workGroupSize,
                                            dim3&                               numWorkGroups,
                                            ContractionSolution::Problem const& problem) const;
+        // Main GEMM launch dimensions, including Stream-K's workspace fallback,
+        // GSU, flattening and cluster padding. Shares its calculations with dispatch.
+        void                 calculateLaunchGrid(dim3&           workGroupSize,
+                                                 dim3&           numWorkGroups,
+                                                 Problem const&  problem,
+                                                 Hardware const& hardware) const;
         origami::reduction_t getSKReduction(Problem const& problem, Hardware const& hardware) const;
         size_t               getSKGrid(Problem const&       problem,
                                        Hardware const&      hardware,
@@ -1337,6 +1343,14 @@ namespace TensileLite
                                                  size_t         tiles) const;
 
         bool handwrittenCustomKernel() const;
+
+        void finalizeSingleCallGrid(dim3&                  numWorkGroups,
+                                    uint32_t               gsu,
+                                    StreamKSettings const& sk) const;
+        void calculateCustomCallGrid(dim3&                  numWorkGroups,
+                                     dim3 const&            tiles,
+                                     uint32_t               gsu,
+                                     StreamKSettings const& sk) const;
 
         // Same StreamK grid / reduction solve() packs, including the
         // insufficient-workspace fall back to tree + grid==tiles.
