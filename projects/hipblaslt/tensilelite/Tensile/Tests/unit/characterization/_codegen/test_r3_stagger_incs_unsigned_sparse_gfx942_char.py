@@ -30,9 +30,6 @@ import re
 
 import pytest
 
-import codegen_harness as _ch
-import config_harness as _cfgh
-
 from test_r3_stagger_incs_unsigned_gfx1201_char import _emit_asm
 
 pytestmark = pytest.mark.unit
