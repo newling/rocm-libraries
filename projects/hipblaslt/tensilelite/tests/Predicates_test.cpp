@@ -26,6 +26,8 @@
 
 #include <gtest/gtest.h>
 
+#include <sstream>
+
 #include <Tensile/ContractionProblemPredicates.hpp>
 
 TEST(Predicates, ArithmeticIntensity)
@@ -271,4 +273,19 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_WideOutputUsesTileWidth)
 
     EXPECT_TRUE(narrowTile(problem));
     EXPECT_FALSE(wideTile(problem));
+}
+
+TEST(Predicates, BufferStoreOffsetLimitCheck_DebugReportsClampedExtent)
+{
+    using namespace TensileLite;
+    // A failing predicate prints even without verbose debugging. N is less
+    // than the tile width, so the diagnostic must use the output's width.
+    auto problem = bf16ColumnMajorD(300000000, 8);
+    Predicates::Contraction::BufferStoreOffsetLimitCheck pred(256);
+    std::ostringstream details;
+
+    EXPECT_FALSE(pred(problem));
+    EXPECT_FALSE(pred.debugEval(problem, details));
+    EXPECT_NE(details.str().find("D:4800000000<0xfffff000"), std::string::npos)
+        << details.str();
 }
