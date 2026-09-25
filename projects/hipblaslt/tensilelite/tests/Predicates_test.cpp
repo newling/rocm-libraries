@@ -259,3 +259,16 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_NarrowOutputUsesItsOwnWidth)
     auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(macroTile1);
     EXPECT_TRUE((*pred)(bf16ColumnMajorD(m, n)));
 }
+
+TEST(Predicates, BufferStoreOffsetLimitCheck_WideOutputUsesTileWidth)
+{
+    using namespace TensileLite;
+    // The whole output exceeds the descriptor limit, but each workgroup
+    // re-bases along N, so a solution with narrower tiles remains usable.
+    auto problem = bf16ColumnMajorD(12667846, 256);
+    Predicates::Contraction::BufferStoreOffsetLimitCheck narrowTile(128);
+    Predicates::Contraction::BufferStoreOffsetLimitCheck wideTile(256);
+
+    EXPECT_TRUE(narrowTile(problem));
+    EXPECT_FALSE(wideTile(problem));
+}
