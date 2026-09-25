@@ -28,6 +28,7 @@
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
+#include <limits>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedData.hpp>
@@ -586,6 +587,16 @@ namespace TensileLite
                 // The grid dimension is not affected by cluster launch, and is still enumerated
                 // using number of blocks.
                 // The grid dimension should be a multiple of cluster size.
+                constexpr auto maxGridDim
+                    = std::numeric_limits<decltype(config.gridDimX)>::max();
+                if(kernel.numWorkGroups.x > maxGridDim || kernel.numWorkGroups.y > maxGridDim
+                   || kernel.numWorkGroups.z > maxGridDim)
+                {
+                    std::cerr << "hipDrvLaunchKernelEx: numWorkGroups " << kernel.numWorkGroups
+                              << " exceeds the 32-bit grid dimensions for kernel: "
+                              << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
+                }
                 config.gridDimX = kernel.numWorkGroups.x;
                 config.gridDimY = kernel.numWorkGroups.y;
                 config.gridDimZ = kernel.numWorkGroups.z;
@@ -620,6 +631,17 @@ namespace TensileLite
             else
 #endif
             {
+                // globalWorkSize arguments count work items and narrow size_t to unsigned int.
+                constexpr auto maxGlobalWorkSize = std::numeric_limits<unsigned int>::max();
+                if(kernel.numWorkItems.x > maxGlobalWorkSize
+                   || kernel.numWorkItems.y > maxGlobalWorkSize
+                   || kernel.numWorkItems.z > maxGlobalWorkSize)
+                {
+                    std::cerr << "hipExtModuleLaunchKernel: numWorkItems " << kernel.numWorkItems
+                              << " exceeds the 32-bit globalWorkSize parameters for kernel: "
+                              << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
+                }
                 HIP_CHECK_RETURN_WITH_LOG(hipExtModuleLaunchKernel(function,
                                                           kernel.numWorkItems.x,
                                                           kernel.numWorkItems.y,
