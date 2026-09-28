@@ -80,6 +80,9 @@ namespace TensileLite
             std::string              cell;
             while(std::getline(split, cell, ','))
                 cells.push_back(trimmed(cell));
+            // getline does not emit an empty field after a final delimiter.
+            if(!line.empty() && line.back() == ',')
+                cells.emplace_back();
             return cells;
         }
 
@@ -246,7 +249,14 @@ namespace TensileLite
                 continue;
             }
 
-            auto parsed = problemFromRow(zipRow(splitCsv(header), splitCsv(value)));
+            const auto names  = splitCsv(header);
+            const auto values = splitCsv(value);
+            // A truncated named row must not lose its identity column and be
+            // admitted as an older, unnamed row under the file's build stamp.
+            if(names.size() != values.size())
+                continue;
+
+            auto parsed = problemFromRow(zipRow(names, values));
             if(!parsed)
                 continue;
 

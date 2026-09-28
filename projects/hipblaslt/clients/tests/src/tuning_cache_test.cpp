@@ -496,6 +496,52 @@ namespace
         EXPECT_EQ(selected, recorded.index);
     }
 
+    TEST_F(TuningCache_pre_checkin, TruncatedNamedEntryIsNotTreatedAsLegacy)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+        if(m_stamp.empty())
+            GTEST_SKIP() << "this build reports no revision to write";
+
+        // An interrupted append stops before the declared kernel_name cell.
+        // A matching stamp must not turn that incomplete row into a legacy row.
+        {
+            std::ofstream out(m_path, std::ios::trunc);
+            out << "Git Version: " << m_stamp << "\n"
+                << "transA,transB,batch_count,m,n,k,a_type,b_type,c_type,compute_type,"
+                   "solution_index,kernel_name\n"
+                << "N,N,1," << kM << "," << kN << "," << kK
+                << ",f16_r,f16_r,f16_r,f32_r," << m_identities[1].index;
+        }
+        useTuningFile();
+
+        int selected = -1;
+        ASSERT_TRUE(runGemm(&selected));
+        EXPECT_EQ(selected, m_identities[0].index);
+    }
+
+    TEST_F(TuningCache_pre_checkin, NamedEntryWithEmptyTrailingColumnReplays)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        const auto& recorded = m_identities[1];
+        {
+            std::ofstream out(m_path, std::ios::trunc);
+            out << "Git Version: not-this-build\n"
+                << "transA,transB,batch_count,m,n,k,a_type,b_type,c_type,compute_type,"
+                   "solution_index,kernel_name,unused\n"
+                << "N,N,1," << kM << "," << kN << "," << kK
+                << ",f16_r,f16_r,f16_r,f32_r," << recorded.index << ","
+                << recorded.kernelName << ",\n";
+        }
+        useTuningFile();
+
+        int selected = -1;
+        ASSERT_TRUE(runGemm(&selected));
+        EXPECT_EQ(selected, recorded.index);
+    }
+
     // A row whose index now resolves to a different kernel is not launched: the
     // problem falls back to default selection.
     TEST_F(TuningCache_pre_checkin, EntryWhoseNameNoLongerMatchesIsRejected)
