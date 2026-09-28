@@ -1,5 +1,7 @@
 # Solution fingerprint prototype
 
+See the [review and related branches](pr12585-review.md) for the published review, concrete review fixes, and comparison with PR #12585.
+
 This explores a stronger identity check for the offline tuning records in PR
 #12585. A kernel name can stay unchanged when a solution's launch defaults or
 compiled code changes. The prototype records a build-time fingerprint alongside
