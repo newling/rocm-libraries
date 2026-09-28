@@ -219,7 +219,9 @@ namespace
             ok = ok && problem.create();
 
             std::vector<hipblasLtMatmulHeuristicResult_t> heuristic(requested);
-            int                                           returned = 0;
+            // This is an output parameter. A zero supplied by the test would
+            // hide a missing initialization on the override-only path.
+            int returned = -1;
             ok                                                     = ok
                  && hipblasLtMatmulAlgoGetHeuristic(handle,
                                                     problem.desc,
