@@ -222,19 +222,19 @@ namespace
             // This is an output parameter. A zero supplied by the test would
             // hide a missing initialization on the override-only path.
             int returned = -1;
-            ok                                                     = ok
-                 && hipblasLtMatmulAlgoGetHeuristic(handle,
-                                                    problem.desc,
-                                                    problem.layoutA,
-                                                    problem.layoutB,
-                                                    problem.layoutC,
-                                                    problem.layoutC,
-                                                    problem.pref,
-                                                    requested,
-                                                    heuristic.data(),
-                                                    &returned)
-                        == HIPBLAS_STATUS_SUCCESS
-                 && returned > 0;
+            ok           = ok
+                           && hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                              problem.desc,
+                                                              problem.layoutA,
+                                                              problem.layoutB,
+                                                              problem.layoutC,
+                                                              problem.layoutC,
+                                                              problem.pref,
+                                                              requested,
+                                                              heuristic.data(),
+                                                              &returned)
+                                  == HIPBLAS_STATUS_SUCCESS
+                           && returned > 0;
 
             if(ok)
             {
@@ -246,23 +246,23 @@ namespace
                 const float alpha = 1.0f;
                 const float beta  = 0.0f;
                 ok                = hipblasLtMatmul(handle,
-                                     problem.desc,
-                                     &alpha,
-                                     dA,
-                                     problem.layoutA,
-                                     dB,
-                                     problem.layoutB,
-                                     &beta,
-                                     dC,
-                                     problem.layoutC,
-                                     dC,
-                                     problem.layoutC,
-                                     &heuristic[0].algo,
-                                     dWs,
-                                     kWorkspaceBytes,
-                                     nullptr)
-                         == HIPBLAS_STATUS_SUCCESS
-                     && hipDeviceSynchronize() == hipSuccess;
+                                                    problem.desc,
+                                                    &alpha,
+                                                    dA,
+                                                    problem.layoutA,
+                                                    dB,
+                                                    problem.layoutB,
+                                                    &beta,
+                                                    dC,
+                                                    problem.layoutC,
+                                                    dC,
+                                                    problem.layoutC,
+                                                    &heuristic[0].algo,
+                                                    dWs,
+                                                    kWorkspaceBytes,
+                                                    nullptr)
+                                        == HIPBLAS_STATUS_SUCCESS
+                                    && hipDeviceSynchronize() == hipSuccess;
             }
         }
 
@@ -292,8 +292,8 @@ namespace
         void* dB = nullptr;
         void* dC = nullptr;
         bool  ok = hipMalloc(&dA, kM * kK * elementBytes) == hipSuccess
-                  && hipMalloc(&dB, kK * kN * elementBytes) == hipSuccess
-                  && hipMalloc(&dC, kM * kN * elementBytes) == hipSuccess;
+                   && hipMalloc(&dB, kK * kN * elementBytes) == hipSuccess
+                   && hipMalloc(&dC, kM * kN * elementBytes) == hipSuccess;
 
         if(ok)
         {
@@ -341,8 +341,8 @@ namespace
         void* dB = nullptr;
         void* dC = nullptr;
         bool  ok = hipMalloc(&dA, kM * kK * sizeof(uint16_t)) == hipSuccess
-                  && hipMalloc(&dB, kK * kN * sizeof(uint16_t)) == hipSuccess
-                  && hipMalloc(&dC, kM * kN * sizeof(uint16_t)) == hipSuccess;
+                   && hipMalloc(&dB, kK * kN * sizeof(uint16_t)) == hipSuccess
+                   && hipMalloc(&dC, kM * kN * sizeof(uint16_t)) == hipSuccess;
 
         if(ok)
         {
@@ -512,8 +512,8 @@ namespace
             out << "Git Version: " << m_stamp << "\n"
                 << "transA,transB,batch_count,m,n,k,a_type,b_type,c_type,compute_type,"
                    "solution_index,kernel_name\n"
-                << "N,N,1," << kM << "," << kN << "," << kK
-                << ",f16_r,f16_r,f16_r,f32_r," << m_identities[1].index;
+                << "N,N,1," << kM << "," << kN << "," << kK << ",f16_r,f16_r,f16_r,f32_r,"
+                << m_identities[1].index;
         }
         useTuningFile();
 
@@ -533,9 +533,8 @@ namespace
             out << "Git Version: not-this-build\n"
                 << "transA,transB,batch_count,m,n,k,a_type,b_type,c_type,compute_type,"
                    "solution_index,kernel_name,unused\n"
-                << "N,N,1," << kM << "," << kN << "," << kK
-                << ",f16_r,f16_r,f16_r,f32_r," << recorded.index << ","
-                << recorded.kernelName << ",\n";
+                << "N,N,1," << kM << "," << kN << "," << kK << ",f16_r,f16_r,f16_r,f32_r,"
+                << recorded.index << "," << recorded.kernelName << ",\n";
         }
         useTuningFile();
 
