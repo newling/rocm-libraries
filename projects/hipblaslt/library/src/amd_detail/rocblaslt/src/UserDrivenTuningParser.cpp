@@ -171,6 +171,14 @@ namespace TensileLite
 
             TunedEntry entry;
             entry.solutionIndex = solutionIndex;
+            if(auto fingerprint = field("solution_fingerprint"))
+            {
+                // A declared but empty/unknown fingerprint must never downgrade
+                // to legacy name or build-stamp validation.
+                if(!validSolutionFingerprint(*fingerprint))
+                    return std::nullopt;
+                entry.fingerprint = *fingerprint;
+            }
             if(auto name = field("kernel_name"); name && !name->empty())
                 entry.kernelName = *name;
             if(auto name = field("solution_name"); name && !name->empty())
@@ -262,11 +270,11 @@ namespace TensileLite
 
             const auto& [key, entry] = *parsed;
 
-            // A row that records a name is checked at replay, where its index is
-            // resolved in the running library and the name must still match. A
-            // row without one has nothing to check it against, so it is trusted
-            // only when the file was written by this build.
-            if(!entry.kernelName && !entry.solutionName && !writtenByThisBuild(fileBuildStamp))
+            // Fingerprints and legacy names are checked after resolving the
+            // index at replay. Rows with neither identity are trusted only
+            // when the file was written by this build.
+            if(!entry.fingerprint && !entry.kernelName && !entry.solutionName
+               && !writtenByThisBuild(fileBuildStamp))
             {
                 ++skippedUnnamed;
                 continue;

@@ -255,6 +255,9 @@ std::string rocblaslt_get_solution_name_from_data_cpp(rocblaslt_handle          
 std::string rocblaslt_get_kernel_name_from_algo(rocblaslt_handle             handle,
                                                 const rocblaslt_matmul_algo& algo);
 
+std::string rocblaslt_get_solution_fingerprint_from_algo(rocblaslt_handle             handle,
+                                                         const rocblaslt_matmul_algo& algo);
+
 std::string rocblaslt_get_solution_name_from_algo(rocblaslt_handle             handle,
                                                   const rocblaslt_matmul_algo& algo);
 

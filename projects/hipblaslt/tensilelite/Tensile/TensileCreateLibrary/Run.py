@@ -40,6 +40,7 @@ from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
 
 from Tensile import LibraryIO
+from Tensile.SolutionFingerprint import SolutionFingerprints
 from Tensile.Common import (
     CHeader,
     DebugConfig,
@@ -628,6 +629,7 @@ def writeSolutionsAndKernelsTCL(
     compress: bool=True,
     removeTemporaries: bool=True,
     outputArchNames: Optional[Dict[str, str]]=None,
+    generatedCodeObjects: Optional[List[Path]]=None,
 ):
     # base arch -> output subtree (see computeOutputArchNames); identity/empty
     # for ordinary builds.
@@ -704,7 +706,7 @@ def writeSolutionsAndKernelsTCL(
         return_as="list"
     )
 
-    buildAssemblyCodeObjectFiles(
+    assemblyCodeObjects = buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
         asmToolchain.bundler,
         asmKernels,
@@ -717,7 +719,7 @@ def writeSolutionsAndKernelsTCL(
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = Path(outputPath) / "Kernels.cpp"
 
-    buildSourceCodeObjectFiles(
+    helperCodeObjects = buildSourceCodeObjectFiles(
         srcToolchain.compiler,
         srcToolchain.bundler,
         destRoot,
@@ -727,6 +729,10 @@ def writeSolutionsAndKernelsTCL(
         cmdlineArchs,
         outputArchNames=outArchNames,
     )
+
+    if generatedCodeObjects is not None:
+        generatedCodeObjects.extend(assemblyCodeObjects)
+        generatedCodeObjects.extend(helperCodeObjects)
 
     return len(uniqueAsmKernels), uniqueAsmKernels, results
 
@@ -1262,6 +1268,7 @@ def run():
 
     copyStaticFiles(outputPath)
 
+    generatedCodeObjects = []
     start_wsk = timer()
     numKernels, uniqueKernels, kernelInfo = writeSolutionsAndKernelsTCL(
         outputPath,
@@ -1279,6 +1286,7 @@ def run():
         compress=arguments["UseCompression"],
         removeTemporaries=not arguments["KeepBuildTmp"],
         outputArchNames=outArchNames,
+        generatedCodeObjects=generatedCodeObjects,
     )
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
@@ -1328,23 +1336,30 @@ def run():
             )
             LibraryIO.write(archMappingFile, archMapping, "msgpack")
 
+    start_fingerprints = timer()
+    fingerprints = SolutionFingerprints(generatedCodeObjects)
+    print(f"Time to hash device code objects (s): {timer() - start_fingerprints:3.2f}")
+
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
         if archName in archs:
             # Only the directory is revisioned; the master keeps the ISA token so
             # the runtime finds the same name in either subtree.
             archDir = libraryDir(outputPath, outArchNames.get(archName, archName))
-            def writeMsl(name, lib, archDir=archDir):
+            def writeMsl(name, lib, archDir=archDir, archName=archName):
                 filename = os.path.join(archDir, name)
                 lib.applyNaming(splitGSU)
-                LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+                LibraryIO.write(filename, fingerprints.library_state(lib, archName, archDir),
+                                arguments["LibraryFormat"])
 
             if arguments["LazyLibraryLoading"]:
                 masterFile = os.path.join(archDir, "TensileLibrary_lazy_" + archName)
             else:
                 masterFile = os.path.join(archDir, "TensileLibrary_" + archName)
             newMasterLibrary.applyNaming(splitGSU)
-            LibraryIO.write(masterFile, state(newMasterLibrary), arguments["LibraryFormat"])
+            LibraryIO.write(masterFile,
+                            fingerprints.library_state(newMasterLibrary, archName, archDir),
+                            arguments["LibraryFormat"])
 
             ParallelMap2(writeMsl,
                          newMasterLibrary.lazyLibraries.items(),

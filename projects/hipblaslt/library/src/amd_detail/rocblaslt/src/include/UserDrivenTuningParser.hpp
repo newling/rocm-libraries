@@ -30,6 +30,7 @@
 #include "auxiliary.hpp"
 #include "tensile_host.hpp"
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/SolutionFingerprint.hpp>
 #include <shared_mutex>
 
 #include <map>
@@ -94,7 +95,8 @@ namespace TensileLite
      *
      * A solution index is only a position in one build's kernel library, so on
      * its own it cannot tell whether it still names the kernel that was tuned.
-     * The name recorded beside it is what lets replay check that: kernel_name
+     * New rows record a build-time fingerprint of defaults and device code.
+     * For legacy rows, replay checks the name recorded beside it: kernel_name
      * in files hipblaslt-bench writes, solution_name in some older files, and
      * neither in the oldest, which are trusted only when they were written by
      * the running build.
@@ -104,11 +106,12 @@ namespace TensileLite
         int32_t                    solutionIndex = -1;
         std::optional<std::string> kernelName;
         std::optional<std::string> solutionName;
+        std::optional<std::string> fingerprint;
 
         bool sameIdentity(const TunedEntry& other) const
         {
             return solutionIndex == other.solutionIndex && kernelName == other.kernelName
-                   && solutionName == other.solutionName;
+                   && solutionName == other.solutionName && fingerprint == other.fingerprint;
         }
     };
 
@@ -258,7 +261,7 @@ namespace TensileLite
         /**
          * Insert unless this key already records the same entry, so a file that
          * repeats a row does not stack duplicates. The identity is the index and
-         * the recorded names together: two rows can share an index while naming
+         * the recorded fingerprint and names together: two rows can share an index while naming
          * different kernels, and only one of them can still be valid.
          */
         void addIfAbsent(const ProblemOverride& key, const TunedEntry& entry)

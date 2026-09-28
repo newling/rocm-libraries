@@ -121,6 +121,7 @@ namespace
     {
         int         index = -1;
         std::string kernelName;
+        std::string fingerprint;
     };
 
     /**
@@ -157,6 +158,8 @@ namespace
                     Identity id;
                     id.index      = hipblaslt_ext::getIndexFromAlgo(heuristic[i].algo);
                     id.kernelName = hipblaslt_ext::getKernelNameFromAlgo(handle, heuristic[i].algo);
+                    id.fingerprint
+                        = hipblaslt_ext::getSolutionFingerprintFromAlgo(handle, heuristic[i].algo);
                     if(id.kernelName.empty())
                         continue;
 
@@ -395,6 +398,7 @@ namespace
         std::optional<std::string> kernelName;
         // a_type, b_type, c_type and compute_type, in the file's spelling.
         std::string types = "f16_r,f16_r,f16_r,f32_r";
+        std::optional<std::string> fingerprint;
     };
 
     /**
@@ -416,11 +420,15 @@ namespace
                    "index";
             if(row.kernelName)
                 out << ",kernel_name";
+            if(row.fingerprint)
+                out << ",solution_fingerprint";
             out << "\n";
 
             out << "N,N,1," << kM << "," << kN << "," << kK << "," << row.types << "," << row.index;
             if(row.kernelName)
                 out << "," << *row.kernelName;
+            if(row.fingerprint)
+                out << "," << *row.fingerprint;
             out << "\n";
         }
     }
@@ -496,6 +504,43 @@ namespace
         int selected = -1;
         ASSERT_TRUE(runGemm(&selected));
         EXPECT_EQ(selected, recorded.index);
+    }
+
+    TEST_F(TuningCache_pre_checkin, FingerprintedEntryReplaysThroughBothApis)
+    {
+        if(!haveSolutions(2) || m_identities[1].fingerprint.empty())
+            GTEST_SKIP() << "requires two solutions and fingerprinted device metadata";
+        const auto& id = m_identities[1];
+        // The first row has identical names/index but an obsolete fingerprint.
+        auto stale   = id.fingerprint;
+        stale.back() = stale.back() == '0' ? '1' : '0';
+        writeTuningFile(m_path,
+                        "different-build",
+                        {{id.index, id.kernelName, "f16_r,f16_r,f16_r,f32_r", stale},
+                         {id.index, id.kernelName, "f16_r,f16_r,f16_r,f32_r", id.fingerprint}});
+        useTuningFile();
+        int selected = -1;
+        ASSERT_TRUE(runGemm(&selected));
+        EXPECT_EQ(selected, id.index);
+        ASSERT_TRUE(extHeuristicIndex(&selected));
+        EXPECT_EQ(selected, id.index);
+    }
+
+    TEST_F(TuningCache_pre_checkin, ChangedFingerprintRejectsEvenWhenNamesMatch)
+    {
+        if(!haveSolutions(2) || m_identities[1].fingerprint.empty())
+            GTEST_SKIP() << "requires two solutions and fingerprinted device metadata";
+        const auto& id    = m_identities[1];
+        auto        stale = id.fingerprint;
+        stale.back()      = stale.back() == '0' ? '1' : '0';
+        writeTuningFile(
+            m_path, m_stamp, {{id.index, id.kernelName, "f16_r,f16_r,f16_r,f32_r", stale}});
+        useTuningFile();
+        int selected = -1;
+        ASSERT_TRUE(runGemm(&selected));
+        EXPECT_EQ(selected, m_identities[0].index);
+        ASSERT_TRUE(extHeuristicIndex(&selected));
+        EXPECT_EQ(selected, m_identities[0].index);
     }
 
     TEST_F(TuningCache_pre_checkin, TruncatedNamedEntryIsNotTreatedAsLegacy)

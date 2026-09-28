@@ -1437,6 +1437,13 @@ namespace hipblaslt_ext
         return rocblaslt_get_solution_name_from_algo((rocblaslt_handle)handle, *rocalgo);
     }
 
+    std::string getSolutionFingerprintFromAlgo(hipblasLtHandle_t      handle,
+                                               hipblasLtMatmulAlgo_t& algo)
+    {
+        auto rocalgo = reinterpret_cast<const rocblaslt_matmul_algo*>(&algo);
+        return rocblaslt_get_solution_fingerprint_from_algo((rocblaslt_handle)handle, *rocalgo);
+    }
+
     std::string getKernelNameFromAlgo(hipblasLtHandle_t handle, hipblasLtMatmulAlgo_t& algo)
     {
         auto rocalgo = reinterpret_cast<const rocblaslt_matmul_algo*>(&algo);

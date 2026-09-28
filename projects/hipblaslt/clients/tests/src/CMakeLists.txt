@@ -42,3 +42,17 @@ endif()
 # directory. Adding the internal rocblaslt/src/include dir to hipblaslt-test
 # shadows the clients' own "utility.hpp" with the library's internal one and
 # breaks the build of unrelated test sources, so it must not be added here.
+
+# CPU tests link the real parser, whose internal symbols are hidden in hipblaslt.
+# Keep its include directories off the main client-test target (see above).
+add_executable(hipblaslt-tuning-parser-test
+    tuning_fingerprint_test.cpp
+    ../../../library/src/amd_detail/rocblaslt/src/UserDrivenTuningParser.cpp
+)
+target_include_directories(hipblaslt-tuning-parser-test PRIVATE
+    $<TARGET_PROPERTY:hipblaslt,INCLUDE_DIRECTORIES>)
+target_compile_definitions(hipblaslt-tuning-parser-test PRIVATE
+    $<TARGET_PROPERTY:hipblaslt,COMPILE_DEFINITIONS>)
+target_compile_features(hipblaslt-tuning-parser-test PRIVATE cxx_std_17)
+target_link_libraries(hipblaslt-tuning-parser-test PRIVATE GTest::gtest_main hip::device)
+add_test(NAME hipblaslt-tuning-parser-test COMMAND hipblaslt-tuning-parser-test)

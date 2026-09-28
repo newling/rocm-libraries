@@ -1141,6 +1141,13 @@ namespace hipblaslt_ext
     HIPBLASLT_EXPORT std::string getSolutionNameFromAlgo(hipblasLtHandle_t      handle,
                                                          hipblasLtMatmulAlgo_t& algo);
 
+    /** Experimental: stored build-time identity of the solution defaults and
+     *  device code. Returns empty when unavailable (including older libraries).
+     *  Does not identify custom tuning overrides or the runtime environment.
+     */
+    HIPBLASLT_EXPORT std::string getSolutionFingerprintFromAlgo(hipblasLtHandle_t      handle,
+                                                                hipblasLtMatmulAlgo_t& algo);
+
     /*! \ingroup library_module
      *  \brief Retrieve the kernel name
      *

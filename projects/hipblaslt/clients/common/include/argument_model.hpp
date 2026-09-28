@@ -159,27 +159,28 @@ public:
         }
     }
 
-    void log_args(hipDataType                 Tc,
-                  hipblaslt_internal_ostream& str,
-                  size_t                      index,
-                  int32_t                     solution_index,
-                  std::string&                solution_name,
-                  std::string&                kernel_name,
-                  std::string&                archName,
-                  std::string&                cuNum,
-                  const Arguments&            arg,
-                  uint32_t                    splitK,
-                  uint32_t                    wgm,
-                  double                      gpu_us,
-                  double                      gflops,
-                  double                      gbytes = ArgumentLogging::NA_value,
-                  double                      cpu_us = ArgumentLogging::NA_value,
-                  double                      norm    = ArgumentLogging::NA_value,
-                  double                      atol    = ArgumentLogging::NA_value,
-                  double                      rtol    = ArgumentLogging::NA_value,
-                  double                      max_ulp = 0.0,
-                  double                      avg_ulp = 0.0,
-                  const hipblaslt_bench::TimingResult& timing = {})
+    void log_args(hipDataType                          Tc,
+                  hipblaslt_internal_ostream&          str,
+                  size_t                               index,
+                  int32_t                              solution_index,
+                  std::string&                         solution_name,
+                  std::string&                         kernel_name,
+                  std::string&                         archName,
+                  std::string&                         cuNum,
+                  const Arguments&                     arg,
+                  uint32_t                             splitK,
+                  uint32_t                             wgm,
+                  double                               gpu_us,
+                  double                               gflops,
+                  double                               gbytes  = ArgumentLogging::NA_value,
+                  double                               cpu_us  = ArgumentLogging::NA_value,
+                  double                               norm    = ArgumentLogging::NA_value,
+                  double                               atol    = ArgumentLogging::NA_value,
+                  double                               rtol    = ArgumentLogging::NA_value,
+                  double                               max_ulp = 0.0,
+                  double                               avg_ulp = 0.0,
+                  const hipblaslt_bench::TimingResult& timing  = {},
+                  const std::string&                   solution_fingerprint = {})
     {
         hipblaslt_internal_ostream name_list;
         hipblaslt_internal_ostream value_list;
@@ -307,16 +308,23 @@ public:
             print("status", status);
         }
 
-        if(archName != "")
+        if(!archName.empty() && (splitK != 0 || wgm != 0 || solution_fingerprint.empty()))
+            hipblaslt_cerr << "Skipping tuning-file row: a solution fingerprint and default "
+                              "split-K/WGM are required."
+                           << std::endl;
+
+        if(!archName.empty() && splitK == 0 && wgm == 0 && !solution_fingerprint.empty())
         {
             auto delim = ",";
             name_list << delim << "solution_index";
             value_list << delim << solution_index;
 
-            // Replay resolves solution_index and uses it only if it still
-            // names this kernel.
+            // Replay resolves solution_index and requires the fingerprint to
+            // match. Keep the kernel name for diagnostics and older readers.
             name_list << delim << "kernel_name";
             value_list << delim << kernel_name;
+            name_list << delim << "solution_fingerprint";
+            value_list << delim << solution_fingerprint;
 
             const char*   tuningEnv  = getenv("HIPBLASLT_TUNING_FILE");
             std::string   tuningPath = tuningEnv;

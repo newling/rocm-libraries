@@ -178,11 +178,11 @@ inline bool
 namespace
 {
     /**
-     * Whether an entry's recorded name still matches what its index resolves to.
+     * Whether an entry's recorded identity matches what its index resolves to.
      *
      * The index only locates a solution in the running build; the recorded
-     * name is what authorizes using it. A row with no name was already accepted
-     * or refused on the file's build stamp when it was loaded.
+     * fingerprint (or legacy name) authorizes using it. Unnamed legacy rows
+     * were already checked against the file's build stamp when loaded.
      */
     bool tuned_entry_identity_matches(rocblaslt_handle                         handle,
                                       const TensileLite::TunedEntry&           entry,
@@ -193,7 +193,15 @@ namespace
         // they differ from the solution's defaults, which could never match.
         std::string recorded;
         std::string current;
-        if(entry.kernelName)
+        if(entry.fingerprint)
+        {
+            recorded = *entry.fingerprint;
+            current  = getSolutionFingerprintFromAlgoIndex(handle, resolved.algo);
+            if(TensileLite::solutionFingerprintMatches(recorded, current))
+                return true;
+            // A fingerprint is authoritative, even if the names still match.
+        }
+        else if(entry.kernelName)
         {
             recorded = *entry.kernelName;
             current  = getKernelNameFromAlgoIndex(handle, resolved.algo);
@@ -208,7 +216,7 @@ namespace
             return true;
         }
 
-        if(current == recorded)
+        if(!entry.fingerprint && current == recorded)
             return true;
 
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)

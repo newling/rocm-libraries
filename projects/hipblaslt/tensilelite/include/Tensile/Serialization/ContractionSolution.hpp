@@ -56,6 +56,7 @@ namespace TensileLite
             {
                 iot::mapRequired(io, "name", s.solutionName);
                 iot::mapRequired(io, "kernelName", s.kernelName);
+                iot::mapOptional(io, "fingerprint", s.fingerprint);
                 iot::mapRequired(io, "index", s.index);
 
                 iot::mapRequired(io, "hardwarePredicate", s.hardwarePredicate);

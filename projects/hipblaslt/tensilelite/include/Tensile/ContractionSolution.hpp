@@ -1273,6 +1273,7 @@ namespace TensileLite
         int                          index = 0;
         std::string                  kernelName;
         std::string                  solutionName;
+        std::string                  fingerprint; // Empty for older device libraries.
         ThreadSafeValue<std::string> codeObjectFilename;
         bool                         debugKernel     = false;
         bool                         kernelArgsLog   = false;

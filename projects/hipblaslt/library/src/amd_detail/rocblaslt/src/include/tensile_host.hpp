@@ -134,6 +134,9 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
 
 std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo);
 
+std::string getSolutionFingerprintFromAlgoIndex(rocblaslt_handle             handle,
+                                                const rocblaslt_matmul_algo& algo);
+
 std::string getSolutionNameFromAlgoIndex(rocblaslt_handle             handle,
                                          const rocblaslt_matmul_algo& algo);
 

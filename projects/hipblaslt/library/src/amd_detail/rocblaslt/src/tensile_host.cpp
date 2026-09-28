@@ -5533,6 +5533,25 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
     return solutionName;
 }
 
+std::string getSolutionFingerprintFromAlgoIndex(rocblaslt_handle             handle,
+                                                const rocblaslt_matmul_algo& algo)
+{
+    int solutionIndex;
+    std::memcpy(&solutionIndex, algo.data, sizeof(solutionIndex));
+    if(!handle || solutionIndex < 0)
+        return {};
+
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       deviceProp;
+    std::shared_ptr<TensileLite::Hardware> hardware;
+    get_library_and_adapter(&library, &deviceProp, &hardware, handle->device);
+    if(!library || !hardware)
+        return {};
+    auto solution = library->getSolutionByIndex(*hardware, solutionIndex);
+    return solution ? solution->fingerprint : std::string{};
+}
+
 std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo)
 {
     int* solutionIndex = (int*)algo.data;

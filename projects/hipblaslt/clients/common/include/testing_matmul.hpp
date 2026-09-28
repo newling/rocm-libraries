@@ -6218,7 +6218,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_rtol,
                     hipblaslt_max_ulp,
                     hipblaslt_avg_ulp,
-                    timing);
+                    timing,
+                    archName.empty() ? std::string{}
+                                     : hipblaslt_ext::getSolutionFingerprintFromAlgo(
+                                           handle, heuristicResult[sol].algo));
             }
             if(best_gpu_time > gpu_time_used)
             {
@@ -6282,7 +6285,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 best_rtol,
                 best_max_ulp,
                 best_avg_ulp,
-                best_timing);
+                best_timing,
+                archName.empty() ? std::string{}
+                                 : hipblaslt_ext::getSolutionFingerprintFromAlgo(
+                                       handle, heuristicResult[best_sol].algo));
         }
     }
 

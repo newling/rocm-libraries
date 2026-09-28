@@ -1641,6 +1641,12 @@ std::string rocblaslt_get_kernel_name_from_algo(rocblaslt_handle             han
     return getKernelNameFromAlgoIndex(handle, algo);
 }
 
+std::string rocblaslt_get_solution_fingerprint_from_algo(rocblaslt_handle             handle,
+                                                         const rocblaslt_matmul_algo& algo)
+{
+    return getSolutionFingerprintFromAlgoIndex(handle, algo);
+}
+
 std::string rocblaslt_get_solution_name_from_algo(rocblaslt_handle             handle,
                                                   const rocblaslt_matmul_algo& algo)
 {
