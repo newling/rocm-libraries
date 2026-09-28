@@ -397,7 +397,7 @@ namespace
         int                        index = -1;
         std::optional<std::string> kernelName;
         // a_type, b_type, c_type and compute_type, in the file's spelling.
-        std::string types = "f16_r,f16_r,f16_r,f32_r";
+        std::string                types = "f16_r,f16_r,f16_r,f32_r";
         std::optional<std::string> fingerprint;
     };
 

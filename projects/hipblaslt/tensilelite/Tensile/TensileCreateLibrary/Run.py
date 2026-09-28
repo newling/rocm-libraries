@@ -53,7 +53,6 @@ from Tensile.Common import (
     printWarning,
     printExit,
     printWarning,
-    state,
     tqdm,
     setVerbosity,
     getVerbosity,
