@@ -13,6 +13,7 @@
 #include <sys/prctl.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 namespace hipblaslt_bench
@@ -22,6 +23,59 @@ namespace hipblaslt_bench
     constexpr int kRankChildSkipped = 2;
 
     constexpr uint32_t kRankChildDefaultLaunches = 1;
+
+    // Largest MacroTile0 the fused path admits; the other is 128.
+    constexpr int64_t kFusedA2AMaxMacroTile0 = 256;
+
+    // Every world moves the same per-rank shard and keeps the same local tail, so
+    // only M grows with the world. Both are whole tiles for either admitted
+    // MacroTile0, which makes FusedA2ATileDivisible hold for every world. At 2
+    // ranks this is the 4096 x 256 x 1024 problem with a 2048 extent.
+    constexpr int64_t kFusedA2AShardFeatures = 1024;
+    constexpr int64_t kFusedA2ALocalFeatures = 2048;
+    constexpr int64_t kFusedA2ATokens        = 256;
+    constexpr int64_t kFusedA2AContractBound = 1024;
+
+    struct FusedA2AShape
+    {
+        int64_t features;
+        int64_t extent;
+    };
+
+    inline FusedA2AShape fused_a2a_shape_for_world(uint32_t world)
+    {
+        const int64_t extent = kFusedA2AShardFeatures * int64_t(world);
+        return {extent + kFusedA2ALocalFeatures, extent};
+    }
+
+    // Expected to gain A2AGemm collective.
+    enum class Collective
+    {
+        GemmA2A,
+        Unknown,
+    };
+
+    constexpr const char* kCollectiveGemmA2A = "gemm-a2a";
+
+    // An unset name selects GemmA2A, the only collective before A2A_COLLECTIVE.
+    inline Collective parse_collective(const char* name)
+    {
+        if(name == nullptr || name[0] == '\0' || std::strcmp(name, kCollectiveGemmA2A) == 0)
+            return Collective::GemmA2A;
+        return Collective::Unknown;
+    }
+
+    inline const char* collective_name(Collective c)
+    {
+        switch(c)
+        {
+        case Collective::GemmA2A:
+            return kCollectiveGemmA2A;
+        case Collective::Unknown:
+            break;
+        }
+        return "";
+    }
 
     inline uint32_t rank_child_launches()
     {
@@ -36,12 +90,14 @@ namespace hipblaslt_bench
 
     inline Arguments rank_child_arguments(const LauncherEnv& env)
     {
+        const FusedA2AShape shape = fused_a2a_shape_for_world(env.world);
+
         Arguments arg;
         arg.init();
-        arg.M[0]       = 4096;
-        arg.N[0]       = 256;
-        arg.K[0]       = 1024;
-        arg.a2a_extent = 2048;
+        arg.M[0]       = shape.features;
+        arg.N[0]       = kFusedA2ATokens;
+        arg.K[0]       = kFusedA2AContractBound;
+        arg.a2a_extent = shape.extent;
         arg.a2a_world  = uint8_t(env.world);
         return arg;
     }
@@ -77,6 +133,14 @@ namespace hipblaslt_bench
             hipblaslt_cout << "skipped: WORLD_SIZE " << env.world << " exceeds "
                            << HIPBLASLT_DEVICE_COMM_MAX_WORLD << "\n";
             return kRankChildSkipped;
+        }
+
+        const char*      collectiveName = std::getenv("A2A_COLLECTIVE");
+        const Collective collective     = parse_collective(collectiveName);
+        if(collective == Collective::Unknown)
+        {
+            hipblaslt_cerr << "error: unknown collective " << collectiveName << "\n";
+            return kRankChildFailed;
         }
 
         const Arguments arg = rank_child_arguments(env);
@@ -144,14 +208,23 @@ namespace hipblaslt_bench
         const uint32_t launches = rank_child_launches();
         for(uint32_t i = 0; i < launches && verified; ++i)
         {
-            const bool cleared = hipMemset(res.dRecv, 0, recvBytes) == hipSuccess;
+            // Peers write into this buffer from their own launch, so every rank
+            // has to finish clearing its buffer before any rank launches.
+            const bool cleared = hipMemsetAsync(res.dRecv, 0, recvBytes, res.stream) == hipSuccess
+                                 && hipStreamSynchronize(res.stream) == hipSuccess;
+            if(group_verdict(rendezvous, env.world, cleared) != GroupVerdict::Agreed)
+            {
+                hipblaslt_cerr << "error: rank " << env.rank << " failed to clear before launch "
+                               << i << "\n";
+                verified = false;
+                break;
+            }
 
             launch(int64_t(i));
 
             const bool synced = hipStreamSynchronize(res.stream) == hipSuccess;
             const bool landedCorrectly = check_recv(env, arg, res, gold, landed);
-            const bool ok = cleared && synced && landedCorrectly
-                            && lastStatus == HIPBLAS_STATUS_SUCCESS;
+            const bool ok = synced && landedCorrectly && lastStatus == HIPBLAS_STATUS_SUCCESS;
             if(!ok)
                 hipblaslt_cerr << "error: rank " << env.rank << " failed launch " << i << "\n";
 
