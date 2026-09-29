@@ -35,7 +35,7 @@ namespace hipblaslt_bench
         return kRankChildDefaultLaunches;
     }
 
-    inline Arguments rank_child_arguments(const LauncherEnv& env)
+    inline Arguments gemm_a2a_rank_arguments(const LauncherEnv& env)
     {
         const FusedA2AShape shape = fused_a2a_shape_for_world(env.world);
 
@@ -69,28 +69,10 @@ namespace hipblaslt_bench
         return GroupVerdict::Agreed;
     }
 
-    inline int run_rank_child()
+    // run_rank_child() bounds env.world before selecting this runner.
+    inline int run_gemm_a2a_rank(const LauncherEnv& env)
     {
-        // SIGKILL once the spawning test process is gone.
-        prctl(PR_SET_PDEATHSIG, SIGKILL);
-
-        const LauncherEnv env = read_launcher_env();
-        if(env.world > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
-        {
-            hipblaslt_cout << "skipped: WORLD_SIZE " << env.world << " exceeds "
-                           << HIPBLASLT_DEVICE_COMM_MAX_WORLD << "\n";
-            return kRankChildSkipped;
-        }
-
-        const char*      collectiveName = std::getenv("A2A_COLLECTIVE");
-        const Collective collective     = parse_collective(collectiveName);
-        if(collective == Collective::Unknown)
-        {
-            hipblaslt_cerr << "error: unknown collective " << collectiveName << "\n";
-            return kRankChildFailed;
-        }
-
-        const Arguments arg = rank_child_arguments(env);
+        const Arguments arg = gemm_a2a_rank_arguments(env);
 
         TcpRendezvous rendezvous(env, kRendezvousTimeoutSec);
 
@@ -179,5 +161,33 @@ namespace hipblaslt_bench
         }
 
         return verified ? kRankChildPassed : kRankChildFailed;
+    }
+
+    // Select a collective-specific runner after reading the common launcher state.
+    // Each runner owns its argument setup, launch, and result validation.
+    inline int run_rank_child()
+    {
+        // SIGKILL once the spawning test process is gone.
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+
+        const LauncherEnv env = read_launcher_env();
+        if(env.world > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
+        {
+            hipblaslt_cout << "skipped: WORLD_SIZE " << env.world << " exceeds "
+                           << HIPBLASLT_DEVICE_COMM_MAX_WORLD << "\n";
+            return kRankChildSkipped;
+        }
+
+        const char* collectiveName = std::getenv("A2A_COLLECTIVE");
+        switch(parse_collective(collectiveName))
+        {
+        case Collective::GemmA2A:
+            return run_gemm_a2a_rank(env);
+        case Collective::Unknown:
+            break;
+        }
+
+        hipblaslt_cerr << "error: unknown collective " << collectiveName << "\n";
+        return kRankChildFailed;
     }
 } // namespace hipblaslt_bench
