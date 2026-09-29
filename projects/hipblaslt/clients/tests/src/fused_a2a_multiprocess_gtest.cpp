@@ -179,43 +179,8 @@ TEST(FusedA2ARankEnv_smoke, RejectsLocalRankThatDoesNotMatchRank)
 
 using hipblaslt_bench::Collective;
 
-// Worlds every fused collective is swept over, one GPU per rank. A host with
-// fewer devices skips a world rather than failing it.
-constexpr uint32_t kFusedWorlds[] = {2, 3, 4, 5, 6, 7, 8};
-
 // Collectives the multi-process sweep runs.
 constexpr Collective kFusedCollectives[] = {Collective::GemmA2A};
-
-TEST(FusedA2ACollective_smoke, NamesRoundTrip)
-{
-    EXPECT_EQ(hipblaslt_bench::parse_collective(nullptr), Collective::GemmA2A);
-    EXPECT_EQ(hipblaslt_bench::parse_collective(""), Collective::GemmA2A);
-    EXPECT_EQ(hipblaslt_bench::parse_collective(
-                  hipblaslt_bench::collective_name(Collective::GemmA2A)),
-              Collective::GemmA2A);
-    EXPECT_EQ(hipblaslt_bench::parse_collective("bias"), Collective::Unknown);
-}
-
-// One rule has to give a legal fused-A2A problem at every world, with the same
-// shard per rank and the same local tail.
-TEST(FusedA2AWorldShape_smoke, EveryWorldFrom2To8IsTileDivisible)
-{
-    for(uint32_t world : kFusedWorlds)
-    {
-        const auto    shape = hipblaslt_bench::fused_a2a_shape_for_world(world);
-        const int64_t tile  = hipblaslt_bench::kFusedA2AMaxMacroTile0;
-        EXPECT_EQ(shape.extent % (tile * int64_t(world)), 0) << "world " << world;
-        EXPECT_EQ(shape.features % tile, 0) << "world " << world;
-        EXPECT_EQ(shape.extent / int64_t(world), hipblaslt_bench::kFusedA2AShardFeatures)
-            << "world " << world;
-        EXPECT_EQ(shape.features - shape.extent, hipblaslt_bench::kFusedA2ALocalFeatures)
-            << "world " << world;
-    }
-
-    const auto two = hipblaslt_bench::fused_a2a_shape_for_world(2);
-    EXPECT_EQ(two.features, 4096);
-    EXPECT_EQ(two.extent, 2048);
-}
 
 class FusedA2AMultiProcess_multi_gpu
     : public ::testing::TestWithParam<std::tuple<Collective, uint32_t>>
@@ -267,7 +232,8 @@ TEST_P(FusedA2AMultiProcess_multi_gpu, ReusedChannelsStayCorrect)
 INSTANTIATE_TEST_SUITE_P(
     World,
     FusedA2AMultiProcess_multi_gpu,
-    ::testing::Combine(::testing::ValuesIn(kFusedCollectives), ::testing::ValuesIn(kFusedWorlds)),
+    ::testing::Combine(::testing::ValuesIn(kFusedCollectives),
+                       ::testing::ValuesIn(hipblaslt_bench::kFusedA2AWorlds)),
     [](const ::testing::TestParamInfo<std::tuple<Collective, uint32_t>>& info) {
         const char* tag = std::get<0>(info.param) == Collective::GemmA2A ? "GemmA2A" : "Unknown";
         return std::string(tag) + "_" + std::to_string(std::get<1>(info.param)) + "gpu";

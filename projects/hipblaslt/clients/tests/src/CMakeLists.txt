@@ -23,6 +23,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/arguments_a2a_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../a2a_config/a2a_config_gtest.cpp
 )
 
 if(NOT WIN32)
