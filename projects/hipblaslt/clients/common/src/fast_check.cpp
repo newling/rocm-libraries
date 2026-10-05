@@ -677,6 +677,10 @@ FastCheckExpected fast_check_expected(const FastCheckProblem& p)
     if(!e.status.passed)
         return finish();
 
+    // An empty output needs neither input fingerprints nor operand storage.
+    if(p.M == 0 || p.N == 0 || p.batch_count == 0)
+        return finish();
+
     const int64_t M = p.M, N = p.N, K = p.K;
     // Multiplies two integer factors, failing rather than overflowing: a combined factor of 2^61
     // or more is far outside every compute type's exact range anyway.
@@ -894,6 +898,8 @@ FastCheckResult fast_check_result(const FastCheckProblem& p, const FastCheckExpe
 {
     if(!e.status.passed)
         return e.status;
+    if(p.M == 0 || p.N == 0 || p.batch_count == 0)
+        return {};
 
     Report        rep(p);
     const int64_t M = p.M, N = p.N;
@@ -1358,6 +1364,9 @@ FastCheckResult fast_check_result_device(const FastCheckProblem&  p,
 {
     if(!e.status.passed)
         return e.status;
+    // Chunk sizing divides by M and N; empty outputs require no device work.
+    if(p.M == 0 || p.N == 0 || p.batch_count == 0)
+        return {};
 
     // The device pass handles the types the GPU converts natively; fp8 outputs use the host pass.
     switch(p.D.type)
