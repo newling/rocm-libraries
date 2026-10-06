@@ -60,12 +60,17 @@ TEST(MxScaleStorageLayoutTest, MapsArchitectureNames) {
     EXPECT_EQ(mxScaleStorageLayoutForArchitectureName("gfx1250"), MxScaleStorageLayout::Gfx1250);
     EXPECT_EQ(mxScaleStorageLayoutForArchitectureName("gfx1250:xnack+"),
               MxScaleStorageLayout::Gfx1250);
+    EXPECT_EQ(mxScaleStorageLayoutForArchitectureName("gfx1250-strict"),
+              MxScaleStorageLayout::Gfx1250);
+    EXPECT_EQ(mxScaleStorageLayoutForArchitectureName("gfx1250-strict:xnack-"),
+              MxScaleStorageLayout::Gfx1250);
     EXPECT_EQ(mxScaleStorageLayoutForArchitectureName("gfx942"), MxScaleStorageLayout::Natural);
 }
 
 TEST(MxScaleStorageLayoutTest, RejectsMisleadingArchitectureSubstrings) {
     for (const std::string_view architectureName :
-         {"notgfx950", "gfx9500", "gfx950-sramecc+", "notgfx1250", "gfx12500", "gfx1250suffix"})
+         {"notgfx950", "gfx9500", "gfx950-sramecc+", "notgfx1250", "gfx12500", "gfx1250suffix",
+          "gfx1250-strictsuffix"})
         EXPECT_EQ(mxScaleStorageLayoutForArchitectureName(architectureName),
                   MxScaleStorageLayout::Natural)
             << architectureName;

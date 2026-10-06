@@ -18,7 +18,8 @@ MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view ar
     };
 
     if (matchesArchitectureToken("gfx950")) return MxScaleStorageLayout::Gfx950;
-    if (matchesArchitectureToken("gfx1250")) return MxScaleStorageLayout::Gfx1250;
+    if (matchesArchitectureToken("gfx1250") || matchesArchitectureToken("gfx1250-strict"))
+        return MxScaleStorageLayout::Gfx1250;
     return MxScaleStorageLayout::Natural;
 }
 
