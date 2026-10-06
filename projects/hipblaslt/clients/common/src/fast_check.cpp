@@ -1845,6 +1845,11 @@ FastCheckResult fast_check_activation_device(const FastCheckMatrix& d,
                                              double*                amax)
 {
     FastCheckResult   result;
+    if(amax)
+        *amax = std::numeric_limits<double>::quiet_NaN();
+    if(act == FastCheckActivation::clamp
+       && (!is_exact_integer(arg1) || !is_exact_integer(arg2)))
+        return {false, "fast_check requires integer clamp bounds\n"};
     std::vector<char> hd = host_region(d, batch_count, stream);
     std::vector<char> he = host_region(e, batch_count, stream);
     if(hd.empty() || he.empty())
