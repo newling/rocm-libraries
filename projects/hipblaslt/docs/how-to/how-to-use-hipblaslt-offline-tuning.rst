@@ -70,6 +70,14 @@ To find and use the best GEMM kernel for a problem, follow these steps:
    search has no time limit unless ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` sets one. A problem the file already holds is not
    tuned again. Grouped GEMM and pointer-array batched problems are not tuned.
 
+   With ``--api_method cpp``, the search still runs through the C API and uses each candidate's default split-K and
+   workgroup-mapping settings. ``--splitk`` and ``--wgm`` apply to the selected solution during the following benchmark.
+   Repeating these options benchmarks several configurations of that one solution; it does not search the other candidates
+   with those overrides. The tuning row does not store either override.
+
+   The runtime tuner's other `Limitations`_ also apply. For example, an in-place problem with nonzero ``beta`` can be
+   benchmarked but is skipped by the tuner, so no tuning row is added.
+
    After the tuning completes, the expected output is displayed as follows:
 
    .. code-block:: none

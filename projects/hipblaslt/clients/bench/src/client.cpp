@@ -66,6 +66,8 @@ struct perf_matmul : hipblaslt_test_valid
 // it writes serves the C++ API's lookups for the same problem too. The run that
 // is timed afterwards is then the winner alone, which the heuristic now returns
 // like any cached problem.
+// The search uses each candidate's default split-K and WGM settings. C++ overrides
+// in arg apply only to the subsequent benchmark of the selected solution.
 void tune_with_library(Arguments& arg)
 {
     if(arg.grouped_gemm
@@ -109,11 +111,10 @@ void tune_with_library(Arguments& arg)
     arg.print_kernel_info      = true;
 }
 
-// hipblaslt-bench tunes with the library's tune mode rather than a loop of its
-// own, so it and a tuning application measure the same way and cannot choose
-// different winners. The tuning file becomes the cache the winners are written
-// to, and the bench's measurement options become the tune-mode settings. Set
-// before any hipBLASLt call, since the library reads them once.
+// hipblaslt-bench delegates candidate selection to the library's runtime tuner.
+// The tuning file receives the winners, and the measurement options configure
+// each search. Initialize mode and path before the first hipBLASLt call, which
+// caches them. Search settings are read anew for each tuning attempt.
 bool enter_library_tune_mode(const char* tuningFile, const Arguments& arg)
 {
     const char* mode = getenv("HIPBLASLT_TUNING_MODE");
