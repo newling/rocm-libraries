@@ -1122,13 +1122,6 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
     if(!arg.gradient && arg.activation_type != hipblaslt_activation_type::none && !arg.use_e)
         return "fast_check checks an activation through E, the pre-activation output, so it "
                "requires use_e";
-    if(arg.activation_type == hipblaslt_activation_type::clamp
-       && (!std::isfinite(arg.activation_arg1) || !std::isfinite(arg.activation_arg2)
-           || std::trunc(arg.activation_arg1) != arg.activation_arg1
-           || std::trunc(arg.activation_arg2) != arg.activation_arg2
-           || std::fabs(arg.activation_arg1) >= 0x1p61
-           || std::fabs(arg.activation_arg2) >= 0x1p61))
-        return "fast_check requires integer clamp bounds below 2^61 in magnitude";
     if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
         return "fast_check does not support MX block scales";
     if(do_swizzle)

@@ -163,7 +163,7 @@ enum class FastCheckActivation
 {
     none,
     relu, // max(x, 0)
-    clamp, // max(arg1, min(x, arg2)); requires integer bounds
+    clamp, // max(arg1, min(x, arg2))
 };
 
 // With an activation, D is not linear in the inputs, so it is checked through E, the
