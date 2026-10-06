@@ -10,6 +10,7 @@
 #include <fstream>
 #include <istream>
 #include <limits>
+#include <locale>
 #include <sstream>
 
 namespace TensileLite
@@ -102,7 +103,10 @@ namespace TensileLite
                 return fallback;
             try
             {
-                return std::stod(it->second);
+                std::istringstream in(it->second);
+                in.imbue(std::locale::classic());
+                double value;
+                return in >> value ? value : fallback;
             }
             catch(...)
             {
@@ -419,7 +423,10 @@ namespace TensileLite
     {
         std::ostringstream names;
         std::ostringstream values;
-        bool               first = true;
+        // The file uses decimal points and ungrouped integers regardless of
+        // the application's locale; decimal commas would add CSV columns.
+        values.imbue(std::locale::classic());
+        bool first = true;
 
         auto column = [&](const char* name, auto&& value) {
             if(!first)

@@ -10,8 +10,10 @@
 
 #include <gtest/gtest.h>
 
+#include <clocale>
 #include <cstdio>
 #include <fstream>
+#include <locale>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -234,6 +236,81 @@ namespace
         EXPECT_EQ(read.buildStamp, kStamp);
         EXPECT_EQ(read.requiredWorkspaceBytes, 4096u);
         EXPECT_DOUBLE_EQ(read.winnerTimeUs, 12.5);
+    }
+
+    TEST_F(TuningStore, ApplicationLocaleDoesNotChangeWrittenRows)
+    {
+        struct GroupedNumbers : std::numpunct<char>
+        {
+            char do_thousands_sep() const override
+            {
+                return '.';
+            }
+            char do_decimal_point() const override
+            {
+                return ',';
+            }
+            std::string do_grouping() const override
+            {
+                return "\3";
+            }
+        };
+        struct RestoreLocale
+        {
+            std::locale previous = std::locale();
+            ~RestoreLocale()
+            {
+                std::locale::global(previous);
+            }
+        } restore;
+
+        const auto key   = halfKey();
+        const auto entry = tunedEntry(1234, "kernel");
+        std::locale::global(std::locale::classic());
+        const auto expected = tunedRow(key, entry);
+        std::locale::global(std::locale(std::locale::classic(), new GroupedNumbers));
+        const auto row = tunedRow(key, entry);
+        EXPECT_EQ(row, expected);
+
+        OverrideMap map;
+        ASSERT_EQ(loadInto(map, fileOf({row})).accepted, 1u);
+        const auto found = map.find(key);
+        ASSERT_EQ(found.size(), 1u);
+        EXPECT_EQ(found[0].solutionIndex, entry.solutionIndex);
+        EXPECT_DOUBLE_EQ(found[0].winnerTimeUs, entry.winnerTimeUs);
+    }
+
+    TEST_F(TuningStore, NumericLocaleDoesNotChangeReadTiming)
+    {
+        struct RestoreNumericLocale
+        {
+            std::string previous = std::setlocale(LC_NUMERIC, nullptr);
+            ~RestoreNumericLocale()
+            {
+                std::setlocale(LC_NUMERIC, previous.c_str());
+            }
+        } restore;
+
+        // Locale names vary between C libraries; skip when the test machine
+        // has no locale with a comma decimal point installed.
+        bool selected = false;
+        for(const char* name : {"en_DK.utf8", "de_DE.UTF-8", "German_Germany.1252"})
+        {
+            if(std::setlocale(LC_NUMERIC, name) && std::localeconv()->decimal_point[0] == ',')
+            {
+                selected = true;
+                break;
+            }
+        }
+        if(!selected)
+            GTEST_SKIP() << "No comma-decimal numeric locale is installed";
+
+        OverrideMap map;
+        const auto  row = tunedRow(halfKey(), tunedEntry(7, "kernel"));
+        ASSERT_EQ(loadInto(map, fileOf({row})).accepted, 1u);
+        const auto found = map.find(halfKey());
+        ASSERT_EQ(found.size(), 1u);
+        EXPECT_DOUBLE_EQ(found[0].winnerTimeUs, 12.5);
     }
 
     // A current row may be named by its kernel, its solution or both, and an
