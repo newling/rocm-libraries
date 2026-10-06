@@ -293,8 +293,15 @@ int run_bench_test(Arguments&         arg,
         }
     }
 
-    if(getenv("HIPBLASLT_TUNING_FILE"))
+    if(const char* tuningFile = getenv("HIPBLASLT_TUNING_FILE"))
+    {
+        // Data-file cases have their own Arguments. The search settings are
+        // read for each tuning attempt, so use this case's limits rather than
+        // the unrelated command-line defaults installed by main.
+        if(yaml && !enter_library_tune_mode(tuningFile, arg))
+            return 1;
         tune_with_library(arg);
+    }
 
     perf_matmul{}(arg);
     return 0;
