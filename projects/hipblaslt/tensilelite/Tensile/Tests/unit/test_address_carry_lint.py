@@ -99,6 +99,11 @@ def test_add_without_carry_on_an_address_low_dword_is_reported():
     assert len(reasons) == 1 and "s_add_i32" in reasons[0] and "s9" in reasons[0]
 
 
+def test_addk_reads_its_destination_as_an_implicit_source():
+    reasons = _reasons("s_addk_i32 s8, 64\ns_load_dword s0, s[8:9], 0\n")
+    assert len(reasons) == 1 and "s_addk_i32" in reasons[0]
+
+
 def test_vector_global_address_needs_a_carry_chain():
     good = """
     v_add_co_u32 v4, vcc, v4, v6
