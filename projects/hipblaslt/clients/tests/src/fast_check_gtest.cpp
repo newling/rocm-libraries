@@ -1096,6 +1096,22 @@ namespace
         }
     }
 
+    // Fractional clamp bounds can round once on entry to the f32 kernel and
+    // again after scaling. The integer oracle must refuse that configuration.
+    TEST(FastCheckDevice_pre_checkin, activation_refuses_fractional_clamp_bounds)
+    {
+        DeviceMatrix d, e;
+        d.write(std::vector<float>(DeviceMatrix::total, 0.1f * 9.f));
+        e.write(std::vector<float>(DeviceMatrix::total, 1.f));
+        double amax = 0;
+        auto res = fast_check_activation_device(d.matrix(), e.matrix(), DeviceMatrix::batch,
+                                                9, 1, FastCheckActivation::clamp,
+                                                0, 0.1, 0, &amax);
+        EXPECT_FALSE(res.passed);
+        EXPECT_NE(res.message.find("integer clamp bounds"), std::string::npos) << res.message;
+        EXPECT_TRUE(std::isnan(amax));
+    }
+
     // amaxD without an activation is the largest |D| over |scale_d|. A value outside the range the
     // type stores exactly may have been rounded, and a scale of 0 erases the values, so neither
     // amaxD nor the activation can be checked from it, and both say so rather than report a wrong
