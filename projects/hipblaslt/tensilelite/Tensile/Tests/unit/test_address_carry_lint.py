@@ -504,3 +504,36 @@ def test_carry_must_reach_the_high_word_before_each_address_use(vector, layout, 
         use = "s_load_dword s0, s[8:9], 0"
     findings = lint(layout.format(low=low, high=high, use=use))
     assert bool(findings) is reported
+
+
+@pytest.mark.parametrize("vector", [False, True], ids=["scalar", "vector"])
+@pytest.mark.parametrize(
+    "layout,reported",
+    [
+        ("{low}\n{copy_low}\n{copy_high}\n{use}\n{high}", True),
+        ("{low}\n{copy_low}\n{copy_high}\n{high}\n{use}", True),
+        ("{low}\n{copy_low}\n{high}\n{copy_high}\n{use}", False),
+        ("{low}\n{high}\n{copy_low}\n{copy_high}\n{use}", False),
+        ("{low}\n{copy_low}\n{copy_high}\n{high}\n{discard}\n{use}", True),
+        (
+            "{low}\n{copy_low}\ns_cbranch_vccz label_use\n{high}\n{copy_high}\nlabel_use:\n{use}",
+            True,
+        ),
+    ],
+)
+def test_copied_address_needs_its_own_updated_high_word(vector, layout, reported):
+    if vector:
+        low = "v_add_co_u32 v4, vcc, v4, v6"
+        high = "v_addc_co_u32 v5, vcc, v5, 0, vcc"
+        copy_low, copy_high = "v_mov_b32 v12, v4", "v_mov_b32 v13, v5"
+        discard = "v_mov_b32 v4, 0"
+        use = "global_load_dword v0, v[12:13], off"
+    else:
+        low, high = "s_add_u32 s8, s8, 64", "s_addc_u32 s9, s9, 0"
+        copy_low, copy_high = "s_mov_b32 s12, s8", "s_mov_b32 s13, s9"
+        discard = "s_mov_b32 s8, 0"
+        use = "s_load_dword s0, s[12:13], 0"
+    asm = layout.format(
+        low=low, high=high, copy_low=copy_low, copy_high=copy_high, use=use, discard=discard
+    )
+    assert bool(lint(asm)) is reported

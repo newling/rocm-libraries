@@ -369,36 +369,44 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
         """
         ops = insts[start].operands
         carry = _carry_parts(ops[1]) if vector and len(ops) > 1 else set()
-        seen, todo, steps = set(), [(j, True, False) for j in successors(start)], 0
+        # Each copied low word needs a carried high word in its own pair. Updating the
+        # original high word does not repair a copy made before that update.
+        seen, steps = set(), 0
+        todo = [(j, True, frozenset({low}), frozenset()) for j in successors(start)]
         while todo and steps < FLOW_STEPS:
-            j, live, copied = todo.pop()
-            if (j, live, copied) in seen:
+            j, live, pending, carried_highs = todo.pop()
+            state = (j, live, pending, carried_highs)
+            if state in seen:
                 continue
-            seen.add((j, live, copied))
+            seen.add(state)
             steps += 1
-            if low in uses[j]:
+            if pending.intersection(uses[j]):
                 return False
-            if low in writes[j]:
-                if copied:
-                    return False
-                continue
             ops = insts[j].operands
-            if insts[j].mnemonic in COPIES and parse_regs(ops[-1]) == [low]:
-                destination = writes[j][:1]
-                if destination and flows_to_address(destination[0], j):
-                    copied = True
+            next_pending = set(pending).difference(writes[j])
+            next_highs = set(carried_highs).difference(writes[j])
+            if insts[j].mnemonic in COPIES and len(writes[j]) == 1:
+                source = parse_regs(ops[-1])
+                destination = writes[j][0]
+                if len(source) == 1:
+                    if source[0] in pending:
+                        next_pending.add(destination)
+                    if source[0] in carried_highs:
+                        next_highs.add(destination)
             if live and insts[j].mnemonic in CARRY_IN and writes[j][:1] == [high]:
                 if not vector or (carry and _carry_parts(ops[-1]) == carry):
-                    continue
+                    next_highs.add(high)
                 live = False
+            next_pending = {r for r in next_pending if r.plus(1) not in next_highs}
+            if not next_pending:
+                continue
             if vector:
                 live = live and not bool(carry_writes(j) & carry)
             else:
                 live = live and not bool(_SCC_WRITERS.match(insts[j].mnemonic))
-            following = successors(j)
-            if copied and not following:
-                return False
-            todo.extend((k, live, copied) for k in following)
+            todo.extend(
+                (k, live, frozenset(next_pending), frozenset(next_highs)) for k in successors(j)
+            )
         return not todo
 
     def updates_bit_op_result(i: int, low: Reg) -> bool:
