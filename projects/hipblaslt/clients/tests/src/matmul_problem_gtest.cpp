@@ -365,33 +365,43 @@ TEST(MatmulPreparation, MakesScaleAlphaVectorAUnitScalarEpilogue)
     EXPECT_TRUE(preparedProblem.epilogueEnabled);
 }
 
-TEST(MatmulPreparation, UsesPhysicalMxScaleStoragePlans)
+TEST(MatmulPreparation, UsesPhysicalMxScaleStoragePlansForEveryTranspose)
 {
     using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
 
     auto arguments   = baseArguments();
-    arguments.transA = 'T';
-    arguments.transB = 'N';
     arguments.M[0]   = 17;
     arguments.N[0]   = 33;
     arguments.K[0]   = 256;
-    arguments.lda[0] = 256;
-    arguments.ldb[0] = 256;
     arguments.ldc[0] = 17;
     arguments.ldd[0] = 17;
     arguments.scaleA = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
     arguments.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
 
-    const auto preparation = prepare(
-        arguments, false, false, MxScaleStorageLayout::Gfx950, MxScaleStorageLayout::Gfx950);
-    ASSERT_EQ(preparation.problems.size(), 1);
-    const auto& prepared = preparation.problems.front();
-    ASSERT_TRUE(prepared.a.mxScaleStorage);
-    ASSERT_TRUE(prepared.b.mxScaleStorage);
-    EXPECT_EQ(prepared.a.mxScaleStorage->naturalShape, (std::array<size_t, 2>{17, 8}));
-    EXPECT_EQ(prepared.b.mxScaleStorage->naturalShape, (std::array<size_t, 2>{33, 8}));
-    EXPECT_EQ(prepared.a.scaleElements, 256);
-    EXPECT_EQ(prepared.b.scaleElements, 512);
+    for(char transA : {'N', 'T'})
+    {
+        for(char transB : {'N', 'T'})
+        {
+            SCOPED_TRACE(::testing::Message() << "transA=" << transA << " transB=" << transB);
+            arguments.transA       = transA;
+            arguments.transB       = transB;
+            arguments.lda[0]       = transA == 'T' ? 272 : 25;
+            arguments.ldb[0]       = transB == 'N' ? 272 : 41;
+            const auto preparation = prepare(arguments,
+                                             false,
+                                             false,
+                                             MxScaleStorageLayout::Gfx950,
+                                             MxScaleStorageLayout::Gfx950);
+            ASSERT_EQ(preparation.problems.size(), 1);
+            const auto& prepared = preparation.problems.front();
+            ASSERT_TRUE(prepared.a.mxScaleStorage);
+            ASSERT_TRUE(prepared.b.mxScaleStorage);
+            EXPECT_EQ(prepared.a.mxScaleStorage->naturalShape, (std::array<size_t, 2>{17, 8}));
+            EXPECT_EQ(prepared.b.mxScaleStorage->naturalShape, (std::array<size_t, 2>{33, 8}));
+            EXPECT_EQ(prepared.a.scaleElements, 256);
+            EXPECT_EQ(prepared.b.scaleElements, 512);
+        }
+    }
 }
 
 TEST(MatmulPreparation, CountsEveryBatchOfByteEncodedMxScales)

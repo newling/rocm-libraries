@@ -1652,10 +1652,18 @@ void testing_matmul_with_bias(const Arguments&                                  
                       seed);
                   dataOutput.copyLogicalElementsFrom(generated.data);
 
+                  // gfx950 consumes [MN, K blocks] for either operand orientation.
+                  const auto scalesForDevice
+                      = scalePlan.layout
+                                    == roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::
+                                        Gfx950
+                                && blockColumns > 1
+                            ? generated.scales.copyWithPermutedDimensions({1, 0})
+                            : generated.scales;
                   const std::vector<std::byte> scaleStorage
                       = roc::host_numerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
-                          generated.scales.rawEncodedBackingStorage().data(),
-                          generated.scales.rawEncodedBackingStorage().size(),
+                          scalesForDevice.rawEncodedBackingStorage().data(),
+                          scalesForDevice.rawEncodedBackingStorage().size(),
                           scalePlan);
                   if(scaleOutput.size() < scaleStorage.size())
                       throw std::invalid_argument("hipBLASLt MX scale output is too small.");

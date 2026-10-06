@@ -28,6 +28,8 @@ namespace hipblaslt::client
             const size_t                freeExtent    = matrix.layout.shape()[1 - blockAxis];
             const std::array<size_t, 2> naturalShape
                 = blockAxis == 0
+                          || physicalLayout
+                                 == roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
                       ? std::array<size_t, 2>{freeExtent, divideRoundUp(blockedExtent, blockSize)}
                       : std::array<size_t, 2>{divideRoundUp(blockedExtent, blockSize), freeExtent};
             return roc::host_numerics::amd_gpu_layout::planMxScaleStorage(

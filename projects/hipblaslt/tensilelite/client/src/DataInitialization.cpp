@@ -1931,15 +1931,21 @@ namespace TensileLite
                     if(swizzleLayout != MxScaleStorageLayout::Natural
                        && pristineScale.gpuInput.valid)
                     {
+                        // The gfx950 ABI always packs [MN, K blocks]; the CPU
+                        // reference keeps the operand's canonical scale orientation.
+                        const auto scalesForDevice
+                            = swizzleLayout == MxScaleStorageLayout::Gfx950 && !kFast
+                                  ? canonicalScales.copyWithPermutedDimensions({1, 0})
+                                  : canonicalScales;
                         const auto scalePlan
                             = roc::host_numerics::amd_gpu_layout::planMxScaleStorage(
-                                {canonicalScales.shape()[0], canonicalScales.shape()[1]},
+                                {scalesForDevice.shape()[0], scalesForDevice.shape()[1]},
                                 mxBlock,
                                 swizzleLayout);
                         auto physicalScale = roc::host_numerics::amd_gpu_layout::
                             copyMxScaleStorageToPhysicalLayout(
-                                canonicalScales.rawEncodedBackingStorage().data(),
-                                canonicalScales.rawEncodedBackingStorage().size(),
+                                scalesForDevice.rawEncodedBackingStorage().data(),
+                                scalesForDevice.rawEncodedBackingStorage().size(),
                                 scalePlan);
                         if(b == 0)
                         {
