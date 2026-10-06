@@ -3721,8 +3721,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
         {
-            std::string kernel_name   = getKernelNameFromAlgoIndex(handle, *algo);
-            std::string Solution_name = getSolutionNameFromAlgoIndex(handle, *algo);
+            auto loggedAlgo           = *algo;
+            *(int*)loggedAlgo.data    = *solutionIndex;
+            std::string kernel_name   = getKernelNameFromAlgoIndex(handle, loggedAlgo);
+            std::string Solution_name = getSolutionNameFromAlgoIndex(handle, loggedAlgo);
 
             logExtendedProfileFromTensileDataGemm(data->problem,
                                                   data->inputs,
