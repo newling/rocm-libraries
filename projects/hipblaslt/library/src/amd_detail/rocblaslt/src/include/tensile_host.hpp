@@ -229,12 +229,21 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
 namespace TensileLite
 {
     class ProblemOverride;
+    struct TunedEntry;
 }
 
 TensileLite::ProblemOverride
     RocblasltContractionProblem2ProblemOverride(const RocblasltContractionProblem&);
 
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
+
+/** Validate one row's identity, support predicates and workspace without mutating gemmData. */
+bool tuning_cache_entry_is_usable(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const TensileLite::TunedEntry&      entry,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes);
 
 /**
  * The solution index of the first entry for this key that still resolves to its

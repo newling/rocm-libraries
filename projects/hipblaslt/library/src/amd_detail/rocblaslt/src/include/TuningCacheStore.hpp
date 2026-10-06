@@ -560,17 +560,19 @@ namespace TensileLite
          * Only current-schema rows are consulted: a legacy row records no search
          * and never counts as partial.
          */
-        bool needsRetune(const ProblemOverride& key,
-                         const TuningSearch&    now,
-                         int64_t                currentBudgetMs) const
+        // A runtime caller supplies the same validation used by replay. Invoke
+        // it on copies, outside the map lock, since it may load solution data.
+        bool needsRetune(const ProblemOverride&                        key,
+                         const TuningSearch&                           now,
+                         int64_t                                       currentBudgetMs,
+                         const std::function<bool(const TunedEntry&)>& usable = {}) const
         {
-            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
-            auto                                      range = m_override.equal_range(key);
-            bool                                      any   = false;
-            for(auto it = range.first; it != range.second; ++it)
+            bool any = false;
+            for(const auto& entry : find(key))
             {
-                any                     = true;
-                const TunedEntry& entry = it->second;
+                if(usable && !usable(entry))
+                    continue;
+                any = true;
                 if(entry.complete)
                 {
                     if(!entry.search || tuningSearchCovers(*entry.search, now))

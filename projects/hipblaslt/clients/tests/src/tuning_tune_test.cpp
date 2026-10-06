@@ -1534,6 +1534,25 @@ namespace
         EXPECT_GT(valueRowCount(m_path), before) << "a partial entry was never re-tuned";
     }
 
+    TEST_F(TuningTune_pre_checkin, StaleCompletedRowDoesNotFinalizeAValidPartial)
+    {
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_EQ(valueRowCount(m_path), 1u);
+
+        ASSERT_TRUE(
+            writeTwoRowsFromFirst(m_path,
+                                  {{"complete", "1"}, {"kernel_name", "no-longer-this-kernel"}},
+                                  {{"complete", "0"}, {"budget_ms", "1000"}}));
+
+        // The unlimited run can finish the valid partial search. The completed
+        // row fails replay validation and must not close the retuning gate.
+        enterMode("tune", m_path);
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        EXPECT_EQ(counters().attempts, 1u);
+        EXPECT_EQ(valueRowCount(m_path), 3u);
+    }
+
     // Re-tuning is worth a stall only when this run can get further than the one
     // that gave up. Under the same ceiling it would measure the same prefix,
     // stop in the same place, and append an identical row, so a shape that keeps

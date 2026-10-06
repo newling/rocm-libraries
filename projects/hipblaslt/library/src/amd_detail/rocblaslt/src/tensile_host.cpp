@@ -5232,7 +5232,14 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                     = eligible ? TuningPolicy::search(prob.workspaceSize)
                                : TensileLite::TuningSearch{};
 
-                if(eligible && (cachedIndex < 0 || cache.needsRetune(key, search, currentBudgetMs))
+                auto needsRetune = [&] {
+                    return cache.needsRetune(key, search, currentBudgetMs, [&](const auto& entry) {
+                        return tuning_cache_entry_is_usable(
+                            handle, key, entry, prob, gemmData, prob.workspaceSize);
+                    });
+                };
+
+                if(eligible && (cachedIndex < 0 || needsRetune())
                    && !TensileLite::tuningAlreadyAttempted(key))
                 {
                     // Waits rather than skipping: every shape tune mode meets is
@@ -5250,7 +5257,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                     countLookup(lockedIndex >= 0);
 
                     if(!TensileLite::tuningAlreadyAttempted(key)
-                       && (lockedIndex < 0 || cache.needsRetune(key, search, currentBudgetMs)))
+                       && (lockedIndex < 0 || needsRetune()))
                     {
                         TensileLite::TunedEntry winner;
                         benchmarked = true;

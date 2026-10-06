@@ -499,54 +499,58 @@ bool problem_override_from_file_cpp(
     return success;
 }
 
-int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
+bool tuning_cache_entry_is_usable(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
+                                  const TensileLite::TunedEntry&      entry,
                                   const RocblasltContractionProblem&  problem,
                                   std::shared_ptr<void>               gemmData,
                                   size_t                              max_workspace_bytes)
 {
     std::vector<rocblaslt_matmul_heuristic_result> resolved;
     std::vector<int>                               index(1);
+    index[0] = entry.solutionIndex;
 
-    for(const auto& entry : tuned_entries_for(key))
+    if(rocblaslt_status_success
+           != getSolutionsFromIndex(handle, index, resolved, max_workspace_bytes)
+       || resolved.empty())
+        return false;
+    if(!tuned_entry_identity_matches(handle, key, entry, resolved[0]))
+        return false;
+
+    // The key leaves out values such as beta and C/D aliasing, so an entry
+    // whose identity holds can still fail this call's support predicates.
+    RocblasltContractionProblem supportProblem = problem;
+    size_t                      required       = 0;
+    auto                        algo           = resolved[0].algo;
+    if(rocblaslt_status_success
+           == isSolutionSupportedNoMutation(handle, supportProblem, gemmData, &algo, &required)
+       && required <= max_workspace_bytes)
+        return true;
+
+    // The heuristic replay's XF32 fallback, as a pure probe: the call may go
+    // on to launch some other algorithm, which must not find gemmData left
+    // in FP32 mode.
+    if(problem.compute_type == rocblaslt_compute_f32_fast_xf32)
     {
-        index[0] = entry.solutionIndex;
-
-        // getSolutionsFromIndex appends, and everything below reads [0].
-        resolved.clear();
-
-        if(rocblaslt_status_success
-               != getSolutionsFromIndex(handle, index, resolved, max_workspace_bytes)
-           || resolved.empty())
-            continue;
-        if(!tuned_entry_identity_matches(handle, key, entry, resolved[0]))
-            continue;
-
-        // The key leaves out values such as beta and C/D aliasing, so an entry
-        // whose identity holds can still fail this call's support predicates.
-        RocblasltContractionProblem supportProblem = problem;
-        size_t                      required       = 0;
-        auto                        algo           = resolved[0].algo;
+        supportProblem.compute_type = rocblaslt_compute_f32;
+        required                    = 0;
         if(rocblaslt_status_success
                == isSolutionSupportedNoMutation(handle, supportProblem, gemmData, &algo, &required)
            && required <= max_workspace_bytes)
-            return entry.solutionIndex;
-
-        // The heuristic replay's XF32 fallback, as a pure probe: the call may go
-        // on to launch some other algorithm, which must not find gemmData left
-        // in FP32 mode.
-        if(problem.compute_type == rocblaslt_compute_f32_fast_xf32)
-        {
-            supportProblem.compute_type = rocblaslt_compute_f32;
-            required                    = 0;
-            if(rocblaslt_status_success
-                   == isSolutionSupportedNoMutation(
-                       handle, supportProblem, gemmData, &algo, &required)
-               && required <= max_workspace_bytes)
-                return entry.solutionIndex;
-        }
+            return true;
     }
+    return false;
+}
 
+int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes)
+{
+    for(const auto& entry : tuned_entries_for(key))
+        if(tuning_cache_entry_is_usable(handle, key, entry, problem, gemmData, max_workspace_bytes))
+            return entry.solutionIndex;
     return -1;
 }
 
