@@ -127,7 +127,13 @@ bool enter_library_tune_mode(const char* tuningFile, const Arguments& arg)
         return false;
     }
 
-    auto set = [](const char* name, const std::string& value) { setenv(name, value.c_str(), 1); };
+    auto set = [](const char* name, const std::string& value) {
+#ifdef WIN32
+        _putenv_s(name, value.c_str());
+#else
+        setenv(name, value.c_str(), 1);
+#endif
+    };
     set("HIPBLASLT_TUNING_MODE", "tune");
     set("HIPBLASLT_TUNING_CACHE_PATH", tuningFile);
     set("HIPBLASLT_TUNING_COLD_ITERS", std::to_string(arg.cold_iters));
