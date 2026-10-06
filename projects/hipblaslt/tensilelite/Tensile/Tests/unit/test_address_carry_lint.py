@@ -6,10 +6,12 @@ quiet on correct carry chains and on registers that are only reused for other ar
 
 import functools
 import os
+import shutil
+import subprocess
 
 import pytest
 
-from Tensile.Utilities.address_carry_lint import lint
+from Tensile.Utilities.address_carry_lint import disassemble, lint
 
 pytestmark = pytest.mark.unit
 
@@ -437,6 +439,48 @@ def test_registers_are_judged_within_their_own_kernel():
     s_load_dwordx2 s[10:11], s[4:5], 0x0
     """
     assert _reasons(asm) == []
+
+
+def test_disassembly_preserves_a_loop_label_aliasing_the_kernel_entry(tmp_path):
+    assembler = shutil.which(
+        "amdclang++", path=os.path.join(os.environ.get("ROCM_PATH", "/opt/rocm"), "bin")
+    ) or shutil.which("amdclang++")
+    if not assembler:
+        pytest.skip("amdclang++ not found")
+    asm = """.text
+.globl test_carry
+.type test_carry,@function
+test_carry:
+label_loop:
+    s_load_dword s0, s[8:9], 0
+    s_add_u32 s8, s8, 64
+    s_cmp_eq_u32 s0, 0
+    s_cbranch_scc1 label_end
+    s_branch label_loop
+label_end:
+    s_endpgm
+"""
+    source, obj = tmp_path / "loop.s", tmp_path / "loop.o"
+    source.write_text(asm)
+    subprocess.run(
+        [
+            assembler,
+            "-x",
+            "assembler",
+            "-target",
+            "amdgcn-amd-amdhsa",
+            "-mcpu=gfx942",
+            "-c",
+            str(source),
+            "-o",
+            str(obj),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert len(lint(asm)) == 1
+    assert len(lint(disassemble(obj))) == 1
 
 
 @pytest.mark.parametrize("vector", [False, True], ids=["scalar", "vector"])

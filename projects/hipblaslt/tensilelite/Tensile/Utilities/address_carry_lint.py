@@ -456,7 +456,14 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
 def disassemble(code_object: Path) -> str:
     objdump = shutil.which("llvm-objdump") or "/opt/rocm/llvm/bin/llvm-objdump"
     return subprocess.run(
-        [objdump, "-d", "--no-show-raw-insn", "--no-leading-addr", str(code_object)],
+        [
+            objdump,
+            "-d",
+            "--no-show-raw-insn",
+            "--no-leading-addr",
+            "--show-all-symbols",
+            str(code_object),
+        ],
         capture_output=True,
         text=True,
         check=True,
