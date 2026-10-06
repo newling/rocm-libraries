@@ -250,7 +250,9 @@ never becomes permanent. To finish such a shape, raise or clear
 
 Each row records the ceiling it was written under and the search that produced it: whether every
 kernel or a ranked prefix was searched and how long that prefix was, the workspace limit, the
-iteration counts, and whether the flush and rotation were on. A finished row is final only for a run
+iteration counts, and the flush and rotation settings. Changing the flush setting or rotation size
+requires a new search: a winner measured with cold caches need not win with warm caches. With those
+settings unchanged, a finished row is final only for a run
 that would search no more than it did, so widening the search, for example from a ranked prefix to
 every kernel, to a larger workspace, or to more iterations, tunes the shape again, while narrowing it
 does not. An incomplete row is benchmarked again when the current ceiling beats the one it was

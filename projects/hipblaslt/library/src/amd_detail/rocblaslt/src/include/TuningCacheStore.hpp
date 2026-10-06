@@ -308,8 +308,9 @@ namespace TensileLite
     };
 
     /**
-     * Whether a finished search already covers everything `now` would search,
-     * measuring at least as carefully, so running `now` could not do better.
+     * Whether a finished search covers the candidates and iteration counts of
+     * `now` under the same cache conditions. Flush and rotation change the
+     * workload being measured, rather than just its measurement precision.
      */
     inline bool tuningSearchCovers(const TuningSearch& done, const TuningSearch& now)
     {
@@ -317,7 +318,7 @@ namespace TensileLite
             = done.allKernels || (!now.allKernels && done.maxCandidates >= now.maxCandidates);
         return candidates && done.workspaceBytes >= now.workspaceBytes
                && done.coldIters >= now.coldIters && done.hotIters >= now.hotIters
-               && (done.flushICache || !now.flushICache) && done.rotatingMb >= now.rotatingMb;
+               && done.flushICache == now.flushICache && done.rotatingMb == now.rotatingMb;
     }
 
     /**

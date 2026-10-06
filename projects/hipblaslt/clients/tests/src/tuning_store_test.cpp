@@ -770,6 +770,28 @@ namespace
             tuningSearchCovers(less([](TuningSearch& s) { s.rotatingMb = 0; }), rankedSearch(16)));
     }
 
+    TEST_F(TuningStore, ChangingCacheConditionsRetunesInBothDirections)
+    {
+        const auto key  = halfKey();
+        const auto cold = rankedSearch(16);
+        for(bool changeFlush : {false, true})
+        {
+            auto hot = cold;
+            if(changeFlush)
+                hot.flushICache = false;
+            else
+                hot.rotatingMb = 0;
+
+            OverrideMap measuredCold;
+            measuredCold.add(key, tunedEntry(7, "kernel", true, 0, cold));
+            EXPECT_TRUE(measuredCold.needsRetune(key, hot, 0));
+
+            OverrideMap measuredHot;
+            measuredHot.add(key, tunedEntry(7, "kernel", true, 0, hot));
+            EXPECT_TRUE(measuredHot.needsRetune(key, cold, 0));
+        }
+    }
+
     // A process in a secure execution context (set-user-ID and the like) must
     // not let an inherited environment choose a file for it to write and
     // minutes of GPU work for it to spend.
