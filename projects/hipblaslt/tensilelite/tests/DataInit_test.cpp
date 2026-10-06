@@ -463,14 +463,12 @@ TEST(HostNumericsDataInitialization, TypeDerivedSpecialValuesMatchTensileEncodin
         InitMode::Max,
         TensileLite::BFloat16(std::numeric_limits<float>::max()));
 #ifndef _WIN32
-#ifdef TENSILE_USE_BF6
     expectComponentInitializationBytes<TensileLite::BFloat6x32>(
         rocisa::DataType::BFloat6, InitMode::Max, TensileLite::BFloat6x32(7.5f));
     expectComponentInitializationBytes<TensileLite::BFloat6x32>(
         rocisa::DataType::BFloat6, InitMode::DenormMin, TensileLite::BFloat6x32(0.125f));
     expectComponentInitializationBytes<TensileLite::BFloat6x32>(
         rocisa::DataType::BFloat6, InitMode::DenormMax, TensileLite::BFloat6x32(0.875f));
-#endif
 #endif
 
     expectComponentInitializationBytes<TensileLite::E8>(

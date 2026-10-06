@@ -85,7 +85,6 @@ namespace
         std::ranges::copy(generated.rawEncodedBackingStorage(), destination.begin());
     }
 
-#ifdef TENSILE_USE_FP8_BF8
     template <typename InputA, typename InputB, typename ScaleA, typename ScaleB>
     std::vector<float> expectedMXGemm(const ContractionProblemGemm& problem,
                                       const std::vector<InputA>&    a,
@@ -167,7 +166,7 @@ namespace
         executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1, requireBlockedExecution);
         EXPECT_EQ(d, (std::vector<float>{128, 128, 128, 128}));
     }
-#endif
+
 } // namespace
 
 #ifndef _WIN32

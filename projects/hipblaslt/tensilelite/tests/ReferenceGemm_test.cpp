@@ -1059,7 +1059,6 @@ TEST(ReferenceBlockedBackend, SupportsMirroredBoundIndex)
     EXPECT_EQ(d, (std::vector<float>{21, 32}));
 }
 
-#ifdef TENSILE_USE_FP8_BF8
 TEST(ReferenceRuntimeGemm, MirrorsBlockScalesWithTheBoundIndex)
 {
     const size_t                        K = 32;
@@ -1116,7 +1115,6 @@ TEST(ReferenceRuntimeGemm, MirrorsBlockScalesWithTheBoundIndex)
     executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1);
     EXPECT_EQ(d[0], 392);
 }
-#endif
 
 TEST(ReferenceRuntimeGemm, HandlesPointerArrayBatches)
 {
@@ -1878,7 +1876,7 @@ TEST(ReferenceRuntimeGemm, NormalizesExplicitGradientActivations)
     }
 }
 
-#if !defined(_WIN32) && defined(TENSILE_USE_FP6)
+#ifndef _WIN32
 TEST(ReferencePackedStorage, Float6MatchesComponentCodec)
 {
     Float6x32 packed{};
@@ -1912,7 +1910,7 @@ TEST(ReferenceRuntimeGemm, HandlesPackedFloat6Storage)
 }
 #endif
 
-#if !defined(_WIN32) && defined(TENSILE_USE_BF6)
+#ifndef _WIN32
 TEST(ReferencePackedStorage, BFloat6MatchesComponentCodec)
 {
     BFloat6x32 packed{};
