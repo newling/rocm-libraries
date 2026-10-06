@@ -1102,19 +1102,34 @@ namespace
         }
     }
 
-    // Fractional clamp bounds can round once on entry to the f32 kernel and
-    // again after scaling. The integer oracle must refuse that configuration.
-    TEST(FastCheckDevice_pre_checkin, activation_refuses_fractional_clamp_bounds)
+    // Arguments stores clamp bounds as float. Both the kernel and verifier receive that
+    // value, rather than independently converting a double literal such as 0.1.
+    TEST(FastCheckDevice_pre_checkin, activation_uses_the_float_clamp_argument)
     {
+        const float bound = 0.1f, scale = 9.f;
         DeviceMatrix d, e;
-        d.write(std::vector<float>(DeviceMatrix::total, 0.1f * 9.f));
+        d.write(std::vector<float>(DeviceMatrix::total, bound * scale));
         e.write(std::vector<float>(DeviceMatrix::total, 1.f));
         double amax = 0;
         auto res = fast_check_activation_device(d.matrix(), e.matrix(), DeviceMatrix::batch,
-                                                9, 1, FastCheckActivation::clamp,
-                                                0, 0.1, 0, &amax);
+                                                scale, 1, FastCheckActivation::clamp,
+                                                0, bound, 0, &amax);
+        EXPECT_TRUE(res.passed) << res.message;
+        EXPECT_EQ(amax, double(bound));
+    }
+
+    TEST(FastCheckDevice_pre_checkin, activation_read_failure_invalidates_amax)
+    {
+        DeviceMatrix d, e;
+        d.write(std::vector<float>(DeviceMatrix::total, 1.f));
+        auto unsupported = e.matrix();
+        unsupported.type = HIP_C_32F;
+        double amax = 0;
+        auto res = fast_check_activation_device(d.matrix(), unsupported, DeviceMatrix::batch,
+                                                1, 1, FastCheckActivation::relu,
+                                                0, 0, 0, &amax);
         EXPECT_FALSE(res.passed);
-        EXPECT_NE(res.message.find("integer clamp bounds"), std::string::npos) << res.message;
+        EXPECT_NE(res.message.find("could not copy"), std::string::npos) << res.message;
         EXPECT_TRUE(std::isnan(amax));
     }
 
