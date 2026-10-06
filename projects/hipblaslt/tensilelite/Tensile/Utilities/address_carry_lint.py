@@ -418,7 +418,8 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
         if updates_bit_op_result(i, low):
             continue
         if inst.mnemonic in NO_CARRY:
-            if not any(parse_regs(o) for o in inst.operands[1:]):
+            # SOPK add reads its destination even though only its immediate is explicit.
+            if inst.mnemonic != "s_addk_i32" and not any(parse_regs(o) for o in inst.operands[1:]):
                 continue
             if flows_to_address(low, i):
                 findings.append(
