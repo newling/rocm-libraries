@@ -352,7 +352,11 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
         out = set(writes[j])
         if ops and ops[0] in _VCC_PARTS:
             out |= _carry_parts(ops[0])
-        if insts[j].mnemonic in CARRY_SETTERS and len(ops) > 1:
+        if (
+            insts[j].mnemonic.startswith("v_")
+            and insts[j].mnemonic in CARRY_SETTERS
+            and len(ops) > 1
+        ):
             out |= _carry_parts(ops[1])
         return out
 

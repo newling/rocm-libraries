@@ -273,6 +273,16 @@ def test_a_vector_carry_overwritten_before_the_carry_in_is_reported():
     assert len(reasons) == 1 and "v4" in reasons[0]
 
 
+def test_reading_a_vector_carry_register_does_not_overwrite_it():
+    asm = """
+    v_add_co_u32 v4, s[20:21], v4, v6
+    s_add_u32 s30, s20, 1
+    v_addc_co_u32 v5, s[20:21], v5, 0, s[20:21]
+    global_load_dword v0, v[4:5], off
+    """
+    assert _reasons(asm) == []
+
+
 # A carry-in add also sets a carry out, so on a low dword its carry must reach the high dword.
 @pytest.mark.parametrize(
     "op,carry",
