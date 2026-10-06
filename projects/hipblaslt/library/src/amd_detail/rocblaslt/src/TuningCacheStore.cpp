@@ -532,6 +532,10 @@ namespace TensileLite
         std::string bytes;
         if(needHeader)
             bytes = std::string(kGitVersionHeader) + " " + buildStamp + "\n";
+        else
+            // A previous writer may have stopped in the middle of a line.
+            // Keep the next row's header separate from that incomplete suffix.
+            bytes = "\n";
         bytes += row;
 
         out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));

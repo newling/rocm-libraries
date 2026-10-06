@@ -643,6 +643,39 @@ namespace
         EXPECT_EQ(names, (std::vector<std::string>{"NotARealKernelName", "kernel"}));
     }
 
+    TEST_F(TuningStore, AppendAfterInterruptedLineKeepsTheNewRow)
+    {
+#ifdef WIN32
+        const auto pid = _getpid();
+#else
+        const auto pid = getpid();
+#endif
+        const std::string path
+            = ::testing::TempDir() + "hipblaslt_tuning_torn_" + std::to_string(pid) + ".txt";
+        const auto key   = halfKey();
+        const auto row   = tunedRow(key, tunedEntry(7, "old"));
+        const auto value = row.find('\n') + 1;
+
+        // A killed process may leave either its header or its value line
+        // unterminated. The next completed append must still be readable.
+        for(const auto cut : {row.find("kernel_name"), row.find("f16_r", value)})
+        {
+            SCOPED_TRACE(cut);
+            {
+                std::ofstream out(path);
+                out << fileOf({row.substr(0, cut)});
+            }
+            ASSERT_TRUE(appendTuningRow(path, tunedRow(key, tunedEntry(9, "new")), kStamp));
+            OverrideMap map;
+            {
+                std::ifstream in(path);
+                EXPECT_EQ(loadTuningRows(in, map, kStamp).accepted, 1u);
+            }
+            std::remove(path.c_str());
+            EXPECT_EQ(indexesOf(map.find(key)), std::vector<int32_t>{9});
+        }
+    }
+
     // The file starts with the build stamp once, and every appended row reads
     // back.
     TEST_F(TuningStore, AppendedRowsReadBackFromTheFile)
