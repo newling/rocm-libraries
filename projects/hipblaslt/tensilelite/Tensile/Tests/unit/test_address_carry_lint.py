@@ -422,3 +422,26 @@ def test_registers_are_judged_within_their_own_kernel():
     s_load_dwordx2 s[10:11], s[4:5], 0x0
     """
     assert _reasons(asm) == []
+
+
+@pytest.mark.parametrize("vector", [False, True], ids=["scalar", "vector"])
+@pytest.mark.parametrize(
+    "layout,reported",
+    [
+        ("{low}\n{use}\n{high}", True),
+        ("{low}\ns_cbranch_vccz label_use\n{high}\nlabel_use:\n{use}", True),
+        ("{low}\ns_branch label_high\nlabel_high:\n{high}\n{use}", False),
+        ("{low}\ns_cbranch_vccz label_high\ns_nop 0\nlabel_high:\n{high}\n{use}", False),
+    ],
+)
+def test_carry_must_reach_the_high_word_before_each_address_use(vector, layout, reported):
+    if vector:
+        low = "v_add_co_u32 v4, vcc, v4, v6"
+        high = "v_addc_co_u32 v5, vcc, v5, 0, vcc"
+        use = "global_load_dword v0, v[4:5], off"
+    else:
+        low = "s_add_u32 s8, s8, 64"
+        high = "s_addc_u32 s9, s9, 0"
+        use = "s_load_dword s0, s[8:9], 0"
+    findings = lint(layout.format(low=low, high=high, use=use))
+    assert bool(findings) is reported

@@ -89,8 +89,6 @@ NO_CARRY = {
 # How a global or flat atomic asks for the old value: a _rtn mnemonic, glc (gfx90a), sc0
 # (gfx94x and gfx950) or th:TH_ATOMIC_RETURN (gfx12 and later).
 _ATOMIC_RETURN = re.compile(r"_rtn\b|\bglc\b|\bsc0\b|\bTH_ATOMIC_RETURN\b")
-# Instructions that rewrite a whole pair, which ends any obligation on its low dword.
-PAIR_DEFS = {"s_mov_b64", "v_mov_b64", "v_lshlrev_b64", "s_lshl_b64", "s_add_u64", "v_add_nc_u64"}
 # Unconditional transfers: the next instruction in the listing is not the next one executed.
 JUMPS = {"s_branch", "s_setpc_b64", "s_endpgm"}
 # 32-bit copies, through which an updated low dword can reach the register used as the address.
@@ -347,12 +345,6 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
             todo.extend(successors(j))
         return False
 
-    def consumes(j: int, low: Reg, high: Reg) -> bool:
-        """Whether instruction j adds a carry into high, or redefines the whole pair."""
-        return (insts[j].mnemonic in CARRY_IN and writes[j][:1] == [high]) or (
-            insts[j].mnemonic in PAIR_DEFS and writes[j][:1] == [low]
-        )
-
     def carry_writes(j: int) -> set:
         """The carry-register parts instruction j writes: its destination, including vcc, and
         the carry-out of another add."""
@@ -364,31 +356,46 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
             out |= _carry_parts(ops[1])
         return out
 
-    def vector_carried(start: int, low: Reg, high: Reg) -> bool:
-        """Whether a vector carry reaches high: a carry-in to high that reads the carry register
-        the low add wrote, before anything writes any part of that register."""
-        ops = insts[start].operands
-        carry = _carry_parts(ops[1]) if len(ops) > 1 else set()
-        for j in range(start + 1, min(len(insts), start + 1 + FLOW_STEPS)):
-            ops = insts[j].operands
-            if insts[j].mnemonic in PAIR_DEFS and writes[j][:1] == [low]:
-                return True
-            if insts[j].mnemonic in CARRY_IN and writes[j][:1] == [high]:
-                return bool(ops) and bool(carry) and _carry_parts(ops[-1]) == carry
-            if carry_writes(j) & carry or insts[j].mnemonic in JUMPS:
-                return False
-        return False
+    def carried_before_use(start: int, low: Reg, high: Reg, vector: bool) -> bool:
+        """Check every reachable path until the carry is consumed or low is overwritten.
 
-    def scalar_carried(start: int, low: Reg, high: Reg) -> bool:
-        """Whether a scalar carry reaches high. The scheduler may move the carry-in well away
-        from the carry-out, so it is followed until SCC changes rather than for a fixed count.
+        A later carry-in cannot repair an earlier memory access, and a carry-in on just one
+        side of a branch does not protect the other side. Keep following a lost carry until
+        an address use, so paths that discard the updated low word do not cause warnings.
         """
-        for j in range(start + 1, min(len(insts), start + 1 + FLOW_STEPS)):
-            if consumes(j, low, high):
-                return True
-            if insts[j].mnemonic in JUMPS or _SCC_WRITERS.match(insts[j].mnemonic):
+        ops = insts[start].operands
+        carry = _carry_parts(ops[1]) if vector and len(ops) > 1 else set()
+        seen, todo, steps = set(), [(j, True, False) for j in successors(start)], 0
+        while todo and steps < FLOW_STEPS:
+            j, live, copied = todo.pop()
+            if (j, live, copied) in seen:
+                continue
+            seen.add((j, live, copied))
+            steps += 1
+            if low in uses[j]:
                 return False
-        return False
+            if low in writes[j]:
+                if copied:
+                    return False
+                continue
+            ops = insts[j].operands
+            if insts[j].mnemonic in COPIES and parse_regs(ops[-1]) == [low]:
+                destination = writes[j][:1]
+                if destination and flows_to_address(destination[0], j):
+                    copied = True
+            if live and insts[j].mnemonic in CARRY_IN and writes[j][:1] == [high]:
+                if not vector or (carry and _carry_parts(ops[-1]) == carry):
+                    continue
+                live = False
+            if vector:
+                live = live and not bool(carry_writes(j) & carry)
+            else:
+                live = live and not bool(_SCC_WRITERS.match(insts[j].mnemonic))
+            following = successors(j)
+            if copied and not following:
+                return False
+            todo.extend((k, live, copied) for k in following)
+        return not todo
 
     def updates_bit_op_result(i: int, low: Reg) -> bool:
         """Whether instruction i updates low in place, and the last write to low before it, in
@@ -424,10 +431,11 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
                 )
         elif inst.mnemonic in CARRY_SETTERS:
             if inst.mnemonic.startswith("s_"):
-                carried, where = scalar_carried(i, low, high), "before SCC changes"
+                carried = carried_before_use(i, low, high, vector=False)
+                where = "before SCC changes and before each address use"
             else:
-                carried = vector_carried(i, low, high)
-                where = "from the carry it wrote, before that carry changes,"
+                carried = carried_before_use(i, low, high, vector=True)
+                where = "from the carry it wrote, before that carry changes or the address is used,"
             if not carried and flows_to_address(low, i):
                 findings.append(
                     Finding(
