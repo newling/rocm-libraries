@@ -104,9 +104,15 @@ bool fast_check_supported_type(hipDataType type, std::string* why = nullptr);
 // The parts of the check that depend only on the inputs: probe vectors and the expected probe
 // sums of D. Compute once and pass to fast_check_result for every solution run on the same
 // inputs. problem.D supplies only its type here; its data is not read.
+//
+// Bounds on every partial sum and finished result are checked against the compute
+// type before accepting any D. Large exact expressions can alias small wrong
+// outputs modulo P, so a check based only on the stored D cannot establish this.
 struct FastCheckExpected
 {
-    FastCheckResult                    status; // fails on unsupported or non-integer inputs
+    FastCheckResult status; // fails on unsupported, non-integer or inexact inputs
+    double          max_partial = 0; // any subset of K, before or after alpha/scale
+    double          max_result  = 0; // finished element before rounding to D
     std::vector<uint64_t>              row_probe; // r, length N
     std::vector<uint64_t>              col_probe; // t, length M
     std::vector<int64_t>               scale; // scaleAlpha_vector, or ones; length M

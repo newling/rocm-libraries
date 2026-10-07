@@ -360,6 +360,77 @@ namespace
         EXPECT_EQ(differ, 1000);
     }
 
+    // The bound must be the largest sum over K of |a| times the largest |b| in that row of B, and
+    // a configuration must be refused once the bound reaches the range the compute type holds
+    // exactly (2^11 for f16), and accepted below it.
+    TEST(FastCheck_pre_checkin, exactness_bound_refuses_results_the_accumulator_cannot_hold)
+    {
+        for(int64_t K : {300, 1200})
+        {
+            HostProblem      hp(9, 4, K, 1, false, true, 1.f, 0.f, false, false);
+            FastCheckProblem p = hp.problem();
+            p.compute_type     = HIP_R_16F;
+
+            double expected = 0;
+            for(int64_t i = 0; i < hp.M; i++)
+            {
+                double s = 0;
+                for(int64_t k = 0; k < K; k++)
+                {
+                    double b_max = 0;
+                    for(int64_t j = 0; j < hp.N; j++)
+                        b_max = std::max(b_max, std::fabs(hp.b(0, k, j)));
+                    s += std::fabs(hp.a(0, i, k)) * b_max;
+                }
+                expected = std::max(expected, s);
+            }
+
+            FastCheckExpected e = fast_check_expected(p);
+            EXPECT_EQ(e.max_partial, expected) << "K=" << K;
+            EXPECT_EQ(e.max_result, expected) << "K=" << K;
+            if(K == 300)
+            {
+                ASSERT_LT(expected, 0x1p11);
+                EXPECT_TRUE(e.status.passed) << e.status.message;
+            }
+            else
+            {
+                ASSERT_GE(expected, 0x1p11);
+                EXPECT_FALSE(e.status.passed);
+                EXPECT_NE(e.status.message.find("refuses this configuration"), std::string::npos)
+                    << e.status.message;
+            }
+        }
+
+        // With alpha, the scaleAlpha vector, beta * C and the bias, a partial sum is bounded by
+        // the larger of the plain and the scaled sum, and a result by the scaled sum plus |beta|
+        // times the largest |C| in its row plus |bias|.
+        HostProblem      hp(9, 4, 50, 1, false, true, 2.f, -2.f, true, true);
+        FastCheckProblem p           = hp.problem();
+        double           max_partial = 0, max_result = 0;
+        for(int64_t i = 0; i < hp.M; i++)
+        {
+            double s = 0, c_max = 0;
+            for(int64_t k = 0; k < hp.K; k++)
+            {
+                double b_max = 0;
+                for(int64_t j = 0; j < hp.N; j++)
+                    b_max = std::max(b_max, std::fabs(hp.b(0, k, j)));
+                s += std::fabs(hp.a(0, i, k)) * b_max;
+            }
+            for(int64_t j = 0; j < hp.N; j++)
+                c_max = std::max(c_max, std::fabs(double(hp.C[size_t(j * hp.ldc + i)])));
+            const double scaled = 2 * std::fabs(double(hp.scale[size_t(i)])) * s;
+            max_partial         = std::max({max_partial, s, scaled});
+            max_result
+                = std::max(max_result, scaled + 2 * c_max + std::fabs(double(hp.bias[size_t(i)])));
+        }
+        FastCheckExpected e = fast_check_expected(p);
+        EXPECT_EQ(e.max_partial, max_partial);
+        EXPECT_EQ(e.max_result, max_result);
+        EXPECT_GT(max_result, max_partial) << "the beta and bias terms must count";
+    }
+
     // ------------------------------------------------------------------------------------------
     // fast_check_result_device: D in device memory
     // ------------------------------------------------------------------------------------------
@@ -1065,6 +1136,40 @@ namespace
         auto res            = fast_check_gemm(p);
         EXPECT_FALSE(res.passed);
         EXPECT_FALSE(res.message.empty());
+    }
+
+    // The expected expression is +/- (2^61 - 1), so both modular probes of an
+    // incorrect zero are zero for every seed. Refuse the inexact configuration
+    // from its inputs even when the stored D takes the small-integer fast path.
+    TEST(FastCheckDevice_pre_checkin, modular_alias_of_large_result_is_refused)
+    {
+        float  a = 2, b = 1, bias = -1, d = 0;
+        float* device = nullptr;
+        ASSERT_EQ(hipMalloc(&device, sizeof(float)), hipSuccess);
+        ASSERT_EQ(hipMemcpy(device, &d, sizeof(float), hipMemcpyHostToDevice), hipSuccess);
+        FastCheckProblem p;
+        p.M = p.N = p.K = 1;
+        p.A             = {&a, HIP_R_32F, 1, 1, 1, 1};
+        p.B             = {&b, HIP_R_32F, 1, 1, 1, 1};
+        p.bias          = &bias;
+        for(int sign : {1, -1})
+        {
+            p.alpha = sign * 0x1p60;
+            bias    = float(-sign);
+            p.D     = {&d, HIP_R_32F, 1, 1, 1, 1};
+            auto e  = fast_check_expected(p);
+            EXPECT_FALSE(e.status.passed);
+            EXPECT_FALSE(fast_check_result(p, e).passed);
+            p.D.data = device;
+            EXPECT_FALSE(fast_check_result_device(p, e, nullptr).passed);
+        }
+        EXPECT_EQ(hipFree(device), hipSuccess);
+
+        // The same zero output is correct and accepted for a small exact case.
+        p.alpha  = 1;
+        bias     = -2;
+        p.D.data = &d;
+        EXPECT_TRUE(fast_check_gemm(p).passed);
     }
 
     TEST(FastCheckDevice_pre_checkin, copy_region_to_host_drops_the_padding)
