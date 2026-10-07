@@ -9,29 +9,24 @@ project(HostNumerics VERSION 0.1.0 LANGUAGES CXX)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    set(HOSTNUMERICS_STANDALONE ON)
-else()
-    set(HOSTNUMERICS_STANDALONE OFF)
-endif()
-
-option(HOSTNUMERICS_BUILD_TESTING "Build HostNumerics tests." ${HOSTNUMERICS_STANDALONE})
+option(HOSTNUMERICS_BUILD_TESTING "Build HostNumerics tests." ${PROJECT_IS_TOP_LEVEL})
 option(HOSTNUMERICS_BUILD_PYTHON "Build the HostNumerics Python module."
-       ${HOSTNUMERICS_STANDALONE})
+       ${PROJECT_IS_TOP_LEVEL})
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/version.hpp.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
+    @ONLY
+)
 
 add_library(hostnumerics-core INTERFACE)
 add_library(roc::hostnumerics-core ALIAS hostnumerics-core)
 target_compile_features(hostnumerics-core INTERFACE cxx_std_20)
-target_include_directories(hostnumerics-core
-    INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
 target_sources(hostnumerics-core
     INTERFACE
         FILE_SET HEADERS
-        BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        FILES "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/version.hpp"
+        BASE_DIRS "${CMAKE_CURRENT_BINARY_DIR}/include"
+        FILES "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
 )
 
 add_library(hostnumerics INTERFACE)
@@ -50,15 +45,16 @@ install(TARGETS hostnumerics-core hostnumerics
     EXPORT hostnumerics-targets
     FILE_SET HEADERS DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
+set(_hostnumerics_cmake_install_dir "${CMAKE_INSTALL_LIBDIR}/cmake/HostNumerics")
 install(EXPORT hostnumerics-targets
     FILE HostNumericsTargets.cmake
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/HostNumerics"
+    DESTINATION "${_hostnumerics_cmake_install_dir}"
     NAMESPACE roc::
 )
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HostNumericsConfig.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/HostNumericsConfig.cmake"
-    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/HostNumerics"
+    INSTALL_DESTINATION "${_hostnumerics_cmake_install_dir}"
 )
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/HostNumericsConfigVersion.cmake"
@@ -69,7 +65,7 @@ write_basic_package_version_file(
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/HostNumericsConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/HostNumericsConfigVersion.cmake"
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/HostNumerics"
+    DESTINATION "${_hostnumerics_cmake_install_dir}"
 )
 install(FILES LICENSE.md
     DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/HostNumerics"

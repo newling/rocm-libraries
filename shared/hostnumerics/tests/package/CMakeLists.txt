@@ -7,7 +7,7 @@ project(HostNumericsPackageTest LANGUAGES CXX)
 
 find_package(HostNumerics CONFIG REQUIRED)
 
-add_executable(hostnumerics-package-test main.cpp)
+add_executable(hostnumerics-package-test ../version_test.cpp)
 target_link_libraries(hostnumerics-package-test PRIVATE roc::hostnumerics)
 
 enable_testing()
