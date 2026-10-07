@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
 
 #include <algorithm>
 #include <array>
@@ -11,26 +11,26 @@
 #include <string_view>
 #include <utility>
 
-#include <roc/host_numerics/generation.hpp>
-#include <roc/host_numerics/mx.hpp>
+#include <roc/hostnumerics/generation.hpp>
+#include <roc/hostnumerics/mx.hpp>
 #include <rocRoller/DataTypes/DataTypes_BF8.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP8.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
-namespace rocRoller::HostNumerics
+namespace rocRoller::hostnumerics
 {
     namespace
     {
-        using roc::host_numerics::GenerationRecipe;
-        using roc::host_numerics::GenerationRecipeSettings;
-        using roc::host_numerics::IndexOrder;
-        using roc::host_numerics::Layout;
-        using roc::host_numerics::MxDataGeneration;
-        using roc::host_numerics::MxGenerationOptions;
-        using roc::host_numerics::MxScaleGenerationMode;
-        using roc::host_numerics::ScalarType;
-        using roc::host_numerics::Shape;
-        using roc::host_numerics::Tensor;
+        using roc::hostnumerics::GenerationRecipe;
+        using roc::hostnumerics::GenerationRecipeSettings;
+        using roc::hostnumerics::IndexOrder;
+        using roc::hostnumerics::Layout;
+        using roc::hostnumerics::MxDataGeneration;
+        using roc::hostnumerics::MxGenerationOptions;
+        using roc::hostnumerics::MxScaleGenerationMode;
+        using roc::hostnumerics::ScalarType;
+        using roc::hostnumerics::Shape;
+        using roc::hostnumerics::Tensor;
 
         ptrdiff_t checkedPtrdiff(size_t value, char const* description)
         {
@@ -120,7 +120,7 @@ namespace rocRoller::HostNumerics
             case DataType::E4M3:
                 return ScalarType::E4M3;
             default:
-                throw std::invalid_argument("Unsupported rocRoller host-numerics data type.");
+                throw std::invalid_argument("Unsupported rocRoller HostNumerics data type.");
             }
         }
 
@@ -318,7 +318,7 @@ namespace rocRoller::HostNumerics
         {
             auto const layout = hostTensorLayout(descriptor);
             Tensor     source(ScalarType::Float32, layout);
-            roc::host_numerics::generate(
+            roc::hostnumerics::generate(
                 source, generationRecipe(descriptor, initialization, type, minimum, maximum, seed));
 
             return source.copyConvertedTo(type);
@@ -343,7 +343,7 @@ namespace rocRoller::HostNumerics
             }
 
             Tensor data(type, hostTensorLayout(descriptor));
-            roc::host_numerics::generate(
+            roc::hostnumerics::generate(
                 data, generationRecipe(descriptor, initialization, type, minimum, maximum, seed));
             std::optional<Tensor> reference;
             if(includeReference)
@@ -396,7 +396,7 @@ namespace rocRoller::HostNumerics
             options.scale     = mxScaleGenerationMode(initialization.mode);
 
             auto result
-                = roc::host_numerics::generateMx(std::move(mxShape), dataGeneration, options);
+                = roc::hostnumerics::generateMx(std::move(mxShape), dataGeneration, options);
             Tensor data = result.data.shareStorageWithLayout(hostTensorLayout(descriptor));
 
             auto const scaleLayout = hostScaleLayout(descriptor, blockedDimension, scaleBlockSize);
@@ -408,8 +408,8 @@ namespace rocRoller::HostNumerics
         }
     }
 
-    roc::host_numerics::ScalarType hostScalarType(DataType               type,
-                                                  DataTypeInterpretation interpretation)
+    roc::hostnumerics::ScalarType hostScalarType(DataType               type,
+                                                 DataTypeInterpretation interpretation)
     {
         return makeHostScalarType(type, interpretation);
     }
@@ -448,14 +448,14 @@ namespace rocRoller::HostNumerics
         return "DataInitMode(" + description + ")";
     }
 
-    roc::host_numerics::Layout hostTensorLayout(TensorDescriptor const& descriptor)
+    roc::hostnumerics::Layout hostTensorLayout(TensorDescriptor const& descriptor)
     {
         return makeTensorLayout(descriptor);
     }
 
-    roc::host_numerics::Layout hostScaleLayout(TensorDescriptor const& descriptor,
-                                               size_t                  blockedDimension,
-                                               size_t                  blockSize)
+    roc::hostnumerics::Layout hostScaleLayout(TensorDescriptor const& descriptor,
+                                              size_t                  blockedDimension,
+                                              size_t                  blockSize)
     {
         if(descriptor.dimensions() != 2)
             throw std::invalid_argument("rocRoller block scales require a rank-two tensor.");

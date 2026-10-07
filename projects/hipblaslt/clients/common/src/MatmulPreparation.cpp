@@ -18,21 +18,21 @@ namespace hipblaslt::client
             return value / divisor + static_cast<size_t>(value % divisor != 0);
         }
 
-        roc::host_numerics::amd_gpu_layout::MxScaleStoragePlan mxScaleStoragePlan(
+        roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan mxScaleStoragePlan(
             const MatmulMatrix&                                      matrix,
             size_t                                                   blockAxis,
             size_t                                                   blockSize,
-            roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout physicalLayout)
+            roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout physicalLayout)
         {
             const size_t                blockedExtent = matrix.layout.shape()[blockAxis];
             const size_t                freeExtent    = matrix.layout.shape()[1 - blockAxis];
             const std::array<size_t, 2> naturalShape
                 = blockAxis == 0
                           || physicalLayout
-                                 == roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
+                                 == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
                       ? std::array<size_t, 2>{freeExtent, divideRoundUp(blockedExtent, blockSize)}
                       : std::array<size_t, 2>{divideRoundUp(blockedExtent, blockSize), freeExtent};
-            return roc::host_numerics::amd_gpu_layout::planMxScaleStorage(
+            return roc::hostnumerics::amd_gpu_layout::planMxScaleStorage(
                 naturalShape, blockSize, physicalLayout);
         }
     } // namespace
@@ -241,8 +241,8 @@ namespace hipblaslt::client
                               const MatmulDataTypes&         dataTypes,
                               bool                           swizzleA,
                               bool                           swizzleB,
-                              roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA,
-                              roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB)
+                              roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA,
+                              roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB)
     {
         MatmulPreparation preparation;
         preparation.problems.resize(matmulProblems.size());

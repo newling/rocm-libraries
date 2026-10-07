@@ -25,14 +25,14 @@
  *******************************************************************************/
 #include <cstddef>
 #include <iostream>
-#include <roc/host_numerics/tensor.hpp>
+#include <roc/hostnumerics/tensor.hpp>
 #include <span>
 #include <vector>
 
 namespace
 {
     template <typename T>
-    void printTensor(std::ostream& os, const roc::host_numerics::Tensor& tensor)
+    void printTensor(std::ostream& os, const roc::hostnumerics::Tensor& tensor)
     {
         std::vector<size_t> indices(tensor.shape().rank(), 0);
         os << '[';
@@ -76,9 +76,9 @@ int main(int argc, char** argv)
         }
     }
 
-    using roc::host_numerics::Layout;
-    using roc::host_numerics::Shape;
-    using roc::host_numerics::Tensor;
+    using roc::hostnumerics::Layout;
+    using roc::hostnumerics::Shape;
+    using roc::hostnumerics::Tensor;
     const Tensor weight
         = Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(Shape{m, k}), std::span<const int>(weightStorage));
 

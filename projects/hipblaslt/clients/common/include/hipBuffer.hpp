@@ -33,7 +33,7 @@
 #include <algorithm>
 #include <complex>
 #include <memory>
-#include <roc/host_numerics/tensor.hpp>
+#include <roc/hostnumerics/tensor.hpp>
 #include <span>
 #include <string>
 #include <type_traits>
@@ -213,10 +213,10 @@ public:
         return reinterpret_cast<const T*>(buf());
     }
 
-    roc::host_numerics::Tensor tensor(roc::host_numerics::ScalarType type,
-                                        roc::host_numerics::Layout     layout) const
+    roc::hostnumerics::Tensor tensor(roc::hostnumerics::ScalarType type,
+                                        roc::hostnumerics::Layout     layout) const
     {
-        return roc::host_numerics::Tensor::shareExternalMutableBackingStorage(
+        return roc::hostnumerics::Tensor::shareExternalMutableBackingStorage(
             type,
             std::move(layout),
             buffer,

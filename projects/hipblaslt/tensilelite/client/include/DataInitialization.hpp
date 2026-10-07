@@ -34,7 +34,7 @@
 #include "ClientProblemFactory.hpp"
 #include "Rotating.hpp"
 
-#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -683,7 +683,7 @@ namespace TensileLite
             {
                 return isMXProblem(problem) && m_mxScaleFormat > 0
                        && m_mxScaleLayout
-                              == roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
+                              == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950
                        && solution != nullptr
                        && solution->problemType.mxScaleFormat == 1;
             }
@@ -788,8 +788,8 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
-            roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout m_mxScaleLayout
-                = roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Natural;
+            roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout m_mxScaleLayout
+                = roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Natural;
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
             // hand back gpuInput.valid as-is rather than re-swizzling).

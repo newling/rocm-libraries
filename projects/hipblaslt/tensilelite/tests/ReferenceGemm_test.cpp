@@ -5,10 +5,10 @@
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
-#include <TensileLite/Client/HostNumerics/GemmInvocationAdapter.hpp>
-#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
-#include <TensileLite/Client/HostNumerics/Reference.hpp>
-#include <roc/host_numerics/validation.hpp>
+#include <TensileLite/Client/hostnumerics/GemmInvocationAdapter.hpp>
+#include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/hostnumerics/Reference.hpp>
+#include <roc/hostnumerics/validation.hpp>
 
 #include <array>
 #include <cmath>
@@ -25,15 +25,15 @@ using namespace TensileLite::Client;
 
 namespace
 {
-    constexpr roc::host_numerics::GemmBackend requireBlockedExecution
-        = roc::host_numerics::GemmBackend::Blocked;
+    constexpr roc::hostnumerics::GemmBackend requireBlockedExecution
+        = roc::hostnumerics::GemmBackend::Blocked;
 
-    constexpr roc::host_numerics::GemmBackend automaticExecution
-        = roc::host_numerics::GemmBackend::Automatic;
+    constexpr roc::hostnumerics::GemmBackend automaticExecution
+        = roc::hostnumerics::GemmBackend::Automatic;
 
-    static_assert(!std::is_default_constructible_v<HostNumerics::TranslatedGemmBatch>);
-    static_assert(std::is_nothrow_move_constructible_v<HostNumerics::TranslatedGemmBatch>);
-    static_assert(std::is_nothrow_move_assignable_v<HostNumerics::TranslatedGemmBatch>);
+    static_assert(!std::is_default_constructible_v<hostnumerics::TranslatedGemmBatch>);
+    static_assert(std::is_nothrow_move_constructible_v<hostnumerics::TranslatedGemmBatch>);
+    static_assert(std::is_nothrow_move_assignable_v<hostnumerics::TranslatedGemmBatch>);
 
     ContractionProblemGemm makePackedProblem(rocisa::DataType typeA,
                                              rocisa::DataType typeB,
@@ -90,12 +90,12 @@ TEST(ReferenceInvocationAdapter, ZeroOutputOrBatchIsNoOpWithoutBindings)
                                          batches);
         const ContractionInputs inputs;
 
-        const auto translation = HostNumerics::translateGemmInvocation(
-            problem, inputs, roc::host_numerics::OutputSelection::all());
-        ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(translation));
-        EXPECT_EQ(std::get<HostNumerics::GemmInvocationAdapter>(translation).batchCount(), 0);
+        const auto translation = hostnumerics::translateGemmInvocation(
+            problem, inputs, roc::hostnumerics::OutputSelection::all());
+        ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(translation));
+        EXPECT_EQ(std::get<hostnumerics::GemmInvocationAdapter>(translation).batchCount(), 0);
         executeReferenceGemm(
-            problem, inputs, roc::host_numerics::OutputSelection::all(), automaticExecution);
+            problem, inputs, roc::hostnumerics::OutputSelection::all(), automaticExecution);
     }
 }
 
@@ -111,7 +111,7 @@ TEST(ReferenceInvocationAdapter, ZeroReductionDoesNotRequireProductOrAddendBindi
     inputs.beta  = 0.0f;
 
     executeReferenceGemm(
-        problem, inputs, roc::host_numerics::OutputSelection::all(), automaticExecution);
+        problem, inputs, roc::hostnumerics::OutputSelection::all(), automaticExecution);
     EXPECT_EQ(output, (std::array<float, 6>{}));
 }
 
@@ -252,7 +252,7 @@ TEST(ReferenceInvocationAdapter, UsesFreeIndexRolesInsteadOfDeclarationOrder)
     const size_t N = 3;
     const size_t K = 2;
 
-    // The B free index is deliberately declared first. The normalized host-numerics
+    // The B free index is deliberately declared first. The normalized HostNumerics
     // request must still use the A free index as M and the B free index as N.
     ContractionProblemGemm::FreeIndices freeIndices{
         {false, 1, 1, 1},
@@ -353,10 +353,10 @@ TEST(ReferenceInvocationAdapter, RejectsUnknownScaleABMode)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
     const auto translation
-        = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslationFailure>(translation));
-    EXPECT_EQ(std::get<HostNumerics::TranslationFailure>(translation).code,
-              HostNumerics::TranslationFailureCode::InvalidScaleConfiguration);
+        = hostnumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(translation).code,
+              hostnumerics::TranslationFailureCode::InvalidScaleConfiguration);
 }
 
 TEST(ReferenceBlockedBackend, DoesNotChangeHalfAccumulatorSemantics)
@@ -453,7 +453,7 @@ TEST(ReferenceGemmSelection, UsesBlockedForSparseFloatValidation)
     SolveGemmCPU(problem, inputs, elementsToValidate);
 
     const auto selection
-        = roc::host_numerics::OutputSelection::primeStride(problem.d().totalLogicalElements(),
+        = roc::hostnumerics::OutputSelection::primeStride(problem.d().totalLogicalElements(),
                                                              problem.d().totalAllocatedElements(),
                                                              elementsToValidate);
     const std::vector<size_t> selected = selection.indices(problem.d().totalLogicalElements());
@@ -482,19 +482,19 @@ TEST(ReferenceGemmSelection, UsesBlockedForSparseFloatValidation)
     for(const size_t index : selected)
         observedSelected.push_back(d[index]);
     const auto selectedLayout
-        = roc::host_numerics::Layout::contiguousLastDimensionFastest(roc::host_numerics::Shape{selected.size()});
-    const auto matching = roc::host_numerics::compare(
-        roc::host_numerics::Tensor::copyNativeStorage<float>(selectedLayout,
+        = roc::hostnumerics::Layout::contiguousLastDimensionFastest(roc::hostnumerics::Shape{selected.size()});
+    const auto matching = roc::hostnumerics::compare(
+        roc::hostnumerics::Tensor::copyNativeStorage<float>(selectedLayout,
                                                         std::span<const float>(observedSelected)),
-        roc::host_numerics::Tensor::copyNativeStorage<float>(selectedLayout,
+        roc::hostnumerics::Tensor::copyNativeStorage<float>(selectedLayout,
                                                         std::span<const float>(expectedSelected)));
     ASSERT_TRUE(matching.passed());
 
     observedSelected[selected.size() / 2] += 1.0f;
-    const auto injectedFailure = roc::host_numerics::compare(
-        roc::host_numerics::Tensor::copyNativeStorage<float>(selectedLayout,
+    const auto injectedFailure = roc::hostnumerics::compare(
+        roc::hostnumerics::Tensor::copyNativeStorage<float>(selectedLayout,
                                                         std::span<const float>(observedSelected)),
-        roc::host_numerics::Tensor::copyNativeStorage<float>(selectedLayout,
+        roc::hostnumerics::Tensor::copyNativeStorage<float>(selectedLayout,
                                                         std::span<const float>(expectedSelected)));
     EXPECT_FALSE(injectedFailure.passed());
     EXPECT_EQ(injectedFailure.mismatches, 1);
@@ -548,13 +548,13 @@ TEST(ReferenceEpilogueComposition, AppliesScaleCDOutsideMatmul)
     inputs.scaleC = &scaleC;
     inputs.scaleD = &scaleD;
 
-    auto invocation = HostNumerics::translateGemmInvocation(
+    auto invocation = hostnumerics::translateGemmInvocation(
         problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocation));
-    auto adapter = std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocation));
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(invocation));
+    auto adapter = std::move(std::get<hostnumerics::GemmInvocationAdapter>(invocation));
     auto batch   = adapter.translateBatch(0);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
-    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslatedGemmBatch>(batch));
+    auto translated = std::move(std::get<hostnumerics::TranslatedGemmBatch>(batch));
 
     translated.runGemm();
     translated.runPostGemmOperationsAndCopyOutputs();
@@ -1201,7 +1201,7 @@ TEST(ReferenceInvocationAdapter, SnapshotsProblemPolicyBeforeBatchTranslation)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.scaleAlphaVec = scaleAlpha.data();
 
-    std::optional<HostNumerics::GemmInvocationAdapter> adapter;
+    std::optional<hostnumerics::GemmInvocationAdapter> adapter;
     {
         auto problem = makePackedProblem(
             rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
@@ -1209,17 +1209,17 @@ TEST(ReferenceInvocationAdapter, SnapshotsProblemPolicyBeforeBatchTranslation)
         problem.setScaleAlphaVec(rocisa::DataType::Float, M, /*factorDim=*/0);
         problem.setF32XdlMathOp(rocisa::DataType::XFloat32);
 
-        auto invocation = HostNumerics::translateGemmInvocation(
+        auto invocation = hostnumerics::translateGemmInvocation(
             problem, inputs, /*elementsToValidate=*/-1);
-        ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocation));
+        ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(invocation));
         adapter.emplace(
-            std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocation)));
+            std::move(std::get<hostnumerics::GemmInvocationAdapter>(invocation)));
     }
 
     auto batch = adapter->translateBatch(0);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
-    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
-    EXPECT_EQ(translated.matmulOptions().mathMode, roc::host_numerics::MathMode::XFloat32);
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslatedGemmBatch>(batch));
+    auto translated = std::move(std::get<hostnumerics::TranslatedGemmBatch>(batch));
+    EXPECT_EQ(translated.matmulOptions().mathMode, roc::hostnumerics::MathMode::XFloat32);
 
     translated.runGemm();
     translated.runPostGemmOperationsAndCopyOutputs();
@@ -1258,15 +1258,15 @@ TEST(ReferenceInvocationAdapter, MaterializesStridedBatchOnDemand)
     std::vector<float> d{-99, -99};
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    auto invocation = HostNumerics::translateGemmInvocation(
+    auto invocation = hostnumerics::translateGemmInvocation(
         problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocation));
-    auto adapter = std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocation));
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(invocation));
+    auto adapter = std::move(std::get<hostnumerics::GemmInvocationAdapter>(invocation));
 
     a[1] = 7;
     auto batch = adapter.translateBatch(1);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
-    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslatedGemmBatch>(batch));
+    auto translated = std::move(std::get<hostnumerics::TranslatedGemmBatch>(batch));
     a[1]             = 9;
 
     translated.runGemm();
@@ -1313,7 +1313,7 @@ TEST(ReferenceInvocationAdapter, MaterializesPointerArrayBatchOnDemand)
     const void*        batchC[] = {c0.data(), c1.data()};
     void*              batchD[] = {d0.data(), d1.data()};
 
-    std::optional<HostNumerics::GemmInvocationAdapter> adapter;
+    std::optional<hostnumerics::GemmInvocationAdapter> adapter;
     {
         ContractionInputs inputs(nullptr, nullptr, nullptr, nullptr, 1.0f, 0.0f);
         inputs.batchA = batchA;
@@ -1321,19 +1321,19 @@ TEST(ReferenceInvocationAdapter, MaterializesPointerArrayBatchOnDemand)
         inputs.batchC = batchC;
         inputs.batchD = batchD;
 
-        auto invocation = HostNumerics::translateGemmInvocation(
+        auto invocation = hostnumerics::translateGemmInvocation(
             problem, inputs, /*elementsToValidate=*/-1);
         ASSERT_TRUE(
-            std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocation));
+            std::holds_alternative<hostnumerics::GemmInvocationAdapter>(invocation));
         adapter.emplace(
-            std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocation)));
+            std::move(std::get<hostnumerics::GemmInvocationAdapter>(invocation)));
     }
 
     batchA[1] = a0.data();
     a1[0] = 7;
     auto batch = adapter->translateBatch(1);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
-    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslatedGemmBatch>(batch));
+    auto translated = std::move(std::get<hostnumerics::TranslatedGemmBatch>(batch));
     a1[0]            = 9;
 
     translated.runGemm();
@@ -1383,13 +1383,13 @@ TEST(ReferenceInvocationAdapter, RebasesOddPackedBatchStrides)
         2, 2, 2, 3, 3, 3, 4, 4, 4,
     };
     const std::vector<float> bValues{1, 2, 4, 1, 2, 4};
-    const auto packedA = roc::host_numerics::Tensor::copyValuesWithConversion(
-        roc::host_numerics::ScalarType::Float4E2M1,
-        roc::host_numerics::Shape{aValues.size()},
+    const auto packedA = roc::hostnumerics::Tensor::copyValuesWithConversion(
+        roc::hostnumerics::ScalarType::Float4E2M1,
+        roc::hostnumerics::Shape{aValues.size()},
         std::span<const float>(aValues));
-    const auto packedB = roc::host_numerics::Tensor::copyValuesWithConversion(
-        roc::host_numerics::ScalarType::Float4E2M1,
-        roc::host_numerics::Shape{bValues.size()},
+    const auto packedB = roc::hostnumerics::Tensor::copyValuesWithConversion(
+        roc::hostnumerics::ScalarType::Float4E2M1,
+        roc::hostnumerics::Shape{bValues.size()},
         std::span<const float>(bValues));
     std::vector<float> c(M * N * batches, 0.0f);
     std::vector<float> d(M * N * batches, -99.0f);
@@ -1497,10 +1497,10 @@ TEST(ReferenceBlockedBackend, RejectsInvalidPointerBatchBeforeWriting)
     inputs.batchD = batchD;
 
     const auto translation
-        = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslationFailure>(translation));
-    EXPECT_EQ(std::get<HostNumerics::TranslationFailure>(translation).code,
-              HostNumerics::TranslationFailureCode::InvalidBatchPointer);
+        = hostnumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(translation).code,
+              hostnumerics::TranslationFailureCode::InvalidBatchPointer);
 
     try
     {
@@ -1555,11 +1555,11 @@ TEST(ReferenceInvocationAdapter, PreflightsEveryBatchLayoutBeforeWriting)
     std::vector<float> d{-99, -99};
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
-    const auto translation = HostNumerics::translateGemmInvocation(
+    const auto translation = hostnumerics::translateGemmInvocation(
         problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslationFailure>(translation));
-    EXPECT_EQ(std::get<HostNumerics::TranslationFailure>(translation).code,
-              HostNumerics::TranslationFailureCode::InvalidDescriptor);
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(translation).code,
+              hostnumerics::TranslationFailureCode::InvalidDescriptor);
     EXPECT_EQ(d, (std::vector<float>{-99, -99}));
 }
 
@@ -1578,23 +1578,23 @@ TEST(ReferenceInvocationAdapter, OwnsStandaloneTemporariesAcrossAdapterLifetime)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
     inputs.e = e.data();
 
-    std::optional<HostNumerics::TranslatedGemmBatch> translated;
+    std::optional<hostnumerics::TranslatedGemmBatch> translated;
     {
         auto invocationTranslation
-            = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
+            = hostnumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/-1);
         ASSERT_TRUE(
-            std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocationTranslation));
+            std::holds_alternative<hostnumerics::GemmInvocationAdapter>(invocationTranslation));
         auto adapter
-            = std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocationTranslation));
+            = std::move(std::get<hostnumerics::GemmInvocationAdapter>(invocationTranslation));
 
         auto batchTranslation = adapter.translateBatch(0);
         ASSERT_TRUE(
-            std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batchTranslation));
+            std::holds_alternative<hostnumerics::TranslatedGemmBatch>(batchTranslation));
         translated.emplace(
-            std::move(std::get<HostNumerics::TranslatedGemmBatch>(batchTranslation)));
+            std::move(std::get<hostnumerics::TranslatedGemmBatch>(batchTranslation)));
     }
 
-    translated->runGemm(roc::host_numerics::GemmBackend::Blocked);
+    translated->runGemm(roc::hostnumerics::GemmBackend::Blocked);
     translated->runPostGemmOperationsAndCopyOutputs();
 
     EXPECT_EQ(d, (std::vector<float>{3, 6, 4, 8}));
@@ -1634,15 +1634,15 @@ TEST(ReferenceInvocationAdapter, CopyOutputsPreservesUnselectedValuesAndPadding)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
     auto invocationTranslation
-        = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/1);
+        = hostnumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/1);
     ASSERT_TRUE(
-        std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocationTranslation));
+        std::holds_alternative<hostnumerics::GemmInvocationAdapter>(invocationTranslation));
     auto adapter
-        = std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocationTranslation));
+        = std::move(std::get<hostnumerics::GemmInvocationAdapter>(invocationTranslation));
 
     auto batchTranslation = adapter.translateBatch(0);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batchTranslation));
-    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batchTranslation));
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslatedGemmBatch>(batchTranslation));
+    auto translated = std::move(std::get<hostnumerics::TranslatedGemmBatch>(batchTranslation));
 
     translated.runGemm();
     d[1] = 111;
@@ -1671,10 +1671,10 @@ TEST(ReferenceInvocationAdapter, RejectsDescriptorStrideThatCannotFitPtrdiff)
     ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
 
     const auto translation
-        = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/0);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslationFailure>(translation));
-    EXPECT_EQ(std::get<HostNumerics::TranslationFailure>(translation).code,
-              HostNumerics::TranslationFailureCode::InvalidDescriptor);
+        = hostnumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/0);
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(translation).code,
+              hostnumerics::TranslationFailureCode::InvalidDescriptor);
 }
 
 TEST(ReferenceInvocationAdapter, RejectsMirroredOffsetMultiplicationOverflow)
@@ -1723,10 +1723,10 @@ TEST(ReferenceInvocationAdapter, RejectsMirroredOffsetMultiplicationOverflow)
     inputs.batchA = batchA;
 
     const auto translation
-        = HostNumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/0);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslationFailure>(translation));
-    EXPECT_EQ(std::get<HostNumerics::TranslationFailure>(translation).code,
-              HostNumerics::TranslationFailureCode::InvalidDescriptor);
+        = hostnumerics::translateGemmInvocation(problem, inputs, /*elementsToValidate=*/0);
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<hostnumerics::TranslationFailure>(translation).code,
+              hostnumerics::TranslationFailureCode::InvalidDescriptor);
 }
 
 TEST(ReferenceRuntimeGemm, HandlesFloat16Accumulation)
@@ -1770,13 +1770,13 @@ TEST(ReferenceRuntimeGemm, AppliesScalarScaleBeforeComputeQuantization)
     inputs.scaleA = &scaleA;
     inputs.scaleB = &scaleB;
 
-    auto invocation = HostNumerics::translateGemmInvocation(
+    auto invocation = hostnumerics::translateGemmInvocation(
         problem, inputs, /*elementsToValidate=*/-1);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::GemmInvocationAdapter>(invocation));
-    auto adapter = std::move(std::get<HostNumerics::GemmInvocationAdapter>(invocation));
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::GemmInvocationAdapter>(invocation));
+    auto adapter = std::move(std::get<hostnumerics::GemmInvocationAdapter>(invocation));
     auto batch   = adapter.translateBatch(0);
-    ASSERT_TRUE(std::holds_alternative<HostNumerics::TranslatedGemmBatch>(batch));
-    auto translated = std::move(std::get<HostNumerics::TranslatedGemmBatch>(batch));
+    ASSERT_TRUE(std::holds_alternative<hostnumerics::TranslatedGemmBatch>(batch));
+    auto translated = std::move(std::get<hostnumerics::TranslatedGemmBatch>(batch));
 
     translated.runGemm();
     translated.runPostGemmOperationsAndCopyOutputs();
@@ -1886,10 +1886,10 @@ TEST(ReferencePackedStorage, Float6MatchesComponentCodec)
     packed.data.v3 = 0x1f;
     packed.data.v4 = 0x3f;
 
-    const roc::host_numerics::Tensor component =
-        roc::host_numerics::Tensor::copyEncodedBackingStorage(
-        roc::host_numerics::ScalarType::Float6E2M3,
-        roc::host_numerics::Layout::contiguousLastDimensionFastest(roc::host_numerics::Shape{32}),
+    const roc::hostnumerics::Tensor component =
+        roc::hostnumerics::Tensor::copyEncodedBackingStorage(
+        roc::hostnumerics::ScalarType::Float6E2M3,
+        roc::hostnumerics::Layout::contiguousLastDimensionFastest(roc::hostnumerics::Shape{32}),
         std::as_bytes(std::span<const Float6x32>(&packed, 1)));
     for(size_t index = 0; index < 32; ++index)
         EXPECT_EQ(component.loadAs<float>({index}), packed.getElement(index)) << "index=" << index;
@@ -1920,10 +1920,10 @@ TEST(ReferencePackedStorage, BFloat6MatchesComponentCodec)
     packed.data.v3 = 0x1f;
     packed.data.v4 = 0x3f;
 
-    const roc::host_numerics::Tensor component =
-        roc::host_numerics::Tensor::copyEncodedBackingStorage(
-        roc::host_numerics::ScalarType::Float6E3M2,
-        roc::host_numerics::Layout::contiguousLastDimensionFastest(roc::host_numerics::Shape{32}),
+    const roc::hostnumerics::Tensor component =
+        roc::hostnumerics::Tensor::copyEncodedBackingStorage(
+        roc::hostnumerics::ScalarType::Float6E3M2,
+        roc::hostnumerics::Layout::contiguousLastDimensionFastest(roc::hostnumerics::Shape{32}),
         std::as_bytes(std::span<const BFloat6x32>(&packed, 1)));
     for(size_t index = 0; index < 32; ++index)
         EXPECT_EQ(component.loadAs<float>({index}), packed.getElement(index)) << "index=" << index;

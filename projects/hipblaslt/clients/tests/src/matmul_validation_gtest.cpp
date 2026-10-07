@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <hipblaslt/host_numerics/MatmulValidation.hpp>
+#include <hipblaslt/hostnumerics/MatmulValidation.hpp>
 
 #include "utility.hpp"
 #include <gtest/gtest.h>
@@ -18,14 +18,14 @@ namespace
     std::pair<double, bool>
         validatePointerArrayNorm(const std::array<float, 2>& observed, bool assertNorm)
     {
-        using namespace hipblaslt::host_numerics;
+        using namespace hipblaslt::hostnumerics;
 
         const std::array<float, 2> expected{1.0f, 1.0f};
         MatmulValidationCase       testCase;
         for(size_t batch = 0; batch < expected.size(); ++batch)
         {
-            testCase.outputs.emplace_back(roc::host_numerics::Tensor(expected[batch]),
-                                          roc::host_numerics::Tensor(observed[batch]));
+            testCase.outputs.emplace_back(roc::hostnumerics::Tensor(expected[batch]),
+                                          roc::hostnumerics::Tensor(observed[batch]));
         }
 
         const MatmulValidationSummary summary = validateMatmulOutputs(
@@ -33,16 +33,16 @@ namespace
         return {summary.relativeFrobeniusError, summary.passed};
     }
 
-    hipblaslt::host_numerics::MatmulValidationCase::TensorPair scalarComparison(float expected,
+    hipblaslt::hostnumerics::MatmulValidationCase::TensorPair scalarComparison(float expected,
                                                                                 float observed)
     {
-        return {roc::host_numerics::Tensor(expected), roc::host_numerics::Tensor(observed)};
+        return {roc::hostnumerics::Tensor(expected), roc::hostnumerics::Tensor(observed)};
     }
 
     std::pair<double, double>
-        validateAllClose(std::span<const hipblaslt::host_numerics::MatmulValidationCase> cases)
+        validateAllClose(std::span<const hipblaslt::hostnumerics::MatmulValidationCase> cases)
     {
-        using namespace hipblaslt::host_numerics;
+        using namespace hipblaslt::hostnumerics;
 
         const MatmulValidationSummary summary
             = validateMatmulOutputs({.searchAllClose = true}, cases);
@@ -66,7 +66,7 @@ TEST(HostNumericsMatmulValidation, PointerArrayNormChecksEachBatch)
 
 TEST(HostNumericsMatmulValidation, PointerArrayOutputsKeepCombinedAllCloseTolerance)
 {
-    using namespace hipblaslt::host_numerics;
+    using namespace hipblaslt::hostnumerics;
 
     const std::array<float, 3> expected{0.0f, 1.0f, 1.0f};
     const std::array<float, 3> observed{0.005f, 1.005f, 1.0f};
@@ -82,7 +82,7 @@ TEST(HostNumericsMatmulValidation, PointerArrayOutputsKeepCombinedAllCloseTolera
 
 TEST(HostNumericsMatmulValidation, GroupedCasesKeepEarlierAllCloseFailure)
 {
-    using namespace hipblaslt::host_numerics;
+    using namespace hipblaslt::hostnumerics;
 
     const std::array<float, 2>          expected{0.0f, 1.0f};
     const std::array<float, 2>          observed{2.0f, 1.0f};
@@ -97,8 +97,8 @@ TEST(HostNumericsMatmulValidation, GroupedCasesKeepEarlierAllCloseFailure)
 
 TEST(HostNumericsMatmulValidation, EmptyOutputsAreNoOps)
 {
-    using namespace hipblaslt::host_numerics;
-    using namespace roc::host_numerics;
+    using namespace hipblaslt::hostnumerics;
+    using namespace roc::hostnumerics;
 
     MatmulValidationCase testCase;
     testCase.outputs.emplace_back(Tensor(ScalarType::Float32, Shape{0, 3, 2}),
@@ -121,7 +121,7 @@ TEST(HostNumericsMatmulValidation, EmptyOutputsAreNoOps)
 
 TEST(HostNumericsMatmulValidation, UnitCheckPreservesNonFiniteSemantics)
 {
-    using namespace hipblaslt::host_numerics;
+    using namespace hipblaslt::hostnumerics;
 
     const float          nan = std::numeric_limits<float>::quiet_NaN();
     MatmulValidationCase matching;
@@ -136,7 +136,7 @@ TEST(HostNumericsMatmulValidation, UnitCheckPreservesNonFiniteSemantics)
 
 TEST(HostNumericsMatmulValidation, NormOnlyPreservesNonFiniteConsistencyCheck)
 {
-    using namespace hipblaslt::host_numerics;
+    using namespace hipblaslt::hostnumerics;
 
     const float          infinity = std::numeric_limits<float>::infinity();
     MatmulValidationCase mismatching;

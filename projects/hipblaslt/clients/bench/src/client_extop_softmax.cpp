@@ -29,7 +29,7 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt_datatype2string.hpp>
 #include <iostream>
-#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
 #include <vector>
 
 void printUsage(char* programName)
@@ -111,14 +111,14 @@ int main(int argc, char** argv)
     float*      output{};
     auto        hipErr = hipMalloc(&input, numElements * elementNumBytes);
     hipErr             = hipMalloc(&output, numElements * elementNumBytes);
-    const roc::host_numerics::Tensor data = roc::host_numerics::generate(
-        roc::host_numerics::ScalarType::Float32,
-        roc::host_numerics::Shape{numElements},
-        hipblaslt::host_numerics::initializationRecipe(
-            roc::host_numerics::ScalarType::Float32,
+    const roc::hostnumerics::Tensor data = roc::hostnumerics::generate(
+        roc::hostnumerics::ScalarType::Float32,
+        roc::hostnumerics::Shape{numElements},
+        hipblaslt::hostnumerics::initializationRecipe(
+            roc::hostnumerics::ScalarType::Float32,
             init,
-            hipblaslt::host_numerics::defaultInitializationSeed,
-            hipblaslt::host_numerics::TrigonometricComponent::Cosine));
+            hipblaslt::hostnumerics::defaultInitializationSeed,
+            hipblaslt::hostnumerics::TrigonometricComponent::Cosine));
     hipErr            = hipMemcpyHtoD(
         input, data.rawEncodedBackingStorage().data(), data.rawEncodedBackingStorage().size());
     hipStream_t stream{};

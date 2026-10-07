@@ -84,9 +84,8 @@
 /projects/rocwmma/                                  @ROCm/rocwmma-reviewers
 /projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
-/shared/hostnumerics/                               @newling
-# Temporary while the host-numerics extraction remains experimental.
-/shared/host-numerics/                            @newling
+# Temporary while the HostNumerics extraction remains experimental.
+/shared/hostnumerics/                              @newling
 /shared/mxdatagenerator/                            @newling
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
@@ -106,17 +105,15 @@
 /projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 /projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 
-/shared/hostnumerics/**/*.cmake                     @ROCm/rocm-math-lib-build-infra
-/shared/hostnumerics/**/*.cmake.in                  @ROCm/rocm-math-lib-build-infra
-/shared/hostnumerics/**/CMakeLists.txt              @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/*.cmake                    @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/*.cmake.in                 @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/CMakeLists.txt             @ROCm/rocm-math-lib-build-infra
 
 
 /shared/origami/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
 /shared/origami/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
 
 # Temporary override matching the experimental path ownership above.
-/shared/host-numerics/**/*.cmake                  @newling
-/shared/host-numerics/**/CMakeLists.txt           @newling
 
 /shared/rocroller/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
 /shared/rocroller/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra

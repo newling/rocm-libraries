@@ -5,9 +5,9 @@
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
-#include <TensileLite/Client/HostNumerics/Reference.hpp>
-#include <roc/host_numerics/comparison.hpp>
-#include <roc/host_numerics/generation.hpp>
+#include <TensileLite/Client/hostnumerics/Reference.hpp>
+#include <roc/hostnumerics/comparison.hpp>
+#include <roc/hostnumerics/generation.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -23,8 +23,8 @@ using namespace TensileLite::Client;
 
 namespace
 {
-    constexpr roc::host_numerics::GemmBackend requireBlockedExecution
-        = roc::host_numerics::GemmBackend::Blocked;
+    constexpr roc::hostnumerics::GemmBackend requireBlockedExecution
+        = roc::hostnumerics::GemmBackend::Blocked;
 
     ContractionProblemGemm makeMXProblem(rocisa::DataType typeA,
                                          rocisa::DataType typeB,
@@ -65,13 +65,13 @@ namespace
 
     template <typename T>
     void generateValues(std::vector<T>&                                   values,
-                        roc::host_numerics::ScalarType                  type,
-                        roc::host_numerics::GenerationRecipe::Component component,
+                        roc::hostnumerics::ScalarType                  type,
+                        roc::hostnumerics::GenerationRecipe::Component component,
                         std::uint64_t                                     seed,
                         std::uint64_t                                     stream)
     {
         static_assert(std::is_trivially_copyable_v<T>);
-        using namespace roc::host_numerics;
+        using namespace roc::hostnumerics;
 
         const auto recipe = GenerationRecipe::realOnly(
             std::move(component),
@@ -242,13 +242,13 @@ TEST(ReferenceMXGemm, ComputesScaledFP8Gemm)
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
-    const auto binaryValues = roc::host_numerics::GenerationRecipe::choice({.values = {-1.0, 1.0}});
+    const auto binaryValues = roc::hostnumerics::GenerationRecipe::choice({.values = {-1.0, 1.0}});
     const auto scaleValues
-        = roc::host_numerics::GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}});
-    generateValues(a, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 12345, 0);
-    generateValues(b, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 12345, 1);
-    generateValues(mxsa, roc::host_numerics::ScalarType::E8M0Zero, scaleValues, 12345, 2);
-    generateValues(mxsb, roc::host_numerics::ScalarType::E8M0Zero, scaleValues, 12345, 3);
+        = roc::hostnumerics::GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}});
+    generateValues(a, roc::hostnumerics::ScalarType::Float8E4M3, binaryValues, 12345, 0);
+    generateValues(b, roc::hostnumerics::ScalarType::Float8E4M3, binaryValues, 12345, 1);
+    generateValues(mxsa, roc::hostnumerics::ScalarType::E8M0Zero, scaleValues, 12345, 2);
+    generateValues(mxsb, roc::hostnumerics::ScalarType::E8M0Zero, scaleValues, 12345, 3);
 
     EXPECT_TRUE(std::ranges::any_of(a, [](Float8 value) { return float(value) != 0.0f; }));
     EXPECT_TRUE(std::ranges::any_of(b, [](Float8 value) { return float(value) != 0.0f; }));
@@ -262,10 +262,10 @@ TEST(ReferenceMXGemm, ComputesScaledFP8Gemm)
     executeReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, requireBlockedExecution);
 
     const auto expected   = expectedMXGemm(problem, a, b, c, mxsa, mxsb, 1.0f, 0.0f);
-    const auto comparison = roc::host_numerics::compare(
-        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
-        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(expected)),
-        roc::host_numerics::nearComparisonOptions(1e-3));
+    const auto comparison = roc::hostnumerics::compare(
+        roc::hostnumerics::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
+        roc::hostnumerics::Tensor::copyNativeStorage(std::span<const float>(expected)),
+        roc::hostnumerics::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
         << " max_absolute_difference=" << comparison.maxAbsoluteDifference;
@@ -291,17 +291,17 @@ TEST(ReferenceMXGemm, ComputesScaledFP8GemmWithBetaAndBias)
     std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements());
     std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements());
 
-    const auto binaryValues = roc::host_numerics::GenerationRecipe::choice({.values = {-1.0, 1.0}});
+    const auto binaryValues = roc::hostnumerics::GenerationRecipe::choice({.values = {-1.0, 1.0}});
     const auto scaleValues
-        = roc::host_numerics::GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}});
-    const auto cValues    = roc::host_numerics::GenerationRecipe::constant({.value = 0.25});
-    const auto biasValues = roc::host_numerics::GenerationRecipe::constant({.value = 0.5});
-    generateValues(a, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 54321, 0);
-    generateValues(b, roc::host_numerics::ScalarType::Float8E4M3, binaryValues, 54321, 1);
-    generateValues(mxsa, roc::host_numerics::ScalarType::E8M0Zero, scaleValues, 54321, 2);
-    generateValues(mxsb, roc::host_numerics::ScalarType::E8M0Zero, scaleValues, 54321, 3);
-    generateValues(c, roc::host_numerics::ScalarType::Float32, cValues, 54321, 4);
-    generateValues(bias, roc::host_numerics::ScalarType::Float32, biasValues, 54321, 5);
+        = roc::hostnumerics::GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}});
+    const auto cValues    = roc::hostnumerics::GenerationRecipe::constant({.value = 0.25});
+    const auto biasValues = roc::hostnumerics::GenerationRecipe::constant({.value = 0.5});
+    generateValues(a, roc::hostnumerics::ScalarType::Float8E4M3, binaryValues, 54321, 0);
+    generateValues(b, roc::hostnumerics::ScalarType::Float8E4M3, binaryValues, 54321, 1);
+    generateValues(mxsa, roc::hostnumerics::ScalarType::E8M0Zero, scaleValues, 54321, 2);
+    generateValues(mxsb, roc::hostnumerics::ScalarType::E8M0Zero, scaleValues, 54321, 3);
+    generateValues(c, roc::hostnumerics::ScalarType::Float32, cValues, 54321, 4);
+    generateValues(bias, roc::hostnumerics::ScalarType::Float32, biasValues, 54321, 5);
 
     EXPECT_TRUE(std::ranges::any_of(a, [](Float8 value) { return float(value) != 0.0f; }));
     EXPECT_TRUE(std::ranges::any_of(b, [](Float8 value) { return float(value) != 0.0f; }));
@@ -318,10 +318,10 @@ TEST(ReferenceMXGemm, ComputesScaledFP8GemmWithBetaAndBias)
     executeReferenceGemm(problem, inputsBlocked, /*elementsToValidate=*/-1, requireBlockedExecution);
 
     const auto expected   = expectedMXGemm(problem, a, b, c, mxsa, mxsb, 1.0f, 0.5f, &bias);
-    const auto comparison = roc::host_numerics::compare(
-        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
-        roc::host_numerics::Tensor::copyNativeStorage(std::span<const float>(expected)),
-        roc::host_numerics::nearComparisonOptions(1e-3));
+    const auto comparison = roc::hostnumerics::compare(
+        roc::hostnumerics::Tensor::copyNativeStorage(std::span<const float>(dBlocked)),
+        roc::hostnumerics::Tensor::copyNativeStorage(std::span<const float>(expected)),
+        roc::hostnumerics::nearComparisonOptions(1e-3));
     EXPECT_TRUE(comparison.passed())
         << "mismatches=" << comparison.mismatches
         << " max_absolute_difference=" << comparison.maxAbsoluteDifference;

@@ -47,10 +47,8 @@ class TheRockMatrixTest(unittest.TestCase):
             hipthreads_entry["projects_to_test"].split(","),
         )
 
-    def test_host_numerics_runs_rocroller_consumers(self):
-        project_to_run = therock_matrix.collect_projects_to_run(
-            ["shared/host-numerics"]
-        )
+    def test_hostnumerics_runs_rocroller_consumers(self):
+        project_to_run = therock_matrix.collect_projects_to_run(["shared/hostnumerics"])
         self.assertEqual(len(project_to_run), 1)
         projects_to_test = project_to_run[0]["projects_to_test"].split(",")
         self.assertIn("hipblaslt", projects_to_test)

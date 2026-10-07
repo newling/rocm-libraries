@@ -27,8 +27,8 @@
 #include "DataInitialization.hpp"
 
 #include "Utility.hpp"
-#include <TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp>
-#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/hostnumerics/DataInitializationHelpers.hpp>
+#include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
 // #include "DataInitializationTyped.hpp"
 
 #include <Tensile/Utils.hpp>
@@ -113,7 +113,7 @@ namespace TensileLite
         using BitWidth        = uint8_t;
         using Size            = uint64_t;
         using SwizzleCacheKey = std::tuple<BitWidth, Size, Size>;
-        using SwizzleCacheVal = roc::host_numerics::Tensor;
+        using SwizzleCacheVal = roc::hostnumerics::Tensor;
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
 
@@ -127,10 +127,10 @@ namespace TensileLite
             MXScale
         };
 
-        roc::host_numerics::ScalarType swizzleScalarType(rocisa::DataType  dataType,
+        roc::hostnumerics::ScalarType swizzleScalarType(rocisa::DataType  dataType,
                                                            SwizzleTensorKind kind)
         {
-            using roc::host_numerics::ScalarType;
+            using roc::hostnumerics::ScalarType;
 
             switch(dataType)
             {
@@ -151,20 +151,20 @@ namespace TensileLite
 
         BitWidth toBitWidth(rocisa::DataType dataType)
         {
-            return static_cast<BitWidth>(roc::host_numerics::scalarTypeInfo(
+            return static_cast<BitWidth>(roc::hostnumerics::scalarTypeInfo(
                                              swizzleScalarType(dataType, SwizzleTensorKind::Data))
                                              .storageBits);
         }
 
-        roc::host_numerics::Tensor makeSwizzleTensor(rocisa::DataType            dataType,
+        roc::hostnumerics::Tensor makeSwizzleTensor(rocisa::DataType            dataType,
                                                        SwizzleTensorKind           kind,
-                                                       roc::host_numerics::Shape shape,
+                                                       roc::hostnumerics::Shape shape,
                                                        const void*                 source)
         {
-            using roc::host_numerics::Layout;
-            using roc::host_numerics::ScalarType;
-            using roc::host_numerics::Tensor;
-            using roc::host_numerics::storageBytesForLayout;
+            using roc::hostnumerics::Layout;
+            using roc::hostnumerics::ScalarType;
+            using roc::hostnumerics::Tensor;
+            using roc::hostnumerics::storageBytesForLayout;
 
             const ScalarType type   = swizzleScalarType(dataType, kind);
             Layout           layout = Layout::contiguousLastDimensionFastest(shape);
@@ -179,11 +179,11 @@ namespace TensileLite
 
         void* copySwizzleTensor(const TensorDescriptor&             descriptor,
                                 void*                               destination,
-                                const roc::host_numerics::Tensor& source,
+                                const roc::hostnumerics::Tensor& source,
                                 hipMemcpyKind                       kind)
         {
             const size_t bytes
-                = roc::host_numerics::storageBytesForLayout(source.type(), source.layout());
+                = roc::hostnumerics::storageBytesForLayout(source.type(), source.layout());
             const auto storage = source.rawEncodedBackingStorage();
             if(storage.size() != bytes)
                 throw std::runtime_error("Swizzled tensor has an unexpected storage byte count.");
@@ -699,7 +699,7 @@ namespace TensileLite
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
                 m_mxScaleLayout
-                    = HostNumerics::detail::mxScaleStorageLayoutForArchName(prop.gcnArchName);
+                    = hostnumerics::detail::mxScaleStorageLayoutForArchName(prop.gcnArchName);
             }
 
             m_rotatingBuffer
@@ -1653,7 +1653,7 @@ namespace TensileLite
             }
         }
 
-        using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
+        using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
 
         static bool isConstantScaleInitMode(InitMode mode)
         {
@@ -1870,7 +1870,7 @@ namespace TensileLite
                     = isMatrixA ? problem.freeIndicesA()[0].i : problem.freeIndicesB()[0].i;
                 bool const kFast = boundIdx == 0;
                 auto const paddedScaleShape
-                    = roc::host_numerics::Shape{kFast ? scaleDesc.sizes()[freeIdx]
+                    = roc::hostnumerics::Shape{kFast ? scaleDesc.sizes()[freeIdx]
                                                         : scaleDesc.sizes()[boundIdx],
                                                   kFast ? scaleDesc.sizes()[boundIdx]
                                                         : scaleDesc.sizes()[freeIdx]};
@@ -1887,17 +1887,17 @@ namespace TensileLite
                         batchAddressShape[2] = completeDataLayout.shape()[2];
                         std::vector<ptrdiff_t> batchAddressStrides(batchCoordinates.size(), 0);
                         batchAddressStrides[2] = completeDataLayout.stride(2);
-                        batchOffset = roc::host_numerics::Layout(
-                                          roc::host_numerics::Shape(
+                        batchOffset = roc::hostnumerics::Layout(
+                                          roc::hostnumerics::Shape(
                                               std::move(batchAddressShape)),
                                           std::move(batchAddressStrides),
                                           completeDataLayout.offset())
                                           .elementOffset(batchCoordinates);
                     }
-                    auto dataOutput = roc::host_numerics::Tensor::shareExternalMutableBackingStorage(
+                    auto dataOutput = roc::hostnumerics::Tensor::shareExternalMutableBackingStorage(
                         dataType,
-                        roc::host_numerics::Layout(
-                            roc::host_numerics::Shape{rows, cols},
+                        roc::hostnumerics::Layout(
+                            roc::hostnumerics::Shape{rows, cols},
                             {completeDataLayout.stride(0), completeDataLayout.stride(1)},
                             batchOffset),
                         pristineData.cpuInput.valid,
@@ -1912,10 +1912,10 @@ namespace TensileLite
                                   && completeDataLayout.stride(2) == 0
                               ? 0
                               : b;
-                    auto generated   = HostNumerics::detail::generateMxData(
+                    auto generated   = hostnumerics::detail::generateMxData(
                         dataDesc.dataType(),
                         scaleEltType,
-                        roc::host_numerics::Shape{rows, cols},
+                        roc::hostnumerics::Shape{rows, cols},
                         stride,
                         kFast ? 0 : 1,
                         mxBlock,
@@ -1938,11 +1938,11 @@ namespace TensileLite
                                   ? canonicalScales.copyWithPermutedDimensions({1, 0})
                                   : canonicalScales;
                         const auto scalePlan
-                            = roc::host_numerics::amd_gpu_layout::planMxScaleStorage(
+                            = roc::hostnumerics::amd_gpu_layout::planMxScaleStorage(
                                 {scalesForDevice.shape()[0], scalesForDevice.shape()[1]},
                                 mxBlock,
                                 swizzleLayout);
-                        auto physicalScale = roc::host_numerics::amd_gpu_layout::
+                        auto physicalScale = roc::hostnumerics::amd_gpu_layout::
                             copyMxScaleStorageToPhysicalLayout(
                                 scalesForDevice.rawEncodedBackingStorage().data(),
                                 scalesForDevice.rawEncodedBackingStorage().size(),
@@ -2490,8 +2490,8 @@ namespace TensileLite
 
                 if(needSwizzle)
                 {
-                    using roc::host_numerics::Shape;
-                    using roc::host_numerics::Tensor;
+                    using roc::hostnumerics::Shape;
+                    using roc::hostnumerics::Tensor;
 
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
@@ -2594,8 +2594,8 @@ namespace TensileLite
                         // branches above. Batch dim (if present) goes at the
                         // front; pad/reshape/permute operate natively on N-D
                         // so all batches are processed at once.
-                        using roc::host_numerics::Shape;
-                        using roc::host_numerics::Tensor;
+                        using roc::hostnumerics::Shape;
+                        using roc::hostnumerics::Tensor;
 
                         size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
 

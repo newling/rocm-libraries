@@ -30,8 +30,8 @@
 #include <iostream>
 #include <memory>
 #include <numeric>
-#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_numerics/MatrixTransformReference.hpp>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/hostnumerics/MatrixTransformReference.hpp>
 #include <vector>
 
 struct MatrixTransformIO
@@ -51,19 +51,19 @@ private:
 template <typename DType>
 struct TypedMatrixTransformIO : public MatrixTransformIO
 {
-    // The extension API consumes device pointers, while host-numerics owns only
+    // The extension API consumes device pointers, while HostNumerics owns only
     // host storage. Allocate the three device buffers here, generate A and B as
     // typed host Tensors using their actual layouts, and copy their encoded
     // storage to the device. C is output-only and remains uninitialized.
-    TypedMatrixTransformIO(const roc::host_numerics::Layout& aLayout,
-                           const roc::host_numerics::Layout& bLayout,
-                           const roc::host_numerics::Layout& outputLayout,
+    TypedMatrixTransformIO(const roc::hostnumerics::Layout& aLayout,
+                           const roc::hostnumerics::Layout& bLayout,
+                           const roc::hostnumerics::Layout& outputLayout,
                            hipblaslt_initialization          initMethod)
     {
-        const auto   type     = hipblaslt::host_numerics::scalarType<DType>();
-        const size_t aBytes   = roc::host_numerics::storageBytesForLayout(type, aLayout);
-        const size_t bBytes   = roc::host_numerics::storageBytesForLayout(type, bLayout);
-        const size_t cBytes   = roc::host_numerics::storageBytesForLayout(type, outputLayout);
+        const auto   type     = hipblaslt::hostnumerics::scalarType<DType>();
+        const size_t aBytes   = roc::hostnumerics::storageBytesForLayout(type, aLayout);
+        const size_t bBytes   = roc::hostnumerics::storageBytesForLayout(type, bLayout);
+        const size_t cBytes   = roc::hostnumerics::storageBytesForLayout(type, outputLayout);
         const auto   allocate = [](DType** pointer, size_t bytes) {
             const hipError_t error = hipMalloc(pointer, bytes == 0 ? 1 : bytes);
             if(error != hipSuccess)
@@ -77,12 +77,12 @@ struct TypedMatrixTransformIO : public MatrixTransformIO
             this->a,
             aLayout,
             initMethod,
-            hipblaslt::host_numerics::initialization::OperandSequence::MatrixA);
+            hipblaslt::hostnumerics::initialization::OperandSequence::MatrixA);
         initializeDeviceInput(
             this->b,
             bLayout,
             initMethod,
-            hipblaslt::host_numerics::initialization::OperandSequence::MatrixB);
+            hipblaslt::hostnumerics::initialization::OperandSequence::MatrixB);
     }
 
     ~TypedMatrixTransformIO() override
@@ -106,16 +106,16 @@ struct TypedMatrixTransformIO : public MatrixTransformIO
 private:
     void initializeDeviceInput(
         DType*                                                    buffer,
-        const roc::host_numerics::Layout&                         layout,
+        const roc::hostnumerics::Layout&                         layout,
         hipblaslt_initialization                                  initialization,
-        hipblaslt::host_numerics::initialization::OperandSequence sequence)
+        hipblaslt::hostnumerics::initialization::OperandSequence sequence)
     {
-        const auto     type = hipblaslt::host_numerics::scalarType<DType>();
-        const uint64_t seed = hipblaslt::host_numerics::initialization::seedForSequence(
-            hipblaslt::host_numerics::defaultInitializationSeed, sequence);
-        const auto recipe = hipblaslt::host_numerics::initializationRecipe(
-            type, initialization, seed, hipblaslt::host_numerics::TrigonometricComponent::Cosine);
-        const auto       generated = roc::host_numerics::generate(type, layout, recipe);
+        const auto     type = hipblaslt::hostnumerics::scalarType<DType>();
+        const uint64_t seed = hipblaslt::hostnumerics::initialization::seedForSequence(
+            hipblaslt::hostnumerics::defaultInitializationSeed, sequence);
+        const auto recipe = hipblaslt::hostnumerics::initializationRecipe(
+            type, initialization, seed, hipblaslt::hostnumerics::TrigonometricComponent::Cosine);
+        const auto       generated = roc::hostnumerics::generate(type, layout, recipe);
         const hipError_t error     = hipMemcpy(buffer,
                                            generated.rawEncodedBackingStorage().data(),
                                            generated.rawEncodedBackingStorage().size(),
@@ -132,9 +132,9 @@ private:
 
 using MatrixTransformIOPtr = std::unique_ptr<MatrixTransformIO>;
 MatrixTransformIOPtr makeMatrixTransformIOPtr(hipDataType                       datatype,
-                                              const roc::host_numerics::Layout& aLayout,
-                                              const roc::host_numerics::Layout& bLayout,
-                                              const roc::host_numerics::Layout& outputLayout,
+                                              const roc::hostnumerics::Layout& aLayout,
+                                              const roc::hostnumerics::Layout& bLayout,
+                                              const roc::hostnumerics::Layout& outputLayout,
                                               hipblaslt_initialization          init)
 {
     if(datatype == HIP_R_32F)
@@ -325,30 +325,30 @@ void validation(hipDataType                       datatype,
                 void*                             b,
                 float                             alpha,
                 float                             beta,
-                const roc::host_numerics::Layout& aLayout,
-                const roc::host_numerics::Layout& bLayout,
-                const roc::host_numerics::Layout& outputLayout)
+                const roc::hostnumerics::Layout& aLayout,
+                const roc::hostnumerics::Layout& bLayout,
+                const roc::hostnumerics::Layout& outputLayout)
 {
-    const roc::host_numerics::ScalarType type
-        = hipblaslt::host_numerics::scalarType(datatype);
+    const roc::hostnumerics::ScalarType type
+        = hipblaslt::hostnumerics::scalarType(datatype);
     const auto readDeviceTensor
-        = [&](void* pointer, const roc::host_numerics::Layout& layout) {
-        std::vector<std::byte> storage(roc::host_numerics::storageBytesForLayout(type, layout));
+        = [&](void* pointer, const roc::hostnumerics::Layout& layout) {
+        std::vector<std::byte> storage(roc::hostnumerics::storageBytesForLayout(type, layout));
         const hipError_t       error = hipMemcpyDtoH(storage.data(), pointer, storage.size());
         if(error != hipSuccess)
             throw std::runtime_error(std::string("hipMemcpyDtoH failed: ")
                                      + hipGetErrorString(error));
-        return roc::host_numerics::Tensor::takeOwnershipOfEncodedBackingStorage(
+        return roc::hostnumerics::Tensor::takeOwnershipOfEncodedBackingStorage(
             type, layout, std::move(storage));
     };
-    const roc::host_numerics::Tensor observed = readDeviceTensor(c, outputLayout);
-    const roc::host_numerics::Tensor inputA   = readDeviceTensor(a, aLayout);
-    const roc::host_numerics::Tensor inputB   = readDeviceTensor(b, bLayout);
+    const roc::hostnumerics::Tensor observed = readDeviceTensor(c, outputLayout);
+    const roc::hostnumerics::Tensor inputA   = readDeviceTensor(a, aLayout);
+    const roc::hostnumerics::Tensor inputB   = readDeviceTensor(b, bLayout);
     const auto   comparison
-        = hipblaslt::host_numerics::referenceMatrixTransform(observed, inputA, inputB, alpha, beta);
+        = hipblaslt::hostnumerics::referenceMatrixTransform(observed, inputA, inputB, alpha, beta);
     if(!comparison.passed())
     {
-        hipblaslt::host_numerics::reportMatrixTransformMismatches(std::cerr, comparison);
+        hipblaslt::hostnumerics::reportMatrixTransformMismatches(std::cerr, comparison);
         std::cerr << '\n';
     }
 }
@@ -412,11 +412,11 @@ int main(int argc, char** argv)
     auto             tA     = transA ? HIPBLAS_OP_T : HIPBLAS_OP_N;
     auto             tB     = transB ? HIPBLAS_OP_T : HIPBLAS_OP_N;
 
-    const auto referenceLayoutA = hipblaslt::host_numerics::matrixTransformLayout(
+    const auto referenceLayoutA = hipblaslt::hostnumerics::matrixTransformLayout(
         m, n, batchSize, ldA, batchStride, rowMajA, transA);
-    const auto referenceLayoutB = hipblaslt::host_numerics::matrixTransformLayout(
+    const auto referenceLayoutB = hipblaslt::hostnumerics::matrixTransformLayout(
         m, n, batchSize, ldB, batchStride, rowMajB, transB);
-    const auto referenceOutputLayout = hipblaslt::host_numerics::matrixTransformLayout(
+    const auto referenceOutputLayout = hipblaslt::hostnumerics::matrixTransformLayout(
         m, n, batchSize, ldC, batchStride, rowMajC, false);
 
     auto inputs = makeMatrixTransformIOPtr(

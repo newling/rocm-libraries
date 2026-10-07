@@ -282,114 +282,114 @@ else()
     endblock()
 endif()
 
-set(_hipblaslt_host_numerics_enabled FALSE)
+set(_hipblaslt_hostnumerics_enabled FALSE)
 if(HIPBLASLT_ENABLE_CLIENT
         OR TENSILELITE_ENABLE_CLIENT
         OR TENSILELITE_ENABLE_HOST
         OR TENSILELITE_BUILD_TESTING)
-    set(_hipblaslt_host_numerics_enabled TRUE)
+    set(_hipblaslt_hostnumerics_enabled TRUE)
 endif()
 
-if(_hipblaslt_host_numerics_enabled
-        AND NOT TARGET roc::host-numerics)
-    set(_hipblaslt_host_numerics_source
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/host-numerics"
+if(_hipblaslt_hostnumerics_enabled
+        AND NOT TARGET roc::hostnumerics)
+    set(_hipblaslt_hostnumerics_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/hostnumerics"
     )
-    if(NOT EXISTS "${_hipblaslt_host_numerics_source}/CMakeLists.txt")
-        set(_hipblaslt_host_numerics_components Operations)
+    if(NOT EXISTS "${_hipblaslt_hostnumerics_source}/CMakeLists.txt")
+        set(_hipblaslt_hostnumerics_components Operations)
         if(HIPBLASLT_ENABLE_CLIENT)
-            list(APPEND _hipblaslt_host_numerics_components BLAS)
+            list(APPEND _hipblaslt_hostnumerics_components BLAS)
         endif()
-        list(APPEND _hipblaslt_host_numerics_components AMDGPULayout)
+        list(APPEND _hipblaslt_hostnumerics_components AMDGPULayout)
         find_package(
-            ROCHostNumerics
+            HostNumerics
             CONFIG
             QUIET
-            COMPONENTS ${_hipblaslt_host_numerics_components}
+            COMPONENTS ${_hipblaslt_hostnumerics_components}
         )
     endif()
-    if(NOT TARGET roc::host-numerics
+    if(NOT TARGET roc::hostnumerics
             AND NOT EXISTS
-                "${_hipblaslt_host_numerics_source}/CMakeLists.txt")
+                "${_hipblaslt_hostnumerics_source}/CMakeLists.txt")
         hipblaslt_materialize_monorepo_paths(
             _hipblaslt_materialized_root
-            shared/host-numerics
+            shared/hostnumerics
         )
         if(_hipblaslt_materialized_root)
-            set(_hipblaslt_host_numerics_source
-                "${_hipblaslt_materialized_root}/shared/host-numerics"
+            set(_hipblaslt_hostnumerics_source
+                "${_hipblaslt_materialized_root}/shared/hostnumerics"
             )
         endif()
     endif()
-    if(NOT TARGET roc::host-numerics
-            AND EXISTS "${_hipblaslt_host_numerics_source}/CMakeLists.txt")
+    if(NOT TARGET roc::hostnumerics
+            AND EXISTS "${_hipblaslt_hostnumerics_source}/CMakeLists.txt")
         block(SCOPE_FOR VARIABLES)
-            set(HOST_NUMERICS_BUILD_TESTING OFF)
-            set(HOST_NUMERICS_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
+            set(HOSTNUMERICS_BUILD_TESTING OFF)
+            set(HOSTNUMERICS_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
             add_subdirectory(
-                "${_hipblaslt_host_numerics_source}"
-                "${CMAKE_CURRENT_BINARY_DIR}/host-numerics"
+                "${_hipblaslt_hostnumerics_source}"
+                "${CMAKE_CURRENT_BINARY_DIR}/hostnumerics"
                 EXCLUDE_FROM_ALL
             )
         endblock()
     endif()
-    if(NOT TARGET roc::host-numerics)
+    if(NOT TARGET roc::hostnumerics)
         message(FATAL_ERROR
-            "hipBLASLt requires the standalone ROCHostNumerics component. "
-            "Include shared/host-numerics in a monorepo sparse checkout, "
+            "hipBLASLt requires the standalone HostNumerics component. "
+            "Include shared/hostnumerics in a monorepo sparse checkout, "
             "configure from a Git checkout that can materialize that path, or "
-            "install the ROCHostNumerics package and add it to CMAKE_PREFIX_PATH."
+            "install the HostNumerics package and add it to CMAKE_PREFIX_PATH."
         )
     endif()
 endif()
-if(_hipblaslt_host_numerics_enabled
+if(_hipblaslt_hostnumerics_enabled
         AND HIPBLASLT_ENABLE_CLIENT
-        AND TARGET roc::host-numerics
-        AND NOT TARGET roc::host-numerics-blas
-        AND COMMAND roc_host_numerics_enable_blas_backend)
-    roc_host_numerics_enable_blas_backend()
+        AND TARGET roc::hostnumerics
+        AND NOT TARGET roc::hostnumerics-blas
+        AND COMMAND hostnumerics_enable_blas_backend)
+    hostnumerics_enable_blas_backend()
 endif()
-if(_hipblaslt_host_numerics_enabled
-        AND NOT TARGET roc::host-numerics-amd-gpu-layout)
+if(_hipblaslt_hostnumerics_enabled
+        AND NOT TARGET roc::hostnumerics-amd-gpu-layout)
     message(FATAL_ERROR
         "hipBLASLt MX clients require the "
-        "roc::host-numerics-amd-gpu-layout target."
+        "roc::hostnumerics-amd-gpu-layout target."
     )
 endif()
-if(_hipblaslt_host_numerics_enabled
+if(_hipblaslt_hostnumerics_enabled
         AND HIPBLASLT_ENABLE_CLIENT
-        AND NOT TARGET roc::host-numerics-blas)
+        AND NOT TARGET roc::hostnumerics-blas)
     message(FATAL_ERROR
-        "hipBLASLt clients require the roc::host-numerics-blas target."
+        "hipBLASLt clients require the roc::hostnumerics-blas target."
     )
 endif()
 
-if(_hipblaslt_host_numerics_enabled)
-    foreach(_host_numerics_target
-            host-numerics
-            host-numerics-blas
-            host-numerics-amd-gpu-layout)
-        if(NOT TARGET ${_host_numerics_target})
+if(_hipblaslt_hostnumerics_enabled)
+    foreach(_hostnumerics_target
+            hostnumerics
+            hostnumerics-blas
+            hostnumerics-amd-gpu-layout)
+        if(NOT TARGET ${_hostnumerics_target})
             continue()
         endif()
 
         if(HIPBLASLT_ENABLE_ASAN OR HIPBLASLT_ENABLE_TSAN)
-            hipblaslt_target_configure_sanitizers(${_host_numerics_target} PRIVATE)
+            hipblaslt_target_configure_sanitizers(${_hostnumerics_target} PRIVATE)
         elseif(TENSILELITE_ENABLE_HOST_ASAN)
-            target_compile_options(${_host_numerics_target}
+            target_compile_options(${_hostnumerics_target}
                 PRIVATE
                     -fsanitize=address
                     -fno-omit-frame-pointer
             )
         elseif(TENSILELITE_ENABLE_HOST_TSAN)
-            target_compile_options(${_host_numerics_target}
+            target_compile_options(${_hostnumerics_target}
                 PRIVATE
                     -fsanitize=thread
             )
         endif()
 
         if(HIPBLASLT_ENABLE_COVERAGE OR TENSILELITE_ENABLE_COVERAGE)
-            target_compile_options(${_host_numerics_target}
+            target_compile_options(${_hostnumerics_target}
                 PRIVATE
                     -g
                     -O0
@@ -398,7 +398,7 @@ if(_hipblaslt_host_numerics_enabled)
             )
         endif()
     endforeach()
-    unset(_host_numerics_target)
+    unset(_hostnumerics_target)
 endif()
 
 add_library(hipblaslt-headers INTERFACE)

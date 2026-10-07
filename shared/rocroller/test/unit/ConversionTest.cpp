@@ -7,9 +7,9 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context.hpp>
-#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
+#include <rocRoller/hostnumerics/HostReference.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
@@ -210,10 +210,10 @@ namespace rocRollerTest
         ASSERT_THAT(hipMemcpy(gpu_D.data(), d_D.get(), M * N * sizeof(TypeD), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        auto tmp_D = HostNumerics::convertHostReference<float>(
-            HostNumerics::computeHostReference(HostNumerics::hostTensor(descA, A),
-                                               HostNumerics::hostTensor(descB, B),
-                                               HostNumerics::hostTensor(descC, C),
+        auto tmp_D = hostnumerics::convertHostReference<float>(
+            hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, A),
+                                               hostnumerics::hostTensor(descB, B),
+                                               hostnumerics::hostTensor(descC, C),
                                                std::nullopt,
                                                std::nullopt,
                                                0,
@@ -333,10 +333,10 @@ namespace rocRollerTest
 
         std::vector<TypeAB> zeroC(M * N, 0.f);
         TensorDescriptor    referenceDescC(dataTypeAB, {size_t(M), size_t(N)}, "N");
-        auto                tmp_D = HostNumerics::convertHostReference<TypeAB>(
-            HostNumerics::computeHostReference(HostNumerics::hostTensor(descA, A),
-                                               HostNumerics::hostTensor(descB, B),
-                                               HostNumerics::hostTensor(referenceDescC, zeroC),
+        auto                tmp_D = hostnumerics::convertHostReference<TypeAB>(
+            hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, A),
+                                               hostnumerics::hostTensor(descB, B),
+                                               hostnumerics::hostTensor(referenceDescC, zeroC),
                                                std::nullopt,
                                                std::nullopt,
                                                0,

@@ -6,7 +6,7 @@
 // Converts a normalized MatmulProblem and command-line Arguments into the
 // device-side allocation and descriptor values used by the hipBLASLt client.
 // Host reference computation deliberately does not consume these structures:
-// it works directly with host-numerics Tensors and operation options.
+// it works directly with HostNumerics Tensors and operation options.
 
 #include "datatype_interface.hpp"
 #include "hipblaslt_arguments.hpp"
@@ -15,7 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 #include <span>
 #include <vector>
 
@@ -34,9 +34,9 @@ namespace hipblaslt::client
         size_t  elements                       = 0;
         int64_t batchStride                    = 0;
         size_t  scaleElements                  = 0;
-        // Present only for block scaling. The host-numerics plan is the single
+        // Present only for block scaling. The HostNumerics plan is the single
         // authority for natural shape, physical layout, and exact byte counts.
-        std::optional<roc::host_numerics::amd_gpu_layout::MxScaleStoragePlan> mxScaleStorage;
+        std::optional<roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan> mxScaleStorage;
         bool    replacedUnsupportedBatchStride = false;
     };
 
@@ -75,13 +75,13 @@ namespace hipblaslt::client
 
     // A and B accept separate physical scale layouts because their independent
     // scaling formats may select different kernel ABIs. Both are values from
-    // the one host-numerics MxScaleStorageLayout model above.
+    // the one HostNumerics MxScaleStorageLayout model above.
     MatmulPreparation prepareMatmulProblems(
         const Arguments&                                         arguments,
         std::span<const MatmulProblem>                           matmulProblems,
         const MatmulDataTypes&                                   dataTypes,
         bool                                                     swizzleA,
         bool                                                     swizzleB,
-        roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA,
-        roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB);
+        roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA,
+        roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB);
 } // namespace hipblaslt::client

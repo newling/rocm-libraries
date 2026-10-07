@@ -11,8 +11,8 @@
 
 #include <gtest/gtest.h>
 
-#include <hipblaslt/host_numerics/Types.hpp>
-#include <roc/host_numerics/comparison.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
+#include <roc/hostnumerics/comparison.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -26,8 +26,8 @@ namespace
 {
     inline int ulp_mantissa_bits(hipDataType type)
     {
-        return roc::host_numerics::ulpMantissaBits(
-            hipblaslt::host_numerics::scalarType(type));
+        return roc::hostnumerics::ulpMantissaBits(
+            hipblaslt::hostnumerics::scalarType(type));
     }
 
     template <typename T>
@@ -38,7 +38,7 @@ namespace
 
     inline double ulp_distance(double exact, double approximation, int mantissaBits)
     {
-        return roc::host_numerics::ulpDistance(exact, approximation, mantissaBits);
+        return roc::hostnumerics::ulpDistance(exact, approximation, mantissaBits);
     }
 
     template <typename T>
@@ -57,8 +57,8 @@ namespace
         if(M == 0 || N == 0 || batchCount == 0)
             return;
 
-        using namespace roc::host_numerics;
-        using namespace hipblaslt::host_numerics;
+        using namespace roc::hostnumerics;
+        using namespace hipblaslt::hostnumerics;
 
         const Layout layout(
             Shape{static_cast<size_t>(M), static_cast<size_t>(N), static_cast<size_t>(batchCount)},
@@ -94,8 +94,8 @@ namespace
                                   size_t&     count,
                                   hipDataType type)
     {
-        using namespace roc::host_numerics;
-        const ScalarType scalar = hipblaslt::host_numerics::scalarType(type);
+        using namespace roc::hostnumerics;
+        const ScalarType scalar = hipblaslt::hostnumerics::scalarType(type);
         const Layout     layout(
             Shape{static_cast<size_t>(M), static_cast<size_t>(N), static_cast<size_t>(batchCount)},
             {1, static_cast<ptrdiff_t>(lda), static_cast<ptrdiff_t>(stride)});
@@ -108,8 +108,8 @@ namespace
         options.maxReportedMismatches        = 0;
         options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
         const ComparisonReport report
-            = compare(hipblaslt::host_numerics::copyTensorFromEncodedStorage(hGPU, scalar, layout),
-                      hipblaslt::host_numerics::copyTensorFromEncodedStorage(hCPU, scalar, layout),
+            = compare(hipblaslt::hostnumerics::copyTensorFromEncodedStorage(hGPU, scalar, layout),
+                      hipblaslt::hostnumerics::copyTensorFromEncodedStorage(hCPU, scalar, layout),
                       options);
         maxUlp = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;

@@ -28,14 +28,14 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_numerics/Types.hpp>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
 #include <hipblaslt_datatype2string.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
-#include <roc/host_numerics/comparison.hpp>
-#include <roc/host_numerics/validation.hpp>
+#include <roc/hostnumerics/comparison.hpp>
+#include <roc/hostnumerics/validation.hpp>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -117,10 +117,10 @@ int parseArgs(int                       argc,
 }
 
 void reportComparison(const char*                        title,
-                      const roc::host_numerics::Tensor& observed,
-                      const roc::host_numerics::Tensor& expected)
+                      const roc::hostnumerics::Tensor& observed,
+                      const roc::hostnumerics::Tensor& expected)
 {
-    const auto report = roc::host_numerics::compare(observed, expected);
+    const auto report = roc::hostnumerics::compare(observed, expected);
     std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
 
@@ -137,17 +137,17 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
     auto hipErr = hipMalloc(&gpuOutput, toNumBytes);
     hipErr      = hipMalloc(&gpuInput, m * n * tiNumBytes);
 
-    const auto scalarType = hipblaslt::host_numerics::scalarType<To>();
-    roc::host_numerics::Tensor observedOutput(scalarType, roc::host_numerics::Shape{});
-    roc::host_numerics::Tensor referenceOutput(scalarType, roc::host_numerics::Shape{});
-    const roc::host_numerics::Tensor cpuInput
-        = roc::host_numerics::generate(hipblaslt::host_numerics::scalarType<Ti>(),
-                                       roc::host_numerics::Shape{numElements},
-                                       hipblaslt::host_numerics::initializationRecipe(
-                                           hipblaslt::host_numerics::scalarType<Ti>(),
+    const auto scalarType = hipblaslt::hostnumerics::scalarType<To>();
+    roc::hostnumerics::Tensor observedOutput(scalarType, roc::hostnumerics::Shape{});
+    roc::hostnumerics::Tensor referenceOutput(scalarType, roc::hostnumerics::Shape{});
+    const roc::hostnumerics::Tensor cpuInput
+        = roc::hostnumerics::generate(hipblaslt::hostnumerics::scalarType<Ti>(),
+                                       roc::hostnumerics::Shape{numElements},
+                                       hipblaslt::hostnumerics::initializationRecipe(
+                                           hipblaslt::hostnumerics::scalarType<Ti>(),
                                            init,
-                                           hipblaslt::host_numerics::defaultInitializationSeed,
-                                           hipblaslt::host_numerics::TrigonometricComponent::Cosine));
+                                           hipblaslt::hostnumerics::defaultInitializationSeed,
+                                           hipblaslt::hostnumerics::TrigonometricComponent::Cosine));
 
     hipErr = hipMemcpyHtoD(gpuInput,
                            cpuInput.rawEncodedBackingStorage().data(),
@@ -161,8 +161,8 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
     hipErr = hipMemcpyDtoH(
         observedOutput.rawEncodedBackingStorage().data(), gpuOutput, toNumBytes);
 
-    roc::host_numerics::referenceMaximumAbsoluteInto(
-        cpuInput, referenceOutput, roc::host_numerics::ScalarType::Float32);
+    roc::hostnumerics::referenceMaximumAbsoluteInto(
+        cpuInput, referenceOutput, roc::hostnumerics::ScalarType::Float32);
     reportComparison("Output", observedOutput, referenceOutput);
 
     hipEvent_t beg, end;

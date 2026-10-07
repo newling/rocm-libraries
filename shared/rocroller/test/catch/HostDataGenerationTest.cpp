@@ -13,7 +13,7 @@
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
 
 #include "CustomSections.hpp"
 #include "SimpleTest.hpp"
@@ -30,7 +30,7 @@ namespace HostDataGenerationTest
                   T,
                   FP4> || std::is_same_v<T, FP6> || std::is_same_v<T, BF6> || std::is_same_v<T, FP8> || std::is_same_v<T, BF8>;
 
-        std::vector<uint8_t> bytes(roc::host_numerics::Tensor const& tensor)
+        std::vector<uint8_t> bytes(roc::hostnumerics::Tensor const& tensor)
         {
             std::vector<uint8_t> result(tensor.rawEncodedBackingStorage().size());
             std::transform(tensor.rawEncodedBackingStorage().begin(),
@@ -41,19 +41,19 @@ namespace HostDataGenerationTest
         }
 
         template <typename T>
-        std::optional<HostNumerics::BlockScaleGeneration> blockScaleGeneration(size_t blockSize)
+        std::optional<hostnumerics::BlockScaleGeneration> blockScaleGeneration(size_t blockSize)
         {
             if constexpr(isBlockScaledType<T>)
-                return HostNumerics::BlockScaleGeneration{DataType::E8M0, 1, blockSize};
+                return hostnumerics::BlockScaleGeneration{DataType::E8M0, 1, blockSize};
             return std::nullopt;
         }
 
         template <typename T>
-        constexpr HostNumerics::DataTypeInterpretation dataTypeInterpretation()
+        constexpr hostnumerics::DataTypeInterpretation dataTypeInterpretation()
         {
             if constexpr(isBlockScaledType<T>)
-                return HostNumerics::DataTypeInterpretation::BlockScaled;
-            return HostNumerics::DataTypeInterpretation::Unscaled;
+                return hostnumerics::DataTypeInterpretation::BlockScaled;
+            return hostnumerics::DataTypeInterpretation::Unscaled;
         }
     }
 
@@ -72,7 +72,7 @@ namespace HostDataGenerationTest
             auto             dataType = TypeInfo<T>::Var.dataType;
             TensorDescriptor descriptor(dataType, {dimension0, dimension1}, "T");
 
-            auto generated = HostNumerics::generateHostTensor(
+            auto generated = hostnumerics::generateHostTensor(
                 descriptor,
                 {},
                 blockScaleGeneration<T>(static_cast<size_t>(blockScaling)),
@@ -82,9 +82,9 @@ namespace HostDataGenerationTest
                 true);
 
             using PackedType = typename PackedTypeOf<T>::type;
-            auto packed      = HostNumerics::copyTensorStorage<PackedType>(generated.data);
+            auto packed      = hostnumerics::copyTensorStorage<PackedType>(generated.data);
             auto packedView
-                = HostNumerics::hostTensor(descriptor, packed, dataTypeInterpretation<T>());
+                = hostnumerics::hostTensor(descriptor, packed, dataTypeInterpretation<T>());
 
             for(size_t row = 0; row < dimension0; ++row)
             {
@@ -169,7 +169,7 @@ namespace HostDataGenerationTest
 
                 for(uint32_t seed : shuffledSeeds)
                 {
-                    auto generated = HostNumerics::generateHostTensor(
+                    auto generated = hostnumerics::generateHostTensor(
                         descriptor,
                         {},
                         blockScaleGeneration<DataType>(blockScaling),
@@ -189,7 +189,7 @@ namespace HostDataGenerationTest
 
                 for(uint32_t seed : shuffledSeeds)
                 {
-                    auto generated = HostNumerics::generateHostTensor(
+                    auto generated = hostnumerics::generateHostTensor(
                         descriptor,
                         {},
                         blockScaleGeneration<DataType>(blockScaling),

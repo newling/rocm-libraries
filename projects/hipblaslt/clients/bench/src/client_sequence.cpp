@@ -26,7 +26,7 @@
 #include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
-#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
 #include <iostream>
 #include <numeric>
 #include <string>
@@ -204,17 +204,17 @@ int32_t type2Size(hipDataType type)
 
 void initData(hipDataType type, void* data, int m, int n, int lda, int stride, int batch_count)
 {
-    const auto   scalar = hipblaslt::host_numerics::scalarType(type);
-    const roc::host_numerics::Layout layout(
-        roc::host_numerics::Shape{
+    const auto   scalar = hipblaslt::hostnumerics::scalarType(type);
+    const roc::hostnumerics::Layout layout(
+        roc::hostnumerics::Shape{
             static_cast<size_t>(m), static_cast<size_t>(n), static_cast<size_t>(batch_count)},
         {1, lda, stride});
-    const roc::host_numerics::Tensor generated = roc::host_numerics::generate(
+    const roc::hostnumerics::Tensor generated = roc::hostnumerics::generate(
         scalar,
         layout,
-        roc::host_numerics::GenerationRecipe::realOnly(
-            roc::host_numerics::GenerationRecipe::cosine(),
-            {.seed = hipblaslt::host_numerics::defaultInitializationSeed}));
+        roc::hostnumerics::GenerationRecipe::realOnly(
+            roc::hostnumerics::GenerationRecipe::cosine(),
+            {.seed = hipblaslt::hostnumerics::defaultInitializationSeed}));
     const auto storage = generated.rawEncodedBackingStorage();
     if(!storage.empty())
         std::memcpy(data, storage.data(), storage.size());

@@ -99,7 +99,7 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:hip::host>
         PRIVATE
             hip::device
-            roc::host-numerics-amd-gpu-layout
+            roc::hostnumerics-amd-gpu-layout
             ZLIB::ZLIB
     )
 

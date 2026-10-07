@@ -9,9 +9,9 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_numerics/Types.hpp>
-#include <roc/host_numerics/validation.hpp>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
+#include <roc/hostnumerics/validation.hpp>
 #include <vector>
 
 #include "hipblaslt_arguments.hpp"
@@ -55,8 +55,8 @@ class ExtOpAMaxUnsupportedDatatypeTest : public testing::TestWithParam<hipDataTy
 
 TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
 {
-    using namespace roc::host_numerics;
-    using namespace hipblaslt::host_numerics;
+    using namespace roc::hostnumerics;
+    using namespace hipblaslt::hostnumerics;
 
     uint32_t           m = GetParam();
     uint32_t           n = 16;
@@ -96,8 +96,8 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
 
 TEST_P(ExtOpLayerNormTest, layernormSuccess)
 {
-    using namespace roc::host_numerics;
-    using namespace hipblaslt::host_numerics;
+    using namespace roc::hostnumerics;
+    using namespace hipblaslt::hostnumerics;
 
     uint32_t m = GetParam();
     uint32_t n = 16;
@@ -220,14 +220,14 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
 
     std::vector<To> cpuOutput(1, 0.f);
     std::vector<To> refOutput(1, 0.f);
-    using namespace roc::host_numerics;
-    const Tensor cpuInput = generate(hipblaslt::host_numerics::scalarType<Ti>(),
+    using namespace roc::hostnumerics;
+    const Tensor cpuInput = generate(hipblaslt::hostnumerics::scalarType<Ti>(),
                                      Shape{numElements},
-                                     hipblaslt::host_numerics::initializationRecipe(
-                                         hipblaslt::host_numerics::scalarType<Ti>(),
+                                     hipblaslt::hostnumerics::initializationRecipe(
+                                         hipblaslt::hostnumerics::scalarType<Ti>(),
                                          hipblaslt_initialization::hpl,
-                                         hipblaslt::host_numerics::defaultInitializationSeed,
-                                         hipblaslt::host_numerics::TrigonometricComponent::Cosine));
+                                         hipblaslt::hostnumerics::defaultInitializationSeed,
+                                         hipblaslt::hostnumerics::TrigonometricComponent::Cosine));
 
     ASSERT_EQ(hipMemcpyHtoD(gpuInput,
                             cpuInput.rawEncodedBackingStorage().data(),
@@ -243,10 +243,10 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
     ASSERT_EQ(hipMemcpyDtoH(cpuOutput.data(), gpuOutput, outNumBytes), hipSuccess);
 
-    Tensor referenceOutput = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+    Tensor referenceOutput = hipblaslt::hostnumerics::copyTensorFromEncodedStorage(
         refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
     referenceMaximumAbsoluteInto(cpuInput, referenceOutput, ScalarType::Float32);
-    hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
+    hipblaslt::hostnumerics::copyTensorEncodedBackingStorageToBuffer(
         refOutput.data(), refOutput.size(), referenceOutput);
 
     EXPECT_NEAR(float(refOutput[0]), float(cpuOutput[0]), 1e-5);

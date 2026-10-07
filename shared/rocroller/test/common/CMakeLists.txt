@@ -7,7 +7,7 @@ add_library(rocroller::common-test-utilities ALIAS common-test-utilities)
 target_link_libraries(common-test-utilities
     PUBLIC
         roc::rocroller-interface
-        rocroller::host-numerics
+        rocroller::hostnumerics
         hip::host
 )
 

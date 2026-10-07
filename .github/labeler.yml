@@ -13,7 +13,7 @@
 "project: hipblaslt":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
-  - any-glob-to-any-file: 'shared/host-numerics/**/*'
+  - any-glob-to-any-file: 'shared/hostnumerics/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
   - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 

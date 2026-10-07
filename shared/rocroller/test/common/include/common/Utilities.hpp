@@ -21,12 +21,12 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
-#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
+#include <rocRoller/hostnumerics/HostReference.hpp>
 
 template <typename Transform, typename... Args>
 rocRoller::KernelGraph::KernelGraph transform(rocRoller::KernelGraph::KernelGraph& graph,
@@ -88,18 +88,18 @@ auto make_shared_device(std::ranges::range auto const& init, size_t padding = 0)
 std::shared_ptr<void> make_shared_device(rocRoller::CommandArgumentValue const& arg);
 
 template <typename T>
-roc::host_numerics::Tensor hostComparisonTensor(std::vector<T> const& values)
+roc::hostnumerics::Tensor hostComparisonTensor(std::vector<T> const& values)
 {
     constexpr size_t packing = rocRoller::TypeInfo<T>::Packing;
     if(values.size() > std::numeric_limits<size_t>::max() / packing)
         throw std::overflow_error("rocRoller comparison element count overflow.");
     const size_t logicalElements = values.size() * packing;
-    const auto   type            = rocRoller::HostNumerics::hostScalarType(
+    const auto   type            = rocRoller::hostnumerics::hostScalarType(
         rocRoller::TypeInfo<T>::SegmentVariableType.dataType);
-    return roc::host_numerics::Tensor::copyEncodedBackingStorage(
+    return roc::hostnumerics::Tensor::copyEncodedBackingStorage(
         type,
-        roc::host_numerics::Layout::contiguousLastDimensionFastest(
-            roc::host_numerics::Shape{logicalElements}),
+        roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+            roc::hostnumerics::Shape{logicalElements}),
         std::as_bytes(std::span<const T>(values)));
 }
 
@@ -108,7 +108,7 @@ double relativeNormL2(std::vector<T> const& observed, std::vector<T> const& expe
 {
     if(observed.size() != expected.size())
         throw std::invalid_argument("rocRoller comparison vectors have different sizes.");
-    roc::host_numerics::ComparisonOptions options;
+    roc::hostnumerics::ComparisonOptions options;
     options.allClose                               = false;
     options.computeElementwiseStatistics           = true;
     options.computeFrobenius                       = true;
@@ -116,13 +116,13 @@ double relativeNormL2(std::vector<T> const& observed, std::vector<T> const& expe
     options.maxReportedMismatches                  = 0;
     options.zeroExpectedNormIsNaN                  = true;
     options.nonFiniteValuesInvalidateRelativeNorms = true;
-    return roc::host_numerics::compare(
+    return roc::hostnumerics::compare(
                hostComparisonTensor(observed), hostComparisonTensor(expected), options)
         .relativeFrobeniusError;
 }
 
-using AcceptableError  = rocRoller::HostNumerics::AcceptableGEMMError;
-using ComparisonResult = rocRoller::HostNumerics::HostComparisonResult;
+using AcceptableError  = rocRoller::hostnumerics::AcceptableGEMMError;
+using ComparisonResult = rocRoller::hostnumerics::HostComparisonResult;
 
 /**
  * Return expected machine epsilon for `T`.
@@ -130,7 +130,7 @@ using ComparisonResult = rocRoller::HostNumerics::HostComparisonResult;
 template <typename T>
 double epsilon()
 {
-    return rocRoller::HostNumerics::hostReferenceEpsilon<T>();
+    return rocRoller::hostnumerics::hostReferenceEpsilon<T>();
 }
 
 /**
@@ -145,7 +145,7 @@ double epsilon()
 template <typename TA, typename TB, typename TD>
 AcceptableError gemmAcceptableError(int K, rocRoller::GPUArchitectureTarget const& arch)
 {
-    return rocRoller::HostNumerics::acceptableGEMMError<TA, TB, TD>(K, arch);
+    return rocRoller::hostnumerics::acceptableGEMMError<TA, TB, TD>(K, arch);
 }
 
 /**
@@ -161,7 +161,7 @@ ComparisonResult compare(std::vector<T> const&  x,
                          std::vector<T> const&  r,
                          AcceptableError const& acceptableError)
 {
-    return rocRoller::HostNumerics::compareHostReference(
+    return rocRoller::hostnumerics::compareHostReference(
         hostComparisonTensor(x), hostComparisonTensor(r), acceptableError);
 }
 

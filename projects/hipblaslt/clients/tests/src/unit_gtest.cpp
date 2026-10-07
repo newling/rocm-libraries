@@ -5,7 +5,7 @@
 // the tensor-based matmul validator. These tests do not require a GPU.
 
 #include <gtest/gtest.h>
-#include <hipblaslt/host_numerics/MatmulValidation.hpp>
+#include <hipblaslt/hostnumerics/MatmulValidation.hpp>
 
 #include <array>
 #include <bit>
@@ -17,8 +17,8 @@
 
 namespace
 {
-    using namespace roc::host_numerics;
-    using namespace hipblaslt::host_numerics;
+    using namespace roc::hostnumerics;
+    using namespace hipblaslt::hostnumerics;
 
     Tensor matrixTensor(const std::vector<float>& values,
                         size_t                    rows,

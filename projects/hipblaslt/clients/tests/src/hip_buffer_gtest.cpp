@@ -197,10 +197,10 @@ TEST(HipBuffer, smoke_TransfersValidSwizzleGeometry)
 
 TEST(HipBuffer, PackedTensorViewsUseLogicalElementOffsets)
 {
-    using roc::host_numerics::Layout;
-    using roc::host_numerics::ScalarType;
-    using roc::host_numerics::Shape;
-    using roc::host_numerics::Tensor;
+    using roc::hostnumerics::Layout;
+    using roc::hostnumerics::ScalarType;
+    using roc::hostnumerics::Shape;
+    using roc::hostnumerics::Tensor;
 
     constexpr size_t batchStride = 5;
     HipHostBuffer    storage(HIP_R_6F_E2M3, 2 * batchStride);

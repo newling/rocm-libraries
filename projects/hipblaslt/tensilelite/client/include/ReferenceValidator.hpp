@@ -36,7 +36,7 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
-#include <roc/host_numerics/operation_types.hpp>
+#include <roc/hostnumerics/operation_types.hpp>
 #include <span>
 #include <vector>
 
@@ -101,14 +101,14 @@ namespace TensileLite
             bool validate(ContractionProblemGemm const& problem,
                           ContractionInputs const&      reference,
                           ContractionInputs const&      result,
-                          const roc::host_numerics::OutputSelection& outputSelection);
+                          const roc::hostnumerics::OutputSelection& outputSelection);
 
             bool checkResults(TensorDescriptor const& tensor,
                               void const*             refPtr,
                               void const*             resPtr,
                               size_t                  maxElements,
                               bool                    isgpu,
-                              const roc::host_numerics::OutputSelection& outputSelection,
+                              const roc::hostnumerics::OutputSelection& outputSelection,
                               double                  threshold);
 
             void printTensors(ContractionProblemGemm const& problem,
@@ -128,7 +128,7 @@ namespace TensileLite
 
             std::shared_ptr<DataInitialization> m_dataInit;
             std::shared_ptr<ProblemInputs>      m_referenceInputs;
-            std::vector<roc::host_numerics::OutputSelection> m_outputSelections;
+            std::vector<roc::hostnumerics::OutputSelection> m_outputSelections;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;

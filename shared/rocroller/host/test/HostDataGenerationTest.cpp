@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
 
 #include <algorithm>
 #include <array>
@@ -13,24 +13,24 @@
 #include <utility>
 #include <vector>
 
-#include <roc/host_numerics/mx.hpp>
+#include <roc/hostnumerics/mx.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 namespace
 {
     using namespace rocRoller;
-    using namespace rocRoller::HostNumerics;
-    using roc::host_numerics::GenerationRecipe;
-    using roc::host_numerics::IndexOrder;
-    using roc::host_numerics::Layout;
-    using roc::host_numerics::MxDataGeneration;
-    using roc::host_numerics::MxGenerationOptions;
-    using roc::host_numerics::MxScaleGenerationMode;
-    using roc::host_numerics::MxTensor;
-    using roc::host_numerics::ScalarType;
-    using roc::host_numerics::Shape;
-    using roc::host_numerics::Tensor;
+    using namespace rocRoller::hostnumerics;
+    using roc::hostnumerics::GenerationRecipe;
+    using roc::hostnumerics::IndexOrder;
+    using roc::hostnumerics::Layout;
+    using roc::hostnumerics::MxDataGeneration;
+    using roc::hostnumerics::MxGenerationOptions;
+    using roc::hostnumerics::MxScaleGenerationMode;
+    using roc::hostnumerics::MxTensor;
+    using roc::hostnumerics::ScalarType;
+    using roc::hostnumerics::Shape;
+    using roc::hostnumerics::Tensor;
 
     void require(bool condition, std::string const& message)
     {
@@ -304,7 +304,7 @@ namespace
         options.blockAxis        = blockAxis;
         options.blockSize        = 4;
         options.scale            = MxScaleGenerationMode::RandomFinite;
-        return roc::host_numerics::generateMx(std::move(shape), std::move(data), options);
+        return roc::hostnumerics::generateMx(std::move(shape), std::move(data), options);
     }
 
     void testScaledTypeBlockAndNaturalOrder()

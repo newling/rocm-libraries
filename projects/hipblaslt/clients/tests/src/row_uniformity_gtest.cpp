@@ -21,7 +21,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
-#include <roc/host_numerics/generation.hpp>
+#include <roc/hostnumerics/generation.hpp>
 
 // hipblaslt-test links roc::tensilelite-host (through hipblaslt-clients-common),
 // so the solution metadata the launch gate reasons from is available here even
@@ -279,14 +279,14 @@ namespace
         bool useBias = false;
     };
 
-    roc::host_numerics::ScalarType hostNumericsOperandType(hipDataType type)
+    roc::hostnumerics::ScalarType hostNumericsOperandType(hipDataType type)
     {
         switch(type)
         {
         case HIP_R_32F:
-            return roc::host_numerics::ScalarType::Float32;
+            return roc::hostnumerics::ScalarType::Float32;
         case HIP_R_16BF:
-            return roc::host_numerics::ScalarType::BFloat16;
+            return roc::hostnumerics::ScalarType::BFloat16;
         default:
             throw std::invalid_argument("Row-uniformity operands must be FP32 or BF16");
         }
@@ -294,7 +294,7 @@ namespace
 
     size_t encodedElementBytes(hipDataType type)
     {
-        const auto& info = roc::host_numerics::scalarTypeInfo(hostNumericsOperandType(type));
+        const auto& info = roc::hostnumerics::scalarTypeInfo(hostNumericsOperandType(type));
         if(info.storageBits % 8 != 0)
             throw std::invalid_argument("Row-uniformity operands must be byte-addressable");
         return info.storageBits / 8;
@@ -309,10 +309,10 @@ namespace
     // largest possible accumulator stays far below FLT_MAX and the smallest
     // product far above the smallest normal, so neither overflow nor denormal
     // flush can occur.
-    roc::host_numerics::Tensor
+    roc::hostnumerics::Tensor
         generateWideRangeOperand(hipDataType type, size_t elementCount, uint64_t seed)
     {
-        using namespace roc::host_numerics;
+        using namespace roc::hostnumerics;
         const auto recipe = GenerationRecipe::realOnly(
             GenerationRecipe::randomEncodedExponent({.lowerUnbiasedExponent = -12,
                                                      .upperUnbiasedExponent = 12,
@@ -341,7 +341,7 @@ namespace
             EXPECT_TRUE(sameStorage(a, aRepeat));
             EXPECT_FALSE(sameStorage(a, b));
 
-            const auto decoded   = a.copyConvertedTo(roc::host_numerics::ScalarType::Float32);
+            const auto decoded   = a.copyConvertedTo(roc::hostnumerics::ScalarType::Float32);
             const auto roundTrip = decoded.copyConvertedTo(hostNumericsOperandType(type));
             EXPECT_TRUE(sameStorage(a, roundTrip));
 
@@ -354,7 +354,7 @@ namespace
                 reverse += a.loadAs<float>({index - 1}) * b.loadAs<float>({index - 1});
 
             EXPECT_NE(std::memcmp(&forward, &reverse, sizeof(float)), 0)
-                << "The generated " << roc::host_numerics::scalarTypeName(a.type())
+                << "The generated " << roc::hostnumerics::scalarTypeName(a.type())
                 << " sample does not expose summation-order changes";
         };
 
@@ -751,12 +751,12 @@ namespace
             // Column k of a column-major A is M copies of a[k], so A goes up one
             // column at a time and never needs an M*K host buffer.
             const size_t               abBytes = encodedElementBytes(m_problem.abType);
-            roc::host_numerics::Tensor column(hostNumericsOperandType(m_problem.abType),
-                                              roc::host_numerics::Shape{static_cast<size_t>(m)});
+            roc::hostnumerics::Tensor column(hostNumericsOperandType(m_problem.abType),
+                                              roc::hostnumerics::Shape{static_cast<size_t>(m)});
             for(int64_t idx = 0; idx < k; ++idx)
             {
                 const float value = m_aVector.loadAs<float>({static_cast<size_t>(idx)});
-                roc::host_numerics::generate(column,
+                roc::hostnumerics::generate(column,
                                              [value](std::span<const size_t>) { return value; });
                 const auto columnStorage = column.rawEncodedBackingStorage();
                 if(hipMemcpy(static_cast<uint8_t*>(m_deviceA)
@@ -785,10 +785,10 @@ namespace
         void*                      m_deviceD         = nullptr;
         void*                      m_deviceBias      = nullptr;
         void*                      m_deviceWorkspace = nullptr;
-        roc::host_numerics::Tensor m_aVector{roc::host_numerics::ScalarType::Float32,
-                                             roc::host_numerics::Shape{0}};
-        roc::host_numerics::Tensor m_hostB{roc::host_numerics::ScalarType::Float32,
-                                           roc::host_numerics::Shape{0}};
+        roc::hostnumerics::Tensor m_aVector{roc::hostnumerics::ScalarType::Float32,
+                                             roc::hostnumerics::Shape{0}};
+        roc::hostnumerics::Tensor m_hostB{roc::hostnumerics::ScalarType::Float32,
+                                           roc::hostnumerics::Shape{0}};
         std::vector<float>         m_hostD;
     };
 

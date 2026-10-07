@@ -1,21 +1,21 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <rocRoller/HostNumerics/HostReference.hpp>
+#include <rocRoller/hostnumerics/HostReference.hpp>
 
 #include <sstream>
 #include <utility>
 
-#include <roc/host_numerics/backends/blas.hpp>
-#include <roc/host_numerics/gemm.hpp>
-#include <roc/host_numerics/tensor_operations.hpp>
+#include <roc/hostnumerics/backends/blas.hpp>
+#include <roc/hostnumerics/gemm.hpp>
+#include <roc/hostnumerics/tensor_operations.hpp>
 
-namespace rocRoller::HostNumerics
+namespace rocRoller::hostnumerics
 {
     namespace
     {
-        using roc::host_numerics::Shape;
-        using roc::host_numerics::Tensor;
+        using roc::hostnumerics::Shape;
+        using roc::hostnumerics::Tensor;
 
         Tensor normalizeBlockScale(Tensor      values,
                                    size_t      freeExtent,
@@ -58,17 +58,17 @@ namespace rocRoller::HostNumerics
         return statistics.passed();
     }
 
-    roc::host_numerics::Tensor hostScaleTensor(DataType                 type,
-                                               std::span<const uint8_t> values,
-                                               size_t                   freeExtent,
-                                               size_t                   reductionExtent,
-                                               size_t                   blockSize)
+    roc::hostnumerics::Tensor hostScaleTensor(DataType                 type,
+                                              std::span<const uint8_t> values,
+                                              size_t                   freeExtent,
+                                              size_t                   reductionExtent,
+                                              size_t                   blockSize)
     {
-        using roc::host_numerics::Layout;
-        using roc::host_numerics::ScalarCategory;
-        using roc::host_numerics::scalarTypeInfo;
-        using roc::host_numerics::Shape;
-        using roc::host_numerics::Tensor;
+        using roc::hostnumerics::Layout;
+        using roc::hostnumerics::ScalarCategory;
+        using roc::hostnumerics::scalarTypeInfo;
+        using roc::hostnumerics::Shape;
+        using roc::hostnumerics::Tensor;
         auto const scalarType = hostScalarType(type);
         if(scalarTypeInfo(scalarType).category != ScalarCategory::Scale)
             throw std::invalid_argument("rocRoller runtime scale requires a scale data type.");
@@ -82,17 +82,17 @@ namespace rocRoller::HostNumerics
             scalarType, Layout(Shape{freeExtent, blockCount}, {0, 0}), std::as_bytes(values));
     }
 
-    roc::host_numerics::Tensor hostScaleTensor(DataType                 type,
-                                               std::span<const uint8_t> values,
-                                               TensorDescriptor const&  dataDescriptor,
-                                               size_t                   blockedDimension,
-                                               size_t                   blockSize)
+    roc::hostnumerics::Tensor hostScaleTensor(DataType                 type,
+                                              std::span<const uint8_t> values,
+                                              TensorDescriptor const&  dataDescriptor,
+                                              size_t                   blockedDimension,
+                                              size_t                   blockSize)
     {
-        using roc::host_numerics::Layout;
-        using roc::host_numerics::ScalarCategory;
-        using roc::host_numerics::scalarTypeInfo;
-        using roc::host_numerics::storageBytesForLayout;
-        using roc::host_numerics::Tensor;
+        using roc::hostnumerics::Layout;
+        using roc::hostnumerics::ScalarCategory;
+        using roc::hostnumerics::scalarTypeInfo;
+        using roc::hostnumerics::storageBytesForLayout;
+        using roc::hostnumerics::Tensor;
 
         auto const layout     = hostScaleLayout(dataDescriptor, blockedDimension, blockSize);
         auto const scalarType = hostScalarType(type);
@@ -109,23 +109,22 @@ namespace rocRoller::HostNumerics
         return Tensor::copyEncodedBackingStorage(scalarType, layout, std::as_bytes(values));
     }
 
-    roc::host_numerics::Tensor
-        computeHostReference(roc::host_numerics::Tensor                a,
-                             roc::host_numerics::Tensor                b,
-                             roc::host_numerics::Tensor                c,
-                             std::optional<roc::host_numerics::Tensor> scaleA,
-                             std::optional<roc::host_numerics::Tensor> scaleB,
-                             size_t                                    scaleBlockSize,
-                             float                                     alpha,
-                             float                                     beta)
+    roc::hostnumerics::Tensor computeHostReference(roc::hostnumerics::Tensor                a,
+                                                   roc::hostnumerics::Tensor                b,
+                                                   roc::hostnumerics::Tensor                c,
+                                                   std::optional<roc::hostnumerics::Tensor> scaleA,
+                                                   std::optional<roc::hostnumerics::Tensor> scaleB,
+                                                   size_t scaleBlockSize,
+                                                   float  alpha,
+                                                   float  beta)
     {
-        using roc::host_numerics::add;
-        using roc::host_numerics::Layout;
-        using roc::host_numerics::MatmulOptions;
-        using roc::host_numerics::matmulWithBlasBackend;
-        using roc::host_numerics::ScalarType;
-        using roc::host_numerics::Shape;
-        using roc::host_numerics::Tensor;
+        using roc::hostnumerics::add;
+        using roc::hostnumerics::Layout;
+        using roc::hostnumerics::MatmulOptions;
+        using roc::hostnumerics::matmulWithBlasBackend;
+        using roc::hostnumerics::ScalarType;
+        using roc::hostnumerics::Shape;
+        using roc::hostnumerics::Tensor;
 
         if(a.shape().rank() != 2 || b.shape().rank() != 2 || c.shape().rank() != 2)
             throw std::invalid_argument(
@@ -170,38 +169,36 @@ namespace rocRoller::HostNumerics
                       : Tensor(ScalarType::Float32, outputLayout);
     }
 
-    roc::host_numerics::Tensor
-        computeHostReference(GeneratedGEMMInputs const&                inputs,
-                             std::optional<roc::host_numerics::Tensor> runtimeScaleA,
-                             std::optional<roc::host_numerics::Tensor> runtimeScaleB,
-                             size_t                                    scaleBlockSize,
-                             float                                     alpha,
-                             float                                     beta)
+    roc::hostnumerics::Tensor
+        computeHostReference(GeneratedGEMMInputs const&               inputs,
+                             std::optional<roc::hostnumerics::Tensor> runtimeScaleA,
+                             std::optional<roc::hostnumerics::Tensor> runtimeScaleB,
+                             size_t                                   scaleBlockSize,
+                             float                                    alpha,
+                             float                                    beta)
     {
         return computeHostReference(
             inputs.a,
             inputs.b,
             inputs.c,
-            runtimeScaleA
-                ? std::move(runtimeScaleA)
-                : (inputs.scaleA ? std::optional<roc::host_numerics::Tensor>(inputs.scaleA)
-                                 : std::nullopt),
-            runtimeScaleB
-                ? std::move(runtimeScaleB)
-                : (inputs.scaleB ? std::optional<roc::host_numerics::Tensor>(inputs.scaleB)
-                                 : std::nullopt),
+            runtimeScaleA ? std::move(runtimeScaleA)
+                          : (inputs.scaleA ? std::optional<roc::hostnumerics::Tensor>(inputs.scaleA)
+                                           : std::nullopt),
+            runtimeScaleB ? std::move(runtimeScaleB)
+                          : (inputs.scaleB ? std::optional<roc::hostnumerics::Tensor>(inputs.scaleB)
+                                           : std::nullopt),
             scaleBlockSize,
             alpha,
             beta);
     }
 
-    HostComparisonResult compareHostReference(roc::host_numerics::Tensor observed,
-                                              roc::host_numerics::Tensor expected,
-                                              AcceptableGEMMError        acceptableError)
+    HostComparisonResult compareHostReference(roc::hostnumerics::Tensor observed,
+                                              roc::hostnumerics::Tensor expected,
+                                              AcceptableGEMMError       acceptableError)
     {
-        using roc::host_numerics::compare;
-        using roc::host_numerics::ComparisonOptions;
-        using roc::host_numerics::ComparisonReport;
+        using roc::hostnumerics::compare;
+        using roc::hostnumerics::ComparisonOptions;
+        using roc::hostnumerics::ComparisonReport;
 
         ComparisonOptions options;
         options.allClose                               = false;

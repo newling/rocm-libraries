@@ -15,8 +15,6 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
-#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
-#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -25,6 +23,8 @@
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
+#include <rocRoller/hostnumerics/HostReference.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
@@ -122,8 +122,8 @@ namespace GEMMDriverTest
             TensorDescriptor descC(dataType, {size_t(M), size_t(N)}, "N");
             TensorDescriptor descRelu(dataType, {size_t(M), size_t(N)}, "N");
 
-            auto const bounded         = HostNumerics::DataInitialization{};
-            auto       generatedInputs = HostNumerics::generateGEMMInputs(descA,
+            auto const bounded         = hostnumerics::DataInitialization{};
+            auto       generatedInputs = hostnumerics::generateGEMMInputs(descA,
                                                                     descB,
                                                                     descC,
                                                                     bounded,
@@ -135,9 +135,9 @@ namespace GEMMDriverTest
                                                                     -1.0f,
                                                                     1.0f,
                                                                     31415u);
-            hostA                      = HostNumerics::copyTensorStorage<T>(generatedInputs.a);
-            hostB                      = HostNumerics::copyTensorStorage<T>(generatedInputs.b);
-            hostC                      = HostNumerics::copyTensorStorage<T>(generatedInputs.c);
+            hostA                      = hostnumerics::copyTensorStorage<T>(generatedInputs.a);
+            hostB                      = hostnumerics::copyTensorStorage<T>(generatedInputs.b);
+            hostC                      = hostnumerics::copyTensorStorage<T>(generatedInputs.c);
 
             if(setIdentity)
             {
@@ -355,10 +355,10 @@ namespace GEMMDriverTest
             }
 
             // Host result
-            auto h_result = HostNumerics::convertHostReference<T>(
-                HostNumerics::computeHostReference(HostNumerics::hostTensor(descA, hostA),
-                                                   HostNumerics::hostTensor(descB, hostB),
-                                                   HostNumerics::hostTensor(descC, hostC),
+            auto h_result = hostnumerics::convertHostReference<T>(
+                hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, hostA),
+                                                   hostnumerics::hostTensor(descB, hostB),
+                                                   hostnumerics::hostTensor(descC, hostC),
                                                    std::nullopt,
                                                    std::nullopt,
                                                    0,

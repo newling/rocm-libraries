@@ -16,12 +16,12 @@
 
 namespace hipblaslt::client
 {
-    roc::host_numerics::Layout MatmulMatrix::logicalBatchLayout(hipblasOperation_t operation,
+    roc::hostnumerics::Layout MatmulMatrix::logicalBatchLayout(hipblasOperation_t operation,
                                                                 size_t             batch,
                                                                 bool separateBatchStorage) const
     {
-        using roc::host_numerics::Layout;
-        using roc::host_numerics::Shape;
+        using roc::hostnumerics::Layout;
+        using roc::hostnumerics::Shape;
 
         if(layout.shape().rank() != 3)
             throw std::invalid_argument("A matmul matrix layout must have rank three.");
@@ -101,8 +101,8 @@ namespace hipblaslt::client
                                      int32_t              batchCount,
                                      hipblasLtBatchMode_t batchMode)
         {
-            using roc::host_numerics::Layout;
-            using roc::host_numerics::Shape;
+            using roc::hostnumerics::Layout;
+            using roc::hostnumerics::Shape;
 
             const int64_t matrixElements
                 = checkedProduct(leadingDimension, columns, "matrix storage size");

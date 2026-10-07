@@ -14,8 +14,8 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
-            using HostNumerics::DataInitialization;
-            using HostNumerics::DataInitializationMode;
+            using hostnumerics::DataInitialization;
+            using hostnumerics::DataInitializationMode;
 
             std::string TypeParameters::kernelNamePart() const
             {
@@ -309,8 +309,8 @@ namespace rocRoller
 
 namespace rocRoller::Client::GEMMClient::CLI
 {
-    using HostNumerics::DataInitialization;
-    using HostNumerics::DataInitializationMode;
+    using hostnumerics::DataInitialization;
+    using hostnumerics::DataInitializationMode;
 
     bool ParseXY(const std::string& arg, XYTuple& x)
     {

@@ -26,9 +26,9 @@
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
-#include <hipblaslt/host_numerics/Types.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
 #include <iostream>
-#include <roc/host_numerics/validation.hpp>
+#include <roc/hostnumerics/validation.hpp>
 
 #include "helper.h"
 
@@ -65,8 +65,8 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
 
     for(int64_t b = 0; b < runner.batch_count; ++b)
     {
-        using namespace roc::host_numerics;
-        using namespace hipblaslt::host_numerics;
+        using namespace roc::hostnumerics;
+        using namespace hipblaslt::hostnumerics;
 
         auto referenceTensor
             = copyTensorFromEncodedStorage(reference.data() + batchStrideD * b,
@@ -98,17 +98,17 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
     CHECK_HIP_ERROR(hipMemcpyDtoH(
         gpuResult.data(), runner.d_d, runner.batch_count * runner.m * runner.n * sizeof(TypeCD)));
 
-    const auto comparison = roc::host_numerics::compare(
-        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+    const auto comparison = roc::hostnumerics::compare(
+        hipblaslt::hostnumerics::copyTensorFromEncodedStorage(
             gpuResult.data(),
             gpuResult.size(),
-            roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                roc::host_numerics::Shape{gpuResult.size()})),
-        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+                roc::hostnumerics::Shape{gpuResult.size()})),
+        hipblaslt::hostnumerics::copyTensorFromEncodedStorage(
             reference.data(),
             reference.size(),
-            roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                roc::host_numerics::Shape{reference.size()})),
+            roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+                roc::hostnumerics::Shape{reference.size()})),
         {.absoluteTolerance = 1e-5, .maxReportedMismatches = 10});
     for(const auto& mismatch : comparison.reportedMismatches)
     {

@@ -4,7 +4,7 @@
 #pragma once
 
 #include "hipblaslt_arguments.hpp"
-#include <hipblaslt/host_numerics/Types.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -32,7 +32,7 @@ namespace hipblaslt::client
     struct MatmulMatrix
     {
         hipDataType                apiType;
-        roc::host_numerics::Layout layout;
+        roc::hostnumerics::Layout layout;
         size_t                     allocationElements;
 
         int64_t rows() const
@@ -58,7 +58,7 @@ namespace hipblaslt::client
         // Returns the logical two-dimensional matrix view for one batch.
         // Transpose and conjugate-transpose swap the stored row/column axes;
         // conjugation itself remains numerical policy for the matmul operation.
-        roc::host_numerics::Layout logicalBatchLayout(hipblasOperation_t operation,
+        roc::hostnumerics::Layout logicalBatchLayout(hipblasOperation_t operation,
                                                       size_t             batch,
                                                       bool separateBatchStorage) const;
     };

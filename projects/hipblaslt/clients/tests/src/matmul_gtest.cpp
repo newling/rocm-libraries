@@ -30,10 +30,10 @@
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
 #include <cstring>
-#include <hipblaslt/host_numerics/Types.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
 #include <limits>
-#include <roc/host_numerics/epilogue.hpp>
-#include <roc/host_numerics/reduction.hpp>
+#include <roc/hostnumerics/epilogue.hpp>
+#include <roc/hostnumerics/reduction.hpp>
 #include <stdexcept>
 #include <type_traits>
 
@@ -41,8 +41,8 @@
 
 TEST(HostNumericsTypeBridge, ConvergesOnScalarType)
 {
-    using namespace hipblaslt::host_numerics;
-    using roc::host_numerics::ScalarType;
+    using namespace hipblaslt::hostnumerics;
+    using roc::hostnumerics::ScalarType;
 
     EXPECT_EQ(scalarType<float>(), scalarType(HIP_R_32F));
     EXPECT_EQ(scalarType(static_cast<hipDataType>(HIP_R_8F_E5M3_EXT)), ScalarType::E5M3);
@@ -235,7 +235,7 @@ TEST(HostNumericsTensorManipulation, SwizzlePreservesPaddedMatrixEncoding)
 
 TEST(HostNumericsEpilogue, SupportsTensorBackedProductComposition)
 {
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
 
     std::array<float, 4> input{-2, 1, 3, -4};
     std::array<float, 2> bias{1, 2};
@@ -272,7 +272,7 @@ TEST(HostNumericsEpilogue, SupportsTensorBackedProductComposition)
 
 TEST(HostNumericsEpilogue, RoutesGradientAuxiliaryInput)
 {
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
 
     std::array<float, 4> gradient{10, 20, 30, 40};
     std::array<float, 4> activationInput{-1, 1, 2, -2};
@@ -300,7 +300,7 @@ TEST(HostNumericsEpilogue, RoutesGradientAuxiliaryInput)
 
 TEST(HostNumericsEpilogue, SaturatesInt8Output)
 {
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
 
     std::array<float, 4>  input{-200.0f, -128.5f, 126.5f, 300.0f};
     const Layout          layout(Shape{2, 2}, {1, 2});
@@ -321,7 +321,7 @@ TEST(HostNumericsEpilogue, SaturatesInt8Output)
 
 TEST(HostNumericsEpilogue, UsesIdentityScaleDefaults)
 {
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
 
     std::array<float, 4> input{-2, 1, 3, -4};
     const Layout         layout(Shape{2, 2}, {1, 2});
@@ -341,7 +341,7 @@ TEST(HostNumericsEpilogue, UsesIdentityScaleDefaults)
 
 TEST(HostNumericsReduction, SumsStridedTensor)
 {
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
 
     const std::array<float, 8> input{1, 2, -99, 3, 4, -99, 5, 6};
     const Tensor inputTensor = Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 3}), input);

@@ -28,7 +28,7 @@ set(ROCM_LIBS_ENABLE_COMPONENTS "all"
 
 set(DEFAULT_COMPONENTS
     # shared
-    host-numerics
+    hostnumerics
     rocroller
     origami
     # projects
@@ -139,11 +139,11 @@ endif()
 unset(_rocm_libs_needs_shared_json)
 
 # --- Add subdirectories ---
-if("host-numerics" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+if("hostnumerics" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
-        COMPONENT host-numerics
+        COMPONENT hostnumerics
         PREFIX_PATH shared
-        EXPECT_TARGET roc::host-numerics
+        EXPECT_TARGET roc::hostnumerics
     )
 endif()
 

@@ -37,8 +37,8 @@ target_sources(rocroller-gemm
 target_link_libraries(rocroller-gemm
     PRIVATE
         roc::rocroller-interface
-        rocroller::host-numerics
-        roc::host-numerics-amd-gpu-layout
+        rocroller::hostnumerics
+        roc::hostnumerics-amd-gpu-layout
         CLI11::CLI11
         ${msgpack_libs}
 )

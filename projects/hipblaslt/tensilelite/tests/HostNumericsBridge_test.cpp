@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
 
 #include <Tensile/DataTypes.hpp>
 
@@ -17,10 +17,10 @@ namespace
     template <typename T>
     bool productValuesClose(rocisa::DataType type, T observed, T expected, double threshold = -1.0)
     {
-        using roc::host_numerics::ComparisonOptions;
-        using roc::host_numerics::Layout;
-        using roc::host_numerics::Shape;
-        using roc::host_numerics::Tensor;
+        using roc::hostnumerics::ComparisonOptions;
+        using roc::hostnumerics::Layout;
+        using roc::hostnumerics::Shape;
+        using roc::hostnumerics::Tensor;
 
         const std::array<T, 1> observedStorage{observed};
         const std::array<T, 1> expectedStorage{expected};
@@ -30,7 +30,7 @@ namespace
         options.computeFrobenius              = false;
         const auto scalarType = TensileLite::Client::toHostNumericsScalarType(type);
         const auto layout     = Layout::contiguousLastDimensionFastest(Shape{1});
-        return roc::host_numerics::compare(
+        return roc::hostnumerics::compare(
                    Tensor::copyEncodedBackingStorage(
                        scalarType, layout, std::as_bytes(std::span<const T>(observedStorage))),
                    Tensor::copyEncodedBackingStorage(

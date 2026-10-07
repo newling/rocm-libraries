@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include <rocRoller/CommandSolution.hpp>
-#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
-#include <rocRoller/HostNumerics/HostReference.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
+#include <rocRoller/hostnumerics/HostReference.hpp>
 
 #include "GPUContextFixture.hpp"
 
@@ -339,23 +339,23 @@ namespace MatrixMultiplyTest
 
                 uint32_t seed = 9861u;
 
-                std::optional<HostNumerics::BlockScaleGeneration> scaleGenerationA;
-                std::optional<HostNumerics::BlockScaleGeneration> scaleGenerationB;
+                std::optional<hostnumerics::BlockScaleGeneration> scaleGenerationA;
+                std::optional<hostnumerics::BlockScaleGeneration> scaleGenerationB;
                 if(scaleA)
                     scaleGenerationA
-                        = HostNumerics::BlockScaleGeneration{scaleTypeA, 1, scaleBlockSize};
+                        = hostnumerics::BlockScaleGeneration{scaleTypeA, 1, scaleBlockSize};
                 if(scaleB)
                     scaleGenerationB
-                        = HostNumerics::BlockScaleGeneration{scaleTypeB, 0, scaleBlockSize};
+                        = hostnumerics::BlockScaleGeneration{scaleTypeB, 0, scaleBlockSize};
 
-                auto generatedA = HostNumerics::generateHostTensor(
+                auto generatedA = hostnumerics::generateHostTensor(
                     descA, {}, scaleGenerationA, -rangeA, rangeA, seed);
-                auto generatedB = HostNumerics::generateHostTensor(
+                auto generatedB = hostnumerics::generateHostTensor(
                     descB, {}, scaleGenerationB, -rangeB, rangeB, seed);
                 using PackedTypeA = typename PackedTypeOf<TA>::type;
                 using PackedTypeB = typename PackedTypeOf<TB>::type;
-                auto A            = HostNumerics::copyTensorStorage<PackedTypeA>(generatedA.data);
-                auto B            = HostNumerics::copyTensorStorage<PackedTypeB>(generatedB.data);
+                auto A            = hostnumerics::copyTensorStorage<PackedTypeA>(generatedA.data);
+                auto B            = hostnumerics::copyTensorStorage<PackedTypeB>(generatedB.data);
 
                 std::vector<uint8_t> hostScaleA, hostScaleB;
 
@@ -368,13 +368,13 @@ namespace MatrixMultiplyTest
                 if(scaleA)
                 {
                     ASSERT_TRUE(generatedA.scales);
-                    hostScaleA = HostNumerics::copyTensorStorage<uint8_t>(*generatedA.scales);
+                    hostScaleA = hostnumerics::copyTensorStorage<uint8_t>(*generatedA.scales);
                     d_scaleA   = make_shared_device(hostScaleA);
                 }
                 if(scaleB)
                 {
                     ASSERT_TRUE(generatedB.scales);
-                    hostScaleB = HostNumerics::copyTensorStorage<uint8_t>(*generatedB.scales);
+                    hostScaleB = hostnumerics::copyTensorStorage<uint8_t>(*generatedB.scales);
                     d_scaleB   = make_shared_device(hostScaleB);
                 }
 
@@ -418,14 +418,14 @@ namespace MatrixMultiplyTest
 
                 float alpha = 1.0f;
 
-                std::optional<roc::host_numerics::Tensor> referenceScaleA;
-                std::optional<roc::host_numerics::Tensor> referenceScaleB;
+                std::optional<roc::hostnumerics::Tensor> referenceScaleA;
+                std::optional<roc::hostnumerics::Tensor> referenceScaleB;
                 if(scaleA)
                 {
                     ASSERT_TRUE(scaleB);
-                    referenceScaleA = HostNumerics::hostScaleTensor(
+                    referenceScaleA = hostnumerics::hostScaleTensor(
                         scaleTypeA, hostScaleA, descA, 1, scaleBlockSize);
-                    referenceScaleB = HostNumerics::hostScaleTensor(
+                    referenceScaleB = hostnumerics::hostScaleTensor(
                         scaleTypeB, hostScaleB, descB, 0, scaleBlockSize);
                 }
                 else
@@ -433,18 +433,18 @@ namespace MatrixMultiplyTest
                     ASSERT_FALSE(scaleB);
                 }
                 auto c_D
-                    = HostNumerics::convertHostReference<TD>(HostNumerics::computeHostReference(
-                        HostNumerics::hostTensor(
+                    = hostnumerics::convertHostReference<TD>(hostnumerics::computeHostReference(
+                        hostnumerics::hostTensor(
                             descA,
                             A,
-                            scaleA ? HostNumerics::DataTypeInterpretation::BlockScaled
-                                   : HostNumerics::DataTypeInterpretation::Unscaled),
-                        HostNumerics::hostTensor(
+                            scaleA ? hostnumerics::DataTypeInterpretation::BlockScaled
+                                   : hostnumerics::DataTypeInterpretation::Unscaled),
+                        hostnumerics::hostTensor(
                             descB,
                             B,
-                            scaleB ? HostNumerics::DataTypeInterpretation::BlockScaled
-                                   : HostNumerics::DataTypeInterpretation::Unscaled),
-                        HostNumerics::hostTensor(descD, c_C),
+                            scaleB ? hostnumerics::DataTypeInterpretation::BlockScaled
+                                   : hostnumerics::DataTypeInterpretation::Unscaled),
+                        hostnumerics::hostTensor(descD, c_C),
                         std::move(referenceScaleA),
                         std::move(referenceScaleB),
                         scaleA ? scaleBlockSize : 0,
@@ -606,13 +606,13 @@ namespace MatrixMultiplyTest
 
             auto const seed = 9861u;
             auto       generatedA
-                = HostNumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, seed + 1);
+                = hostnumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, seed + 1);
             auto generatedB
-                = HostNumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, seed + 2);
+                = hostnumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, seed + 2);
             using PackedTypeA = typename PackedTypeOf<TA>::type;
             using PackedTypeB = typename PackedTypeOf<TB>::type;
-            auto A            = HostNumerics::copyTensorStorage<PackedTypeA>(generatedA.data);
-            auto B            = HostNumerics::copyTensorStorage<PackedTypeB>(generatedB.data);
+            auto A            = hostnumerics::copyTensorStorage<PackedTypeA>(generatedA.data);
+            auto B            = hostnumerics::copyTensorStorage<PackedTypeB>(generatedB.data);
 
             auto d_A = make_shared_device(A);
             auto d_B = make_shared_device(B);
@@ -681,10 +681,10 @@ namespace MatrixMultiplyTest
 
                 std::vector<TD> c_C(M * N, TD{});
 
-                auto c_D = HostNumerics::convertHostReference<TD>(
-                    HostNumerics::computeHostReference(HostNumerics::hostTensor(descA, A),
-                                                       HostNumerics::hostTensor(descB, B),
-                                                       HostNumerics::hostTensor(descD, c_C),
+                auto c_D = hostnumerics::convertHostReference<TD>(
+                    hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, A),
+                                                       hostnumerics::hostTensor(descB, B),
+                                                       hostnumerics::hostTensor(descD, c_C),
                                                        std::nullopt,
                                                        std::nullopt,
                                                        0,
@@ -749,15 +749,15 @@ namespace MatrixMultiplyTest
             auto const seed = 9861u;
 
             auto generatedA
-                = HostNumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, seed + 1);
+                = hostnumerics::generateHostTensor(descA, {}, std::nullopt, -1.0f, 1.0f, seed + 1);
             auto generatedB
-                = HostNumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, seed + 2);
+                = hostnumerics::generateHostTensor(descB, {}, std::nullopt, -1.0f, 1.0f, seed + 2);
             auto generatedC
-                = HostNumerics::generateHostTensor(descC, {}, std::nullopt, -1.0f, 1.0f, seed + 3);
+                = hostnumerics::generateHostTensor(descC, {}, std::nullopt, -1.0f, 1.0f, seed + 3);
             using PackedType = typename PackedTypeOf<T>::type;
-            auto A           = HostNumerics::copyTensorStorage<PackedType>(generatedA.data);
-            auto B           = HostNumerics::copyTensorStorage<PackedType>(generatedB.data);
-            auto C           = HostNumerics::copyTensorStorage<T>(generatedC.data);
+            auto A           = hostnumerics::copyTensorStorage<PackedType>(generatedA.data);
+            auto B           = hostnumerics::copyTensorStorage<PackedType>(generatedB.data);
+            auto C           = hostnumerics::copyTensorStorage<T>(generatedC.data);
 
             auto d_A = make_shared_device(A);
             auto d_B = make_shared_device(B);
@@ -834,10 +834,10 @@ namespace MatrixMultiplyTest
                 ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                auto c_D = HostNumerics::convertHostReference<T>(
-                    HostNumerics::computeHostReference(HostNumerics::hostTensor(descA, A),
-                                                       HostNumerics::hostTensor(descB, B),
-                                                       HostNumerics::hostTensor(descC, C),
+                auto c_D = hostnumerics::convertHostReference<T>(
+                    hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, A),
+                                                       hostnumerics::hostTensor(descB, B),
+                                                       hostnumerics::hostTensor(descC, C),
                                                        std::nullopt,
                                                        std::nullopt,
                                                        0,

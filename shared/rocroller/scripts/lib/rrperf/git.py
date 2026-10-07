@@ -39,7 +39,7 @@ def clone(remote: str | Path, repo: Path) -> None:
             "sparse-checkout",
             "set",
             "shared/rocroller",
-            "shared/host-numerics",
+            "shared/hostnumerics",
         ],
         cwd=str(repo),
         check=True,

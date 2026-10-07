@@ -32,11 +32,11 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_numerics/MatrixTransformReference.hpp>
-#include <hipblaslt/host_numerics/Types.hpp>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/hostnumerics/MatrixTransformReference.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
 #include <numeric>
-#include <roc/host_numerics/generation.hpp>
+#include <roc/hostnumerics/generation.hpp>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -147,19 +147,19 @@ namespace
         {
             std::vector<DType> ref(len);
             const uint64_t     recipeSeed
-                = hipblaslt::host_numerics::initialization::seedForSequence(
-                    hipblaslt::host_numerics::defaultInitializationSeed,
+                = hipblaslt::hostnumerics::initialization::seedForSequence(
+                    hipblaslt::hostnumerics::defaultInitializationSeed,
                     static_cast<std::uint64_t>(sequence));
-            const auto recipe = roc::host_numerics::GenerationRecipe::realOnly(
-                roc::host_numerics::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
+            const auto recipe = roc::hostnumerics::GenerationRecipe::realOnly(
+                roc::hostnumerics::GenerationRecipe::uniformInteger({.lower = -3, .upper = 3}),
                 {.seed = recipeSeed});
-            auto generated = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            auto generated = hipblaslt::hostnumerics::copyTensorFromEncodedStorage(
                 ref.data(),
                 ref.size(),
-                roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                    roc::host_numerics::Shape{ref.size()}));
-            roc::host_numerics::generate(generated, recipe);
-            hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
+                roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+                    roc::hostnumerics::Shape{ref.size()}));
+            roc::hostnumerics::generate(generated, recipe);
+            hipblaslt::hostnumerics::copyTensorEncodedBackingStorageToBuffer(
                 ref.data(), ref.size(), generated);
 
             auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
@@ -227,13 +227,13 @@ namespace
                     bool        transA,
                     bool        transB)
     {
-        using namespace roc::host_numerics;
-        const ScalarType type    = hipblaslt::host_numerics::scalarType(datatype);
-        const Layout     aLayout = hipblaslt::host_numerics::matrixTransformLayout(
+        using namespace roc::hostnumerics;
+        const ScalarType type    = hipblaslt::hostnumerics::scalarType(datatype);
+        const Layout     aLayout = hipblaslt::hostnumerics::matrixTransformLayout(
             m, n, batchSize, ldA, batchStride, rowMajA, transA);
-        const Layout bLayout = hipblaslt::host_numerics::matrixTransformLayout(
+        const Layout bLayout = hipblaslt::hostnumerics::matrixTransformLayout(
             m, n, batchSize, ldB, batchStride, rowMajB, transB);
-        const Layout outputLayout = hipblaslt::host_numerics::matrixTransformLayout(
+        const Layout outputLayout = hipblaslt::hostnumerics::matrixTransformLayout(
             m, n, batchSize, ldC, batchStride, rowMajC, false);
         const auto readDeviceTensor = [&](void* pointer, const Layout& layout) {
             std::vector<std::byte> storage(storageBytesForLayout(type, layout));
@@ -249,10 +249,10 @@ namespace
             = b ? std::optional(readDeviceTensor(b, bLayout)) : std::nullopt;
         ComparisonOptions options;
         options.absoluteTolerance = 1e-5;
-        const auto comparison     = hipblaslt::host_numerics::referenceMatrixTransform(
+        const auto comparison     = hipblaslt::hostnumerics::referenceMatrixTransform(
             observed, inputA, inputB, alpha, beta, options);
         std::ostringstream diagnostics;
-        hipblaslt::host_numerics::reportMatrixTransformMismatches(diagnostics, comparison);
+        hipblaslt::hostnumerics::reportMatrixTransformMismatches(diagnostics, comparison);
         ASSERT_TRUE(comparison.passed()) << diagnostics.str();
     }
 }

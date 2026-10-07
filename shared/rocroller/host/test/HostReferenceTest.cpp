@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <rocRoller/HostNumerics/HostReference.hpp>
+#include <rocRoller/hostnumerics/HostReference.hpp>
 
 #include <array>
 #include <bit>
@@ -18,11 +18,11 @@
 namespace
 {
     using namespace rocRoller;
-    using namespace rocRoller::HostNumerics;
-    using roc::host_numerics::Layout;
-    using roc::host_numerics::ScalarType;
-    using roc::host_numerics::Shape;
-    using roc::host_numerics::Tensor;
+    using namespace rocRoller::hostnumerics;
+    using roc::hostnumerics::Layout;
+    using roc::hostnumerics::ScalarType;
+    using roc::hostnumerics::Shape;
+    using roc::hostnumerics::Tensor;
 
     void require(bool condition, std::string const& message)
     {

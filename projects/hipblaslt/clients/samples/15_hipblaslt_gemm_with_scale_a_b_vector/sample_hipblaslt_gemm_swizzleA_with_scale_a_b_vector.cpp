@@ -29,8 +29,8 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
-#include <roc/host_numerics/comparison.hpp>
-#include <roc/host_numerics/tensor.hpp>
+#include <roc/hostnumerics/comparison.hpp>
+#include <roc/hostnumerics/tensor.hpp>
 #include <span>
 #include <type_traits>
 
@@ -73,9 +73,9 @@ void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
                            std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>>>;
     static_assert(sizeof(T) == sizeof(Storage));
 
-    using roc::host_numerics::Layout;
-    using roc::host_numerics::Shape;
-    using roc::host_numerics::Tensor;
+    using roc::hostnumerics::Layout;
+    using roc::hostnumerics::Shape;
+    using roc::hostnumerics::Tensor;
 
     size_t MiM = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
@@ -202,7 +202,7 @@ int main()
     const hip_bfloat16* regularCpuD  = static_cast<hip_bfloat16*>(runner.d);
     const hip_bfloat16* swizzledCpuD = static_cast<hip_bfloat16*>(swizzleRunner.d);
 
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
     const auto layout = Layout::contiguousLastDimensionFastest(Shape{m * n});
     const auto expected = Tensor::copyEncodedBackingStorage(
         ScalarType::BFloat16,

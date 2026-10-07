@@ -31,8 +31,8 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
-#include <roc/host_numerics/comparison.hpp>
-#include <roc/host_numerics/tensor.hpp>
+#include <roc/hostnumerics/comparison.hpp>
+#include <roc/hostnumerics/tensor.hpp>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -76,9 +76,9 @@ void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
                            std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>>>;
     static_assert(sizeof(T) == sizeof(Storage));
 
-    using roc::host_numerics::Layout;
-    using roc::host_numerics::Shape;
-    using roc::host_numerics::Tensor;
+    using roc::hostnumerics::Layout;
+    using roc::hostnumerics::Shape;
+    using roc::hostnumerics::Tensor;
 
     size_t MiM = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
@@ -228,13 +228,13 @@ int main()
 
         auto convertToFp8 = [](std::span<const hipblasLtHalf> source,
                                std::span<std::byte>           destination) {
-            const roc::host_numerics::Tensor converted
-                = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            const roc::hostnumerics::Tensor converted
+                = hipblaslt::hostnumerics::copyTensorFromEncodedStorage(
                       source.data(),
                       source.size(),
-                      roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                          roc::host_numerics::Shape{source.size()}))
-                      .copyConvertedTo(roc::host_numerics::ScalarType::Float8E4M3Fnuz);
+                      roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+                          roc::hostnumerics::Shape{source.size()}))
+                      .copyConvertedTo(roc::hostnumerics::ScalarType::Float8E4M3Fnuz);
             if(converted.rawEncodedBackingStorage().size() != destination.size())
                 throw std::runtime_error("Converted FP8 storage size mismatch.");
             std::memcpy(destination.data(), converted.rawEncodedBackingStorage().data(), converted.rawEncodedBackingStorage().size());
@@ -285,7 +285,7 @@ int main()
     const hipblasLtHalf* swizzledCpuD    = static_cast<hipblasLtHalf*>(swizzleRunner.d);
     const hipblasLtHalf* swizzledCpuD_F8 = static_cast<hipblasLtHalf*>(swizzleRunner_F8.d);
 
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
     const auto layout = Layout::contiguousLastDimensionFastest(Shape{m * n});
     const auto expected = Tensor::copyEncodedBackingStorage(
         ScalarType::Float16,

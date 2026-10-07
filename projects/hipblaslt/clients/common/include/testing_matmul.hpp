@@ -49,10 +49,10 @@
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_numerics/MatmulValidation.hpp>
-#include <hipblaslt/host_numerics/Types.hpp>
-#include <hipblaslt/host_numerics/near.hpp>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/hostnumerics/MatmulValidation.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
+#include <hipblaslt/hostnumerics/near.hpp>
 #include <iomanip>
 #include <limits>
 #include <map>
@@ -60,12 +60,12 @@
 #include <numeric>
 #include <omp.h>
 #include <optional>
-#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
-#include <roc/host_numerics/backends/blas.hpp>
-#include <roc/host_numerics/epilogue.hpp>
-#include <roc/host_numerics/mx.hpp>
-#include <roc/host_numerics/reduction.hpp>
-#include <roc/host_numerics/tensor_operations.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
+#include <roc/hostnumerics/backends/blas.hpp>
+#include <roc/hostnumerics/epilogue.hpp>
+#include <roc/hostnumerics/mx.hpp>
+#include <roc/hostnumerics/reduction.hpp>
+#include <roc/hostnumerics/tensor_operations.hpp>
 #include <set>
 #include <span>
 #include <vector>
@@ -106,10 +106,10 @@ void swizzle_tensor(T*               dst,
     if(ld < k)
         throw std::runtime_error("invalid value of ld in swizzle_tensor: ld must be >= k.");
 
-    using roc::host_numerics::Layout;
-    using roc::host_numerics::ScalarType;
-    using roc::host_numerics::Shape;
-    using roc::host_numerics::Tensor;
+    using roc::hostnumerics::Layout;
+    using roc::hostnumerics::ScalarType;
+    using roc::hostnumerics::Shape;
+    using roc::hostnumerics::Tensor;
 
     // currently, if A then it means MiM = 16, if B then it means MiN = 16
     constexpr size_t MiM_N = 16;
@@ -120,7 +120,7 @@ void swizzle_tensor(T*               dst,
     const size_t     numElements = b * m_n * k;
     const ScalarType tensorType  = datatype == HIP_R_4F_E2M1
                                        ? ScalarType::UInt8
-                                       : hipblaslt::host_numerics::scalarType(datatype);
+                                       : hipblaslt::hostnumerics::scalarType(datatype);
     std::vector<T>   compact(numElements);
 
     if(colMaj)
@@ -500,7 +500,7 @@ inline std::string solution_description(hipblasLtHandle_t      handle,
     return s.str();
 }
 
-std::vector<roc::host_numerics::ComparisonTolerance>
+std::vector<roc::hostnumerics::ComparisonTolerance>
     matmulValidationTolerances(const Arguments&                                  arg,
                                std::span<const hipblaslt::client::MatmulProblem> matmulProblems,
                                hipDataType                                       inputTypeA,
@@ -508,7 +508,7 @@ std::vector<roc::host_numerics::ComparisonTolerance>
                                hipDataType                                       outputType,
                                hipDataType                                       computeType)
 {
-    std::vector<roc::host_numerics::ComparisonTolerance> tolerances(matmulProblems.size());
+    std::vector<roc::hostnumerics::ComparisonTolerance> tolerances(matmulProblems.size());
     const bool                                           bfloat16Output = outputType == HIP_R_16BF;
 
     if(arg.unit_check && hipblaslt_get_arch_major() == 11 && realDataTypeSize(inputTypeA) == 2
@@ -713,9 +713,9 @@ void testing_matmul_with_bias(const Arguments&                                  
         CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProperties, 0));
     const auto mxScaleLayout = [&](hipblaslt_scaling_format format) {
         return isBlockScaling(format)
-                   ? hipblaslt::host_numerics::mxScaleStorageLayoutForFormat(
+                   ? hipblaslt::hostnumerics::mxScaleStorageLayoutForFormat(
                          format, mxProperties.gcnArchName)
-                   : roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Natural;
+                   : roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Natural;
     };
 
     if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
@@ -821,7 +821,7 @@ void testing_matmul_with_bias(const Arguments&                                  
     // Keep the decoded MX values as Tensors, one per problem and batch. This
     // preserves their compact logical layout without reconstructing it from
     // product allocation strides or converting element offsets to bytes.
-    std::vector<std::vector<roc::host_numerics::Tensor>> refA, refB;
+    std::vector<std::vector<roc::hostnumerics::Tensor>> refA, refB;
 
     gpu_mem_gbytes = static_cast<double>(preparation.rotatingBytes) / (1024 * 1024 * 1024);
 
@@ -1531,32 +1531,32 @@ void testing_matmul_with_bias(const Arguments&                                  
 
         const uint64_t initializationBaseSeed
             = arg.initialization == hipblaslt_initialization::norm_dist_one_special
-                  ? hipblaslt::host_numerics::oneSpecialInitializationSeed
-                  : hipblaslt::host_numerics::defaultInitializationSeed;
+                  ? hipblaslt::hostnumerics::oneSpecialInitializationSeed
+                  : hipblaslt::hostnumerics::defaultInitializationSeed;
         const auto initializationSeed
-            = [&](hipblaslt::host_numerics::initialization::OperandSequence sequence,
+            = [&](hipblaslt::hostnumerics::initialization::OperandSequence sequence,
                   size_t                                                    batch = 0,
-                  uint64_t baseSeed = hipblaslt::host_numerics::defaultInitializationSeed) {
+                  uint64_t baseSeed = hipblaslt::hostnumerics::defaultInitializationSeed) {
                   const uint64_t sequencesPerBatch = static_cast<uint64_t>(
-                      hipblaslt::host_numerics::initialization::OperandSequence::Count);
+                      hipblaslt::hostnumerics::initialization::OperandSequence::Count);
                   const uint64_t batchesPerProblem
                       = static_cast<uint64_t>(std::max(problem.batchCount, 1));
                   const uint64_t sequenceIndex
                       = (static_cast<uint64_t>(i) * batchesPerProblem + batch) * sequencesPerBatch
                         + static_cast<uint64_t>(sequence);
-                  return hipblaslt::host_numerics::initialization::seedForSequence(baseSeed,
+                  return hipblaslt::hostnumerics::initialization::seedForSequence(baseSeed,
                                                                                    sequenceIndex);
               };
-        const auto matrixSeed = [&](hipblaslt::host_numerics::MatrixRole role, size_t batch = 0) {
+        const auto matrixSeed = [&](hipblaslt::hostnumerics::MatrixRole role, size_t batch = 0) {
             const auto sequence = [&] {
                 switch(role)
                 {
-                case hipblaslt::host_numerics::MatrixRole::A:
-                    return hipblaslt::host_numerics::initialization::OperandSequence::MatrixA;
-                case hipblaslt::host_numerics::MatrixRole::B:
-                    return hipblaslt::host_numerics::initialization::OperandSequence::MatrixB;
-                case hipblaslt::host_numerics::MatrixRole::C:
-                    return hipblaslt::host_numerics::initialization::OperandSequence::MatrixC;
+                case hipblaslt::hostnumerics::MatrixRole::A:
+                    return hipblaslt::hostnumerics::initialization::OperandSequence::MatrixA;
+                case hipblaslt::hostnumerics::MatrixRole::B:
+                    return hipblaslt::hostnumerics::initialization::OperandSequence::MatrixB;
+                case hipblaslt::hostnumerics::MatrixRole::C:
+                    return hipblaslt::hostnumerics::initialization::OperandSequence::MatrixC;
                 }
                 throw std::invalid_argument("Unsupported hipBLASLt matrix role.");
             }();
@@ -1565,50 +1565,50 @@ void testing_matmul_with_bias(const Arguments&                                  
 
         const auto initializeHostTensor = [&](HipHostBuffer&                              buffer,
                                               hipDataType                                 type,
-                                              const roc::host_numerics::Layout&           layout,
-                                              const roc::host_numerics::GenerationRecipe& recipe) {
-            auto tensor = buffer.tensor(hipblaslt::host_numerics::scalarType(type), layout);
+                                              const roc::hostnumerics::Layout&           layout,
+                                              const roc::hostnumerics::GenerationRecipe& recipe) {
+            auto tensor = buffer.tensor(hipblaslt::hostnumerics::scalarType(type), layout);
             std::ranges::fill(tensor.rawEncodedBackingStorage(), std::byte{0});
-            roc::host_numerics::generate(tensor, recipe);
+            roc::hostnumerics::generate(tensor, recipe);
         };
         const auto randomInitializationRecipe
             = [&](hipDataType                                               type,
-                  hipblaslt::host_numerics::initialization::OperandSequence sequence,
+                  hipblaslt::hostnumerics::initialization::OperandSequence sequence,
                   bool                                                      small = false) {
-                  const auto scalar = hipblaslt::host_numerics::scalarType(type);
+                  const auto scalar = hipblaslt::hostnumerics::scalarType(type);
                   const auto seed   = initializationSeed(sequence);
                   if(small)
                   {
-                      return roc::host_numerics::GenerationRecipe::realOnly(
-                          roc::host_numerics::GenerationRecipe::uniformInteger(
+                      return roc::hostnumerics::GenerationRecipe::realOnly(
+                          roc::hostnumerics::GenerationRecipe::uniformInteger(
                               {.lower = 1, .upper = 10})
                               .withAffineValueMapping({.scale = 0.1}),
                           {.seed = seed});
                   }
-                  return hipblaslt::host_numerics::initializationRecipe(
+                  return hipblaslt::hostnumerics::initializationRecipe(
                       scalar,
                       hipblaslt_initialization::rand_int,
                       seed,
-                      hipblaslt::host_numerics::TrigonometricComponent::Cosine);
+                      hipblaslt::hostnumerics::TrigonometricComponent::Cosine);
               };
 
         const auto initializeHostMatrix = [&](HipHostBuffer&                         buffer,
                                               const hipblaslt::client::MatmulMatrix& matrix,
-                                              hipblaslt::host_numerics::MatrixRole   role,
+                                              hipblaslt::hostnumerics::MatrixRole   role,
                                               bool                                   forceNaN,
                                               bool   separateBatchStorage,
                                               size_t batch) {
             const size_t                     rows    = static_cast<size_t>(matrix.rows());
             const size_t                     columns = static_cast<size_t>(matrix.columns());
-            const roc::host_numerics::Layout layout
-                = separateBatchStorage ? roc::host_numerics::Layout(
-                                             roc::host_numerics::Shape{rows, columns},
+            const roc::hostnumerics::Layout layout
+                = separateBatchStorage ? roc::hostnumerics::Layout(
+                                             roc::hostnumerics::Shape{rows, columns},
                                              {matrix.layout.stride(0), matrix.layout.stride(1)})
                                        : matrix.layout;
             auto tensor
-                = buffer.tensor(hipblaslt::host_numerics::scalarType(matrix.apiType), layout);
+                = buffer.tensor(hipblaslt::hostnumerics::scalarType(matrix.apiType), layout);
             std::ranges::fill(tensor.rawEncodedBackingStorage(), std::byte{0});
-            hipblaslt::host_numerics::initializeMatrix(tensor,
+            hipblaslt::hostnumerics::initializeMatrix(tensor,
                                                        role,
                                                        arg.initialization,
                                                        matrixSeed(role, batch),
@@ -1628,22 +1628,22 @@ void testing_matmul_with_bias(const Arguments&                                  
         auto generateMxBatch
             = [&](hipDataType                                                   dataType,
                   hipDataType                                                   scaleType,
-                  const roc::host_numerics::Tensor&                             dataOutput,
+                  const roc::hostnumerics::Tensor&                             dataOutput,
                   std::span<uint8_t>                                            scaleOutput,
                   uint64_t                                                      rows,
                   uint64_t                                                      columns,
                   uint64_t                                                      leadingDimension,
                   size_t                                                        blockRows,
                   size_t                                                        blockColumns,
-                  const roc::host_numerics::amd_gpu_layout::MxScaleStoragePlan& scalePlan,
+                  const roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan& scalePlan,
                   uint64_t                                                      seed) {
                   if(blockRows == 0 || blockColumns == 0
                      || blockColumns > std::numeric_limits<size_t>::max() / blockRows)
                       throw std::invalid_argument("Invalid hipBLASLt MX scale block dimensions.");
-                  auto generated = hipblaslt::host_numerics::generateMxData(
+                  auto generated = hipblaslt::hostnumerics::generateMxData(
                       dataType,
                       scaleType,
-                      roc::host_numerics::Shape{static_cast<size_t>(rows),
+                      roc::hostnumerics::Shape{static_cast<size_t>(rows),
                                                 static_cast<size_t>(columns)},
                       leadingDimension,
                       blockColumns > 1 ? 1 : 0,
@@ -1655,13 +1655,13 @@ void testing_matmul_with_bias(const Arguments&                                  
                   // gfx950 consumes [MN, K blocks] for either operand orientation.
                   const auto scalesForDevice
                       = scalePlan.layout
-                                    == roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::
+                                    == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::
                                         Gfx950
                                 && blockColumns > 1
                             ? generated.scales.copyWithPermutedDimensions({1, 0})
                             : generated.scales;
                   const std::vector<std::byte> scaleStorage
-                      = roc::host_numerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
+                      = roc::hostnumerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                           scalesForDevice.rawEncodedBackingStorage().data(),
                           scalesForDevice.rawEncodedBackingStorage().size(),
                           scalePlan);
@@ -1709,12 +1709,12 @@ void testing_matmul_with_bias(const Arguments&                                  
             const auto& scalePlanA = *preparedProblem.a.mxScaleStorage;
             size_t scaleBatchBytesA
                 = (problem.batchCount > 1) ? preparedProblem.a.scaleElements : 0;
-            std::vector<roc::host_numerics::Tensor> refAAll;
+            std::vector<roc::hostnumerics::Tensor> refAAll;
             refAAll.reserve(static_cast<size_t>(problem.batchCount));
             for(int64_t b = 0; b < problem.batchCount; b++)
             {
                 const auto dataOutputA = hA[i].tensor(
-                    hipblaslt::host_numerics::scalarType(TiA),
+                    hipblaslt::hostnumerics::scalarType(TiA),
                     problem.a.logicalBatchLayout(HIPBLAS_OP_N, static_cast<size_t>(b), false));
                 auto scaleOutputA
                     = mxScaleBatchOutput(hScaleA[i], b * scaleBatchBytesA, scaleBatchBytesA);
@@ -1729,7 +1729,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scaleA_row,
                     scaleA_col,
                     scalePlanA,
-                    matrixSeed(hipblaslt::host_numerics::MatrixRole::A,
+                    matrixSeed(hipblaslt::hostnumerics::MatrixRole::A,
                                problem.a.batchStride() == 0 ? 0 : static_cast<size_t>(b))));
             }
             refA.emplace_back(std::move(refAAll));
@@ -1742,7 +1742,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             {
                 initializeHostMatrix(hA[i],
                                      problem.a,
-                                     hipblaslt::host_numerics::MatrixRole::A,
+                                     hipblaslt::hostnumerics::MatrixRole::A,
                                      alpha_isnan_type(arg, Talpha),
                                      false,
                                      0);
@@ -1753,7 +1753,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     initializeHostMatrix(hA[batchCount],
                                          problem.a,
-                                         hipblaslt::host_numerics::MatrixRole::A,
+                                         hipblaslt::hostnumerics::MatrixRole::A,
                                          alpha_isnan_type(arg, Talpha),
                                          true,
                                          static_cast<size_t>(batchCount));
@@ -1767,7 +1767,7 @@ void testing_matmul_with_bias(const Arguments&                                  
         size_t scaleB_col = ((transB == HIPBLAS_OP_T) ? blockSize(arg.scaleB) : 1);
         if(isBlockScaling(arg.scaleB))
         {
-            // MX B always goes through host numerics (mirrors the A side above).
+            // MX B always goes through HostNumerics (mirrors the A side above).
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01
@@ -1801,12 +1801,12 @@ void testing_matmul_with_bias(const Arguments&                                  
             const auto& scalePlanB = *preparedProblem.b.mxScaleStorage;
             size_t scaleBatchBytesB
                 = (problem.batchCount > 1) ? preparedProblem.b.scaleElements : 0;
-            std::vector<roc::host_numerics::Tensor> refBAll;
+            std::vector<roc::hostnumerics::Tensor> refBAll;
             refBAll.reserve(static_cast<size_t>(problem.batchCount));
             for(int64_t b = 0; b < problem.batchCount; b++)
             {
                 const auto dataOutputB = hB[i].tensor(
-                    hipblaslt::host_numerics::scalarType(TiB),
+                    hipblaslt::hostnumerics::scalarType(TiB),
                     problem.b.logicalBatchLayout(HIPBLAS_OP_N, static_cast<size_t>(b), false));
                 auto scaleOutputB
                     = mxScaleBatchOutput(hScaleB[i], b * scaleBatchBytesB, scaleBatchBytesB);
@@ -1821,7 +1821,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scaleB_row,
                     scaleB_col,
                     scalePlanB,
-                    matrixSeed(hipblaslt::host_numerics::MatrixRole::B,
+                    matrixSeed(hipblaslt::hostnumerics::MatrixRole::B,
                                problem.b.batchStride() == 0 ? 0 : static_cast<size_t>(b))));
             }
             refB.emplace_back(std::move(refBAll));
@@ -1834,7 +1834,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             {
                 initializeHostMatrix(hB[i],
                                      problem.b,
-                                     hipblaslt::host_numerics::MatrixRole::B,
+                                     hipblaslt::hostnumerics::MatrixRole::B,
                                      alpha_isnan_type(arg, Talpha),
                                      false,
                                      0);
@@ -1845,7 +1845,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     initializeHostMatrix(hB[batchCount],
                                          problem.b,
-                                         hipblaslt::host_numerics::MatrixRole::B,
+                                         hipblaslt::hostnumerics::MatrixRole::B,
                                          alpha_isnan_type(arg, Talpha),
                                          true,
                                          static_cast<size_t>(batchCount));
@@ -1859,7 +1859,7 @@ void testing_matmul_with_bias(const Arguments&                                  
         {
             initializeHostMatrix(hC[i],
                                  problem.c,
-                                 hipblaslt::host_numerics::MatrixRole::C,
+                                 hipblaslt::hostnumerics::MatrixRole::C,
                                  beta_isnan_type(arg, Talpha),
                                  false,
                                  0);
@@ -2005,7 +2005,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                     auxiliary.layout,
                     randomInitializationRecipe(
                         Taux,
-                        hipblaslt::host_numerics::initialization::OperandSequence::Auxiliary));
+                        hipblaslt::hostnumerics::initialization::OperandSequence::Auxiliary));
             }
 
             if(arg.bias_vector)
@@ -2015,23 +2015,23 @@ void testing_matmul_with_bias(const Arguments&                                  
                     initializeHostTensor(
                         hBias[i],
                         Tbias,
-                        roc::host_numerics::Layout(
-                            roc::host_numerics::Shape{static_cast<size_t>(arg.bias_stride),
+                        roc::hostnumerics::Layout(
+                            roc::hostnumerics::Shape{static_cast<size_t>(arg.bias_stride),
                                                       1,
                                                       static_cast<size_t>(problem.batchCount)},
                             {1, arg.bias_stride, arg.bias_stride}),
                         randomInitializationRecipe(
                             Tbias,
-                            hipblaslt::host_numerics::initialization::OperandSequence::Bias));
+                            hipblaslt::hostnumerics::initialization::OperandSequence::Bias));
                 else
                     initializeHostTensor(
                         hBias[i],
                         Tbias,
-                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                            roc::host_numerics::Shape{preparedProblem.biasElements}),
+                        roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+                            roc::hostnumerics::Shape{preparedProblem.biasElements}),
                         randomInitializationRecipe(
                             Tbias,
-                            hipblaslt::host_numerics::initialization::OperandSequence::Bias));
+                            hipblaslt::hostnumerics::initialization::OperandSequence::Bias));
             }
 
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
@@ -2041,21 +2041,21 @@ void testing_matmul_with_bias(const Arguments&                                  
                     initializeHostTensor(
                         hScaleA[i],
                         Talpha,
-                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                            roc::host_numerics::Shape{preparedProblem.a.scaleElements}),
+                        roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+                            roc::hostnumerics::Shape{preparedProblem.a.scaleElements}),
                         randomInitializationRecipe(
                             Talpha,
-                            hipblaslt::host_numerics::initialization::OperandSequence::ScaleA,
+                            hipblaslt::hostnumerics::initialization::OperandSequence::ScaleA,
                             true));
                 else
                     initializeHostTensor(
                         hScaleA[i],
                         Talpha,
-                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                            roc::host_numerics::Shape{preparedProblem.a.scaleElements}),
+                        roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+                            roc::hostnumerics::Shape{preparedProblem.a.scaleElements}),
                         randomInitializationRecipe(
                             Talpha,
-                            hipblaslt::host_numerics::initialization::OperandSequence::ScaleA));
+                            hipblaslt::hostnumerics::initialization::OperandSequence::ScaleA));
             }
 
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
@@ -2065,21 +2065,21 @@ void testing_matmul_with_bias(const Arguments&                                  
                     initializeHostTensor(
                         hScaleB[i],
                         Talpha,
-                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                            roc::host_numerics::Shape{preparedProblem.b.scaleElements}),
+                        roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+                            roc::hostnumerics::Shape{preparedProblem.b.scaleElements}),
                         randomInitializationRecipe(
                             Talpha,
-                            hipblaslt::host_numerics::initialization::OperandSequence::ScaleB,
+                            hipblaslt::hostnumerics::initialization::OperandSequence::ScaleB,
                             true));
                 else
                     initializeHostTensor(
                         hScaleB[i],
                         Talpha,
-                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                            roc::host_numerics::Shape{preparedProblem.b.scaleElements}),
+                        roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+                            roc::hostnumerics::Shape{preparedProblem.b.scaleElements}),
                         randomInitializationRecipe(
                             Talpha,
-                            hipblaslt::host_numerics::initialization::OperandSequence::ScaleB));
+                            hipblaslt::hostnumerics::initialization::OperandSequence::ScaleB));
             }
 
             if(arg.scaleC)
@@ -2088,10 +2088,10 @@ void testing_matmul_with_bias(const Arguments&                                  
                 initializeHostTensor(
                     hScaleC[i],
                     Talpha,
-                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
                     randomInitializationRecipe(
                         Talpha,
-                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleC,
+                        hipblaslt::hostnumerics::initialization::OperandSequence::ScaleC,
                         small));
             }
 
@@ -2101,10 +2101,10 @@ void testing_matmul_with_bias(const Arguments&                                  
                 initializeHostTensor(
                     hScaleD[i],
                     Talpha,
-                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
                     randomInitializationRecipe(
                         Talpha,
-                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleD,
+                        hipblaslt::hostnumerics::initialization::OperandSequence::ScaleD,
                         small));
             }
 
@@ -2112,27 +2112,27 @@ void testing_matmul_with_bias(const Arguments&                                  
                 initializeHostTensor(
                     hAmaxD_gold[i],
                     Talpha,
-                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
-                    roc::host_numerics::GenerationRecipe::realOnly(
-                        roc::host_numerics::GenerationRecipe::zero()));
+                    roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
+                    roc::hostnumerics::GenerationRecipe::realOnly(
+                        roc::hostnumerics::GenerationRecipe::zero()));
 
             if(arg.scaleE)
                 initializeHostTensor(
                     hScaleE[i],
                     Talpha,
-                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
                     randomInitializationRecipe(
-                        Talpha, hipblaslt::host_numerics::initialization::OperandSequence::ScaleE));
+                        Talpha, hipblaslt::hostnumerics::initialization::OperandSequence::ScaleE));
 
             if(arg.scaleAlpha_vector)
                 initializeHostTensor(
                     hScaleAlphaVec[i],
                     Talpha,
-                    roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                    roc::hostnumerics::Layout::contiguousLastDimensionFastest(
                         {static_cast<size_t>(problem.m)}),
                     randomInitializationRecipe(
                         Talpha,
-                        hipblaslt::host_numerics::initialization::OperandSequence::AlphaVector));
+                        hipblaslt::hostnumerics::initialization::OperandSequence::AlphaVector));
 
             if(arg.gradient && arg.use_e)
             {
@@ -2379,7 +2379,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             {
                 initializeHostMatrix(hC[batchCount],
                                      problem.c,
-                                     hipblaslt::host_numerics::MatrixRole::C,
+                                     hipblaslt::hostnumerics::MatrixRole::C,
                                      beta_isnan_type(arg, Talpha),
                                      true,
                                      static_cast<size_t>(batchCount));
@@ -2446,11 +2446,11 @@ void testing_matmul_with_bias(const Arguments&                                  
                 initializeHostTensor(
                     hScaleA[i],
                     Talpha,
-                    roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                    roc::hostnumerics::Layout::contiguousLastDimensionFastest(
                         {preparedProblem.a.scaleElements}),
                     randomInitializationRecipe(
                         Talpha,
-                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleA,
+                        hipblaslt::hostnumerics::initialization::OperandSequence::ScaleA,
                         arg.norm_check));
             }
 
@@ -2459,11 +2459,11 @@ void testing_matmul_with_bias(const Arguments&                                  
                 initializeHostTensor(
                     hScaleB[i],
                     Talpha,
-                    roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                    roc::hostnumerics::Layout::contiguousLastDimensionFastest(
                         {preparedProblem.b.scaleElements}),
                     randomInitializationRecipe(
                         Talpha,
-                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleB,
+                        hipblaslt::hostnumerics::initialization::OperandSequence::ScaleB,
                         arg.norm_check));
             }
             if(arg.scaleC)
@@ -2472,10 +2472,10 @@ void testing_matmul_with_bias(const Arguments&                                  
                 initializeHostTensor(
                     hScaleC[i],
                     Talpha,
-                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
                     randomInitializationRecipe(
                         Talpha,
-                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleC,
+                        hipblaslt::hostnumerics::initialization::OperandSequence::ScaleC,
                         small));
             }
 
@@ -2485,10 +2485,10 @@ void testing_matmul_with_bias(const Arguments&                                  
                 initializeHostTensor(
                     hScaleD[i],
                     Talpha,
-                    roc::host_numerics::Layout::contiguousLastDimensionFastest({1}),
+                    roc::hostnumerics::Layout::contiguousLastDimensionFastest({1}),
                     randomInitializationRecipe(
                         Talpha,
-                        hipblaslt::host_numerics::initialization::OperandSequence::ScaleD,
+                        hipblaslt::hostnumerics::initialization::OperandSequence::ScaleD,
                         small));
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
@@ -3362,20 +3362,20 @@ void testing_matmul_with_bias(const Arguments&                                  
             {
                 const auto hostBufferTensor = [&](std::vector<HipHostBuffer>&          buffers,
                                                   hipDataType                          type,
-                                                  const roc::host_numerics::Layout& layout,
+                                                  const roc::hostnumerics::Layout& layout,
                                                   bool separateStorage) {
                     const size_t bufferIndex
                         = separateStorage ? static_cast<size_t>(batchIdx)
                                           : static_cast<size_t>(gemmIdx);
                     return buffers.at(bufferIndex).tensor(
-                        hipblaslt::host_numerics::scalarType(type), layout);
+                        hipblaslt::hostnumerics::scalarType(type), layout);
                 };
-                const auto decodedMxTensor = [](const roc::host_numerics::Tensor& tensor,
+                const auto decodedMxTensor = [](const roc::hostnumerics::Tensor& tensor,
                                                 hipblasOperation_t operation) {
                     if(operation == HIPBLAS_OP_N)
                         return tensor;
-                    return tensor.shareStorageWithLayout(roc::host_numerics::Layout(
-                        roc::host_numerics::Shape{tensor.shape()[1], tensor.shape()[0]},
+                    return tensor.shareStorageWithLayout(roc::hostnumerics::Layout(
+                        roc::hostnumerics::Shape{tensor.shape()[1], tensor.shape()[0]},
                         {tensor.layout().stride(1), tensor.layout().stride(0)},
                         tensor.layout().offset()));
                 };
@@ -3391,50 +3391,50 @@ void testing_matmul_with_bias(const Arguments&                                  
                     static_cast<size_t>(batchIdx),
                     pointerArrayMode && !preparedProblem.epilogueEnabled);
 
-                roc::host_numerics::Tensor referenceA
+                roc::hostnumerics::Tensor referenceA
                     = isScaleAMXFormat
                           ? decodedMxTensor(refA.at(gemmIdx).at(batchIdx), problem.operationA)
                           : hostBufferTensor(hA, TiA, aLayout, pointerArrayMode);
-                roc::host_numerics::Tensor referenceB
+                roc::hostnumerics::Tensor referenceB
                     = isScaleBMXFormat
                           ? decodedMxTensor(refB.at(gemmIdx).at(batchIdx), problem.operationB)
                           : hostBufferTensor(hB, TiB, bLayout, pointerArrayMode);
-                roc::host_numerics::Tensor referenceC
+                roc::hostnumerics::Tensor referenceC
                     = hostBufferTensor(hC, TiC, cLayout, pointerArrayMode);
-                roc::host_numerics::Tensor referenceD
+                roc::hostnumerics::Tensor referenceD
                     = preparedProblem.epilogueEnabled
                           ? hostBufferTensor(hD_gold_epl, Talpha, dLayout, false)
                           : hostBufferTensor(hD_gold, To, dLayout, pointerArrayMode);
 
-                using roc::host_numerics::ActivationApplication;
-                using roc::host_numerics::ClampActivation;
-                using roc::host_numerics::EpilogueOptions;
-                using roc::host_numerics::EpilogueOutputs;
-                using roc::host_numerics::GeluActivation;
-                using roc::host_numerics::IdentityActivation;
-                using roc::host_numerics::Layout;
-                using roc::host_numerics::MatmulOptions;
-                using roc::host_numerics::OutputConversion;
-                using roc::host_numerics::ReluActivation;
-                using roc::host_numerics::ScalarType;
-                using roc::host_numerics::Shape;
-                using roc::host_numerics::SiluActivation;
-                using roc::host_numerics::Tensor;
-                using roc::host_numerics::matmulIntoWithBlasBackend;
-                using roc::host_numerics::multiply;
-                using roc::host_numerics::referenceEpilogueInto;
-                using roc::host_numerics::referenceSumInto;
+                using roc::hostnumerics::ActivationApplication;
+                using roc::hostnumerics::ClampActivation;
+                using roc::hostnumerics::EpilogueOptions;
+                using roc::hostnumerics::EpilogueOutputs;
+                using roc::hostnumerics::GeluActivation;
+                using roc::hostnumerics::IdentityActivation;
+                using roc::hostnumerics::Layout;
+                using roc::hostnumerics::MatmulOptions;
+                using roc::hostnumerics::OutputConversion;
+                using roc::hostnumerics::ReluActivation;
+                using roc::hostnumerics::ScalarType;
+                using roc::hostnumerics::Shape;
+                using roc::hostnumerics::SiluActivation;
+                using roc::hostnumerics::Tensor;
+                using roc::hostnumerics::matmulIntoWithBlasBackend;
+                using roc::hostnumerics::multiply;
+                using roc::hostnumerics::referenceEpilogueInto;
+                using roc::hostnumerics::referenceSumInto;
 
                 const ScalarType computeTypeA
                     = isScaleAMXFormat
                           ? referenceA.type()
-                          : hipblaslt::host_numerics::referenceComputeType(dataTypes.computeInputA);
+                          : hipblaslt::hostnumerics::referenceComputeType(dataTypes.computeInputA);
                 const ScalarType computeTypeB
                     = isScaleBMXFormat
                           ? referenceB.type()
-                          : hipblaslt::host_numerics::referenceComputeType(dataTypes.computeInputB);
+                          : hipblaslt::hostnumerics::referenceComputeType(dataTypes.computeInputB);
                 const ScalarType accumulatorType
-                    = hipblaslt::host_numerics::referenceAccumulatorType(dataTypes.coefficient);
+                    = hipblaslt::hostnumerics::referenceAccumulatorType(dataTypes.coefficient);
                 MatmulOptions matmulOptions(accumulatorType);
                 matmulOptions.conjugateA = problem.operationA == HIPBLAS_OP_C;
                 matmulOptions.conjugateB = problem.operationB == HIPBLAS_OP_C;
@@ -3447,7 +3447,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     matmulOptions.preQuantizationScalesA.push_back(
                         hScaleA.at(gemmIdx)
-                            .tensor(hipblaslt::host_numerics::scalarType(Talpha),
+                            .tensor(hipblaslt::hostnumerics::scalarType(Talpha),
                                     Layout::contiguousLastDimensionFastest(
                                         Shape{preparedProblem.a.scaleElements}))
                             .expandDims(1));
@@ -3456,7 +3456,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     matmulOptions.preQuantizationScalesA.push_back(
                         hScaleAlphaVec.at(gemmIdx)
-                            .tensor(hipblaslt::host_numerics::scalarType(Talpha),
+                            .tensor(hipblaslt::hostnumerics::scalarType(Talpha),
                                     Layout::contiguousLastDimensionFastest(
                                         Shape{preparedProblem.scaleAlphaElements}))
                             .expandDims(1));
@@ -3466,23 +3466,23 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     matmulOptions.preQuantizationScalesB.push_back(
                         hScaleB.at(gemmIdx)
-                            .tensor(hipblaslt::host_numerics::scalarType(Talpha),
+                            .tensor(hipblaslt::hostnumerics::scalarType(Talpha),
                                     Layout::contiguousLastDimensionFastest(
                                         Shape{preparedProblem.b.scaleElements}))
                             .expandDims(0));
                 }
 
-                const Tensor alpha = hipblaslt::host_numerics::scalarValue(preparedProblem.alpha,
+                const Tensor alpha = hipblaslt::hostnumerics::scalarValue(preparedProblem.alpha,
                                                                            dataTypes.coefficient);
-                const Tensor beta  = hipblaslt::host_numerics::scalarValue(preparedProblem.beta,
+                const Tensor beta  = hipblaslt::hostnumerics::scalarValue(preparedProblem.beta,
                                                                           dataTypes.coefficient);
                 const Tensor scaleC
                     = arg.scaleC
-                          ? hipblaslt::host_numerics::realOnlyScalarValue(scaleCValue, Talpha)
+                          ? hipblaslt::hostnumerics::realOnlyScalarValue(scaleCValue, Talpha)
                           : Tensor::scalar(accumulatorType, 1);
                 const Tensor outputScale
                     = arg.scaleD && !preparedProblem.epilogueEnabled
-                          ? hipblaslt::host_numerics::scalarValue(scaleDValue, Talpha)
+                          ? hipblaslt::hostnumerics::scalarValue(scaleDValue, Talpha)
                           : Tensor::scalar(accumulatorType, 1);
 
                 const std::complex<double> alphaValue = alpha.item<std::complex<double>>();
@@ -3538,16 +3538,16 @@ void testing_matmul_with_bias(const Arguments&                                  
                         .rawOutput
                         = hostBufferTensor(hBias_gold_epl, Talpha, dLayout, pointerArrayMode),
                     };
-                    EpilogueOptions epilogueOptions(hipblaslt::host_numerics::scalarType(Talpha));
+                    EpilogueOptions epilogueOptions(hipblaslt::hostnumerics::scalarType(Talpha));
                     epilogueOptions.outputScale
-                        = hipblaslt::host_numerics::scalarValue(scaleDValue, Talpha);
+                        = hipblaslt::hostnumerics::scalarValue(scaleDValue, Talpha);
                     epilogueOptions.auxiliaryScale
-                        = hipblaslt::host_numerics::scalarValue(scaleEValue, Talpha);
+                        = hipblaslt::hostnumerics::scalarValue(scaleEValue, Talpha);
 
                     if(arg.amaxD)
                     {
                         epilogueOutputs.amax = hAmaxD_gold[gemmIdx].tensor(
-                            hipblaslt::host_numerics::scalarType(Talpha),
+                            hipblaslt::hostnumerics::scalarType(Talpha),
                             Layout::contiguousLastDimensionFastest(Shape{1}));
                         epilogueOptions.accumulateAmax = true;
                     }
@@ -3570,7 +3570,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                             = arg.bias_stride > 0 ? arg.bias_stride * batchIdx : 0;
                         epilogueOptions.bias
                             = hBias[gemmIdx]
-                                  .tensor(hipblaslt::host_numerics::scalarType(Tbias),
+                                  .tensor(hipblaslt::hostnumerics::scalarType(Tbias),
                                           Layout(Shape{static_cast<size_t>(problem.m)},
                                                  {1},
                                                  biasOffset))
@@ -3605,7 +3605,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         = arg.gradient && arg.activation_type != hipblaslt_activation_type::none
                               ? ActivationApplication::Gradient
                               : ActivationApplication::Forward;
-                    if(hipblaslt::host_numerics::scalarType(To) == ScalarType::Int8)
+                    if(hipblaslt::hostnumerics::scalarType(To) == ScalarType::Int8)
                         epilogueOptions.outputConversion = OutputConversion::SaturatingInt8;
                     referenceEpilogueInto(referenceD, epilogueOutputs, epilogueOptions);
 
@@ -3616,7 +3616,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         const size_t biasElements = static_cast<size_t>(
                             arg.bias_source == hipblaslt_bias_source::b ? problem.n : problem.m);
                         Tensor biasOutput = hBias_gold[gemmIdx].tensor(
-                            hipblaslt::host_numerics::scalarType(Tbias),
+                            hipblaslt::hostnumerics::scalarType(Tbias),
                             Layout(Shape{biasElements}, {1}, biasOffset));
                         const auto reduceBias = [&](const Tensor& input) {
                             referenceSumInto(input, biasOutput, {1}, ScalarType::Float32);
@@ -3722,28 +3722,28 @@ void testing_matmul_with_bias(const Arguments&                                  
         }
     };
 
-    const hipblaslt::host_numerics::MatmulValidationOptions validationOptions{
+    const hipblaslt::hostnumerics::MatmulValidationOptions validationOptions{
         .compareAllClose = bool(arg.unit_check),
         .compareNorm     = bool(arg.norm_check),
         .searchAllClose  = bool(arg.allclose_check),
         .computeUlp      = bool(arg.ulp_check),
         .assertNorm      = arg.norm_check_assert,
         .computeType     = arg.compute_type,
-        .inputTypeA      = hipblaslt::host_numerics::scalarType(arg.a_type),
-        .inputTypeB      = hipblaslt::host_numerics::scalarType(arg.b_type),
+        .inputTypeA      = hipblaslt::hostnumerics::scalarType(arg.a_type),
+        .inputTypeB      = hipblaslt::hostnumerics::scalarType(arg.b_type),
     };
 
     auto makeValidationCases =
-        [&](const std::vector<roc::host_numerics::ComparisonTolerance>& allCloseTolerances) {
-            using hipblaslt::host_numerics::MatmulValidationCase;
-            using roc::host_numerics::Layout;
-            using roc::host_numerics::Shape;
+        [&](const std::vector<roc::hostnumerics::ComparisonTolerance>& allCloseTolerances) {
+            using hipblaslt::hostnumerics::MatmulValidationCase;
+            using roc::hostnumerics::Layout;
+            using roc::hostnumerics::Shape;
 
             auto output = [](const HipHostBuffer& expected,
                              const HipHostBuffer& observed,
                              hipDataType          type,
                              const Layout&        layout) {
-                const auto scalar = hipblaslt::host_numerics::scalarType(type);
+                const auto scalar = hipblaslt::hostnumerics::scalarType(type);
                 return MatmulValidationCase::TensorPair{expected.tensor(scalar, layout),
                                                         observed.tensor(scalar, layout)};
             };
@@ -3821,7 +3821,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             = matmulValidationTolerances(arg, matmulProblems, TiA, TiB, To, Tc);
         readValidationSideOutputs();
         const auto validationCases = makeValidationCases(allCloseTolerances);
-        return hipblaslt::host_numerics::validateMatmulOutputs(validationOptions, validationCases);
+        return hipblaslt::hostnumerics::validateMatmulOutputs(validationOptions, validationCases);
     };
 
     if(!arg.timing)

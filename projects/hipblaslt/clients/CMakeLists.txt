@@ -31,12 +31,12 @@ add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
         roc::hipblaslt
-        roc::host-numerics
-        roc::host-numerics-amd-gpu-layout
+        roc::hostnumerics
+        roc::hostnumerics-amd-gpu-layout
         OpenMP::OpenMP_CXX
     PRIVATE
         hip::device
-        roc::host-numerics-blas
+        roc::hostnumerics-blas
         roc::tensilelite-host
 )
 
@@ -75,7 +75,7 @@ target_link_libraries(hipblaslt-bench-groupedgemm-fixed-mk
     PRIVATE
         hipblaslt-clients-common
         hip::device
-        roc::host-numerics
+        roc::hostnumerics
 )
 
 add_executable(hipblaslt-bench-extop-layernorm "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_layernorm.cpp")
@@ -144,7 +144,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common
-            roc::host-numerics
+            roc::hostnumerics
             roc::tensilelite-host
             GTest::gtest
             OpenMP::OpenMP_CXX

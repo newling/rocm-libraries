@@ -39,7 +39,7 @@
 #include <Tensile/UtilsOrigami.hpp>
 #include <iostream>
 #include <origami/streamk.hpp>
-#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -67,7 +67,7 @@ namespace TensileLite
         // Batch stride for pre-swizzled gfx950 MX scales.
         size_t preSwizzledScaleBatchStride(TensorDescriptor const& tensor, size_t boundIndex)
         {
-            using namespace roc::host_numerics::amd_gpu_layout;
+            using namespace roc::hostnumerics::amd_gpu_layout;
             return planMxScaleStorage({tensor.sizes()[1 - boundIndex], tensor.sizes()[boundIndex]},
                                       0,
                                       MxScaleStorageLayout::Gfx950)

@@ -35,10 +35,10 @@ namespace
         prepare(const Arguments&                                         arguments,
                 bool                                                     swizzleA = false,
                 bool                                                     swizzleB = false,
-                roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA
-                = roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Natural,
-                roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB
-                = roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Natural)
+                roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA
+                = roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Natural,
+                roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB
+                = roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Natural)
     {
         const auto problems  = hipblaslt::client::normalizeMatmulProblems(arguments);
         const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(arguments);
@@ -367,7 +367,7 @@ TEST(MatmulPreparation, MakesScaleAlphaVectorAUnitScalarEpilogue)
 
 TEST(MatmulPreparation, UsesPhysicalMxScaleStoragePlansForEveryTranspose)
 {
-    using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
+    using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
 
     auto arguments   = baseArguments();
     arguments.M[0]   = 17;
@@ -406,7 +406,7 @@ TEST(MatmulPreparation, UsesPhysicalMxScaleStoragePlansForEveryTranspose)
 
 TEST(MatmulPreparation, CountsEveryBatchOfByteEncodedMxScales)
 {
-    using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
+    using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
 
     auto arguments        = baseArguments();
     arguments.a_type      = HIP_R_4F_E2M1;

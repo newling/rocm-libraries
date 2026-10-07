@@ -30,12 +30,12 @@
 #include "hipblaslt_test.hpp"
 #include "host_vector.hpp"
 #include "utility.hpp"
-#include <hipblaslt/host_numerics/Types.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
 #include <limits>
-#include <roc/host_numerics/gemm.hpp>
-#include <roc/host_numerics/generation.hpp>
-#include <roc/host_numerics/tensor_operations.hpp>
-#include <roc/host_numerics/validation.hpp>
+#include <roc/hostnumerics/gemm.hpp>
+#include <roc/hostnumerics/generation.hpp>
+#include <roc/hostnumerics/tensor_operations.hpp>
+#include <roc/hostnumerics/validation.hpp>
 #include <stdexcept>
 
 namespace
@@ -82,19 +82,19 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     if(arg.batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
         GTEST_SKIP() << "Batch offset requires pointer-array batching";
 
-    using hipblaslt::host_numerics::scalarType;
-    using roc::host_numerics::ComparisonOptions;
-    using roc::host_numerics::IndexOrder;
-    using roc::host_numerics::Layout;
-    using roc::host_numerics::MatmulOptions;
-    using roc::host_numerics::OutputSelection;
-    using roc::host_numerics::ScalarType;
-    using roc::host_numerics::Shape;
-    using roc::host_numerics::Tensor;
-    using roc::host_numerics::addInto;
-    using roc::host_numerics::compare;
-    using roc::host_numerics::generate;
-    using roc::host_numerics::multiply;
+    using hipblaslt::hostnumerics::scalarType;
+    using roc::hostnumerics::ComparisonOptions;
+    using roc::hostnumerics::IndexOrder;
+    using roc::hostnumerics::Layout;
+    using roc::hostnumerics::MatmulOptions;
+    using roc::hostnumerics::OutputSelection;
+    using roc::hostnumerics::ScalarType;
+    using roc::hostnumerics::Shape;
+    using roc::hostnumerics::Tensor;
+    using roc::hostnumerics::addInto;
+    using roc::hostnumerics::compare;
+    using roc::hostnumerics::generate;
+    using roc::hostnumerics::multiply;
 
     const hipblasOperation_t transA = char_to_hipblas_operation(arg.transA);
     const hipblasOperation_t transB = char_to_hipblas_operation(arg.transB);
@@ -126,7 +126,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                                 size_t                                    columns,
                                 int64_t                                   leadingDimension,
                                 const OffsetMatrixPlan&                   plan,
-                                const roc::host_numerics::GenerationRecipe& recipe) {
+                                const roc::hostnumerics::GenerationRecipe& recipe) {
         auto tensor = storage.shareStorageWithLayout(
             Layout(Shape{rows, columns, size_t(batchCount)},
                    {1, leadingDimension, ptrdiff_t(plan.allocationElements)},
@@ -140,8 +140,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         aColumns,
         lda,
         aPlan,
-        roc::host_numerics::GenerationRecipe::realOnly(
-            roc::host_numerics::GenerationRecipe::affineIndexRemainder(
+        roc::hostnumerics::GenerationRecipe::realOnly(
+            roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                 {.dimensionCoefficients = {1, 1, 1}, .positiveDivisor = 7})
                 .withAffineValueMapping({.offset = 1})));
     generateMatrices(
@@ -150,8 +150,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         bColumns,
         ldb,
         bPlan,
-        roc::host_numerics::GenerationRecipe::realOnly(
-            roc::host_numerics::GenerationRecipe::affineIndexRemainder(
+        roc::hostnumerics::GenerationRecipe::realOnly(
+            roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                 {.dimensionCoefficients = {1, -1, 1}, .positiveDivisor = 5})
                 .withAffineValueMapping({.offset = 1})));
     generateMatrices(hostC,
@@ -159,8 +159,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                      N,
                      ldc,
                      cPlan,
-                     roc::host_numerics::GenerationRecipe::realOnly(
-                         roc::host_numerics::GenerationRecipe::affineIndexRemainder(
+                     roc::hostnumerics::GenerationRecipe::realOnly(
+                         roc::hostnumerics::GenerationRecipe::affineIndexRemainder(
                              {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3})));
 
     device_vector<Ti> deviceA(aPlan.allocationElements * batchCount);
@@ -301,7 +301,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                    {1, ldc},
                    ptrdiff_t(batch * cPlan.allocationElements) + cPlan.logicalStart()));
         const ScalarType computeType = scalarType<Tc>();
-        Tensor product = roc::host_numerics::matmul(a, b, computeType, MatmulOptions(computeType));
+        Tensor product = roc::hostnumerics::matmul(a, b, computeType, MatmulOptions(computeType));
         Tensor scaledProduct
             = multiply(product, Tensor::scalar(computeType, alpha), computeType, computeType);
         Tensor scaledC = multiply(c, Tensor::scalar(computeType, beta), computeType, computeType);

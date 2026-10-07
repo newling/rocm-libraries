@@ -27,10 +27,10 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_numerics/Types.hpp>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
 #include <iostream>
-#include <roc/host_numerics/validation.hpp>
+#include <roc/hostnumerics/validation.hpp>
 #include <string>
 #include <vector>
 
@@ -106,7 +106,7 @@ int parseArgs(int                       argc,
     return EXIT_SUCCESS;
 }
 
-void reportComparison(const char* title, const roc::host_numerics::ComparisonReport& comparison)
+void reportComparison(const char* title, const roc::hostnumerics::ComparisonReport& comparison)
 {
     std::cout << "----- " << title << " result" << " -----" << std::endl;
     std::cout << "status: " << (comparison.passed() ? "PASS" : "FAIL") << std::endl;
@@ -162,28 +162,28 @@ int main(int argc, char** argv)
     std::vector<float> cpuMean(m, 0.f);
     std::vector<float> cpuInvvar(m, 0.f);
     const auto generated = [&](size_t elements,
-                               hipblaslt::host_numerics::initialization::OperandSequence sequence) {
-        return roc::host_numerics::generate(
-            roc::host_numerics::ScalarType::Float32,
-            roc::host_numerics::Shape{elements},
-            hipblaslt::host_numerics::initializationRecipe(
-                roc::host_numerics::ScalarType::Float32,
+                               hipblaslt::hostnumerics::initialization::OperandSequence sequence) {
+        return roc::hostnumerics::generate(
+            roc::hostnumerics::ScalarType::Float32,
+            roc::hostnumerics::Shape{elements},
+            hipblaslt::hostnumerics::initializationRecipe(
+                roc::hostnumerics::ScalarType::Float32,
                 initialization,
-                hipblaslt::host_numerics::initialization::seedForSequence(
-                    hipblaslt::host_numerics::defaultInitializationSeed, sequence),
-                hipblaslt::host_numerics::TrigonometricComponent::Cosine));
+                hipblaslt::hostnumerics::initialization::seedForSequence(
+                    hipblaslt::hostnumerics::defaultInitializationSeed, sequence),
+                hipblaslt::hostnumerics::TrigonometricComponent::Cosine));
     };
-    const roc::host_numerics::Tensor cpuInput = generated(
-        numElements, hipblaslt::host_numerics::initialization::OperandSequence::MatrixA);
-    const roc::host_numerics::Tensor cpuGamma
+    const roc::hostnumerics::Tensor cpuInput = generated(
+        numElements, hipblaslt::hostnumerics::initialization::OperandSequence::MatrixA);
+    const roc::hostnumerics::Tensor cpuGamma
         = affine
-              ? generated(n, hipblaslt::host_numerics::initialization::OperandSequence::ScaleA)
-              : roc::host_numerics::Tensor(roc::host_numerics::ScalarType::Float32,
-                                           roc::host_numerics::Shape{0});
-    const roc::host_numerics::Tensor cpuBeta
-        = affine ? generated(n, hipblaslt::host_numerics::initialization::OperandSequence::Bias)
-                 : roc::host_numerics::Tensor(roc::host_numerics::ScalarType::Float32,
-                                              roc::host_numerics::Shape{0});
+              ? generated(n, hipblaslt::hostnumerics::initialization::OperandSequence::ScaleA)
+              : roc::hostnumerics::Tensor(roc::hostnumerics::ScalarType::Float32,
+                                           roc::hostnumerics::Shape{0});
+    const roc::hostnumerics::Tensor cpuBeta
+        = affine ? generated(n, hipblaslt::hostnumerics::initialization::OperandSequence::Bias)
+                 : roc::hostnumerics::Tensor(roc::hostnumerics::ScalarType::Float32,
+                                              roc::hostnumerics::Shape{0});
 
     hipErr = hipMemcpyHtoD(gpuInput,
                            cpuInput.rawEncodedBackingStorage().data(),
@@ -208,14 +208,14 @@ int main(int argc, char** argv)
     hipErr = hipMemcpyDtoH(cpuMean.data(), gpuMean, m * elementNumBytes);
     hipErr = hipMemcpyDtoH(cpuInvvar.data(), gpuInvvar, m * elementNumBytes);
 
-    const roc::host_numerics::Layout tensorLayout
-        = roc::host_numerics::Layout::contiguousLastDimensionFastest(
-            roc::host_numerics::Shape{m, n});
-    const roc::host_numerics::Layout statisticsLayout
-        = roc::host_numerics::Layout::contiguousLastDimensionFastest(
-            roc::host_numerics::Shape{m});
+    const roc::hostnumerics::Layout tensorLayout
+        = roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+            roc::hostnumerics::Shape{m, n});
+    const roc::hostnumerics::Layout statisticsLayout
+        = roc::hostnumerics::Layout::contiguousLastDimensionFastest(
+            roc::hostnumerics::Shape{m});
 
-    roc::host_numerics::LayerNormOptions options;
+    roc::hostnumerics::LayerNormOptions options;
     options.axis    = 1;
     options.epsilon = 1e-5;
     if(affine)
@@ -223,34 +223,34 @@ int main(int argc, char** argv)
         options.gamma = cpuGamma;
         options.beta  = cpuBeta;
     }
-    const roc::host_numerics::LayerNormOutputs reference
-        = roc::host_numerics::referenceLayerNorm(
+    const roc::hostnumerics::LayerNormOutputs reference
+        = roc::hostnumerics::referenceLayerNorm(
             cpuInput.shareStorageWithLayout(tensorLayout),
-            {.output          = roc::host_numerics::ScalarType::Float32,
-             .mean            = roc::host_numerics::ScalarType::Float32,
-             .inverseVariance = roc::host_numerics::ScalarType::Float32},
+            {.output          = roc::hostnumerics::ScalarType::Float32,
+             .mean            = roc::hostnumerics::ScalarType::Float32,
+             .inverseVariance = roc::hostnumerics::ScalarType::Float32},
             options);
 
-    const roc::host_numerics::ComparisonOptions comparisonOptions
-        = roc::host_numerics::nearComparisonOptions(1e-5);
+    const roc::hostnumerics::ComparisonOptions comparisonOptions
+        = roc::hostnumerics::nearComparisonOptions(1e-5);
     reportComparison(
         "Output",
-        roc::host_numerics::compare(
-            hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+        roc::hostnumerics::compare(
+            hipblaslt::hostnumerics::copyTensorFromEncodedStorage(
                 cpuOutput.data(), cpuOutput.size(), tensorLayout),
             reference.output,
             comparisonOptions));
     reportComparison(
         "Mean",
-        roc::host_numerics::compare(
-            hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+        roc::hostnumerics::compare(
+            hipblaslt::hostnumerics::copyTensorFromEncodedStorage(
                 cpuMean.data(), cpuMean.size(), statisticsLayout),
             *reference.mean,
             comparisonOptions));
     reportComparison(
         "Invvar",
-        roc::host_numerics::compare(
-            hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+        roc::hostnumerics::compare(
+            hipblaslt::hostnumerics::copyTensorFromEncodedStorage(
                 cpuInvvar.data(), cpuInvvar.size(), statisticsLayout),
             *reference.inverseVariance,
             comparisonOptions));

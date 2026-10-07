@@ -12,7 +12,6 @@
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context_fwd.hpp>
-#include <rocRoller/HostNumerics/HostDataGeneration.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
@@ -21,6 +20,7 @@
 #include <rocRoller/Operations/OperationTag.hpp>
 #include <rocRoller/Operations/Scratch_fwd.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
 
 #include <common/GEMMProblem.hpp>
 #include <common/Utilities.hpp>
@@ -250,7 +250,7 @@ namespace rocRollerTest
                 TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
                 auto const seed           = 31415u;
-                auto const bounded        = HostNumerics::DataInitialization{};
+                auto const bounded        = hostnumerics::DataInitialization{};
                 auto       scaleTypeA     = DataType::None;
                 auto       scaleTypeB     = DataType::None;
                 size_t     scaleBlockSize = 1;
@@ -275,7 +275,7 @@ namespace rocRollerTest
                     scaleTypeB = m_problem.scaleTypeB;
                 }
 
-                auto generatedInputs = HostNumerics::generateGEMMInputs(descA,
+                auto generatedInputs = hostnumerics::generateGEMMInputs(descA,
                                                                         descB,
                                                                         descC,
                                                                         bounded,
@@ -287,13 +287,13 @@ namespace rocRollerTest
                                                                         -1.0f,
                                                                         1.0f,
                                                                         seed);
-                hostA = HostNumerics::copyTensorStorage<PackedTypeA>(generatedInputs.a);
-                hostB = HostNumerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
-                hostC = HostNumerics::copyTensorStorage<TC>(generatedInputs.c);
+                hostA = hostnumerics::copyTensorStorage<PackedTypeA>(generatedInputs.a);
+                hostB = hostnumerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
+                hostC = hostnumerics::copyTensorStorage<TC>(generatedInputs.c);
                 if(generatedInputs.scaleA)
-                    hostScaleA = HostNumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
+                    hostScaleA = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
                 if(generatedInputs.scaleB)
-                    hostScaleB = HostNumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
+                    hostScaleB = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
 
                 auto deviceA = make_shared_device<TA>(hostA);
                 auto deviceB = make_shared_device<TB>(hostB);

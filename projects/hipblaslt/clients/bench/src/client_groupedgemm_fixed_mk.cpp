@@ -33,12 +33,12 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_numerics/Types.hpp>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/hostnumerics/Types.hpp>
 #include <hipblaslt_arguments.hpp>
 #include <iostream>
 #include <limits>
-#include <roc/host_numerics/validation.hpp>
+#include <roc/hostnumerics/validation.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -104,20 +104,20 @@ inline const char* ToString(ActivationType act)
     }
 }
 
-roc::host_numerics::ActivationFunction toHostNumericsActivation(ActivationType activation)
+roc::hostnumerics::ActivationFunction toHostNumericsActivation(ActivationType activation)
 {
     switch(activation)
     {
     case ActivationType::NONE:
-        return roc::host_numerics::IdentityActivation{};
+        return roc::hostnumerics::IdentityActivation{};
     case ActivationType::RELU:
-        return roc::host_numerics::ReluActivation{};
+        return roc::hostnumerics::ReluActivation{};
     case ActivationType::GELU:
-        return roc::host_numerics::GeluActivation{};
+        return roc::hostnumerics::GeluActivation{};
     case ActivationType::SWISH:
-        return roc::host_numerics::SwishActivation{1.0};
+        return roc::hostnumerics::SwishActivation{1.0};
     case ActivationType::CLAMP:
-        return roc::host_numerics::ClampActivation{-1.0, 1.0};
+        return roc::hostnumerics::ClampActivation{-1.0, 1.0};
     }
 
     throw std::invalid_argument("Unsupported grouped GEMM activation.");
@@ -542,7 +542,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
         size_bias(gemm_count);
     std::vector<void*> da(gemm_count), db(gemm_count), dc(gemm_count), dd(gemm_count),
         d_bias(gemm_count);
-    std::vector<roc::host_numerics::Tensor> ha, hb, hc, hd, hd_gold, h_bias;
+    std::vector<roc::hostnumerics::Tensor> ha, hb, hc, hd, hd_gold, h_bias;
     ha.reserve(gemm_count);
     hb.reserve(gemm_count);
     hc.reserve(gemm_count);
@@ -617,13 +617,13 @@ int test_hipblaslt(hipDataType                 in_datatype,
         size_bias[i] = enable_bias[i] ? m[i] : 0;
 
         // Naming: da is in GPU (device) memory. ha is in CPU (host) memory
-        using hipblaslt::host_numerics::groupedGemmInitializationRecipe;
-        using hipblaslt::host_numerics::scalarType;
-        using roc::host_numerics::Layout;
-        using roc::host_numerics::ScalarType;
-        using roc::host_numerics::Shape;
-        using roc::host_numerics::Tensor;
-        using roc::host_numerics::generate;
+        using hipblaslt::hostnumerics::groupedGemmInitializationRecipe;
+        using hipblaslt::hostnumerics::scalarType;
+        using roc::hostnumerics::Layout;
+        using roc::hostnumerics::ScalarType;
+        using roc::hostnumerics::Shape;
+        using roc::hostnumerics::Tensor;
+        using roc::hostnumerics::generate;
         const auto allocatedTensor = [](ScalarType type, size_t elements, Layout layout) {
             return Tensor(type, Shape{elements}).shareStorageWithLayout(std::move(layout));
         };
@@ -662,29 +662,29 @@ int test_hipblaslt(hipDataType                 in_datatype,
         // Reserve one consecutive seed per operand role for every grouped
         // problem. This makes A, B, C, and bias independent while keeping a
         // problem's data stable if an optional operand is disabled.
-        const uint64_t seed = hipblaslt::host_numerics::defaultInitializationSeed
+        const uint64_t seed = hipblaslt::hostnumerics::defaultInitializationSeed
                               + static_cast<uint64_t>(i)
                                     * static_cast<uint64_t>(
-                                        hipblaslt::host_numerics::initialization::OperandSequence::Count);
+                                        hipblaslt::hostnumerics::initialization::OperandSequence::Count);
         const auto recipe
             = [&](ScalarType type,
-                  hipblaslt::host_numerics::initialization::OperandSequence sequence) {
+                  hipblaslt::hostnumerics::initialization::OperandSequence sequence) {
             const uint64_t operandSeed
-                = hipblaslt::host_numerics::initialization::seedForSequence(seed, sequence);
+                = hipblaslt::hostnumerics::initialization::seedForSequence(seed, sequence);
             return groupedGemmInitializationRecipe(type, initialization, sequence, operandSeed);
         };
         generate(ha.back(),
                  recipe(ha.back().type(),
-                        hipblaslt::host_numerics::initialization::OperandSequence::MatrixA));
+                        hipblaslt::hostnumerics::initialization::OperandSequence::MatrixA));
         generate(hb.back(),
                  recipe(hb.back().type(),
-                        hipblaslt::host_numerics::initialization::OperandSequence::MatrixB));
+                        hipblaslt::hostnumerics::initialization::OperandSequence::MatrixB));
         generate(hc.back(),
                  recipe(hc.back().type(),
-                        hipblaslt::host_numerics::initialization::OperandSequence::MatrixC));
+                        hipblaslt::hostnumerics::initialization::OperandSequence::MatrixC));
         generate(h_bias.back(),
                  recipe(h_bias.back().type(),
-                        hipblaslt::host_numerics::initialization::OperandSequence::Bias));
+                        hipblaslt::hostnumerics::initialization::OperandSequence::Bias));
 
         CHECK_HIP_ERROR(hipMalloc(&da[i], std::max<size_t>(1, size_a[i] * sizeof(Tin))));
         CHECK_HIP_ERROR(hipMalloc(&db[i], std::max<size_t>(1, size_b[i] * sizeof(Tin))));
@@ -947,16 +947,16 @@ int test_hipblaslt(hipDataType                 in_datatype,
                 bool passed = true;
                 for(int i3 = 0; i3 < batch_count[i]; i3++)
                 {
-                    using roc::host_numerics::ComparisonOptions;
-                    using roc::host_numerics::EpilogueOptions;
-                    using roc::host_numerics::IndexOrder;
-                    using roc::host_numerics::Layout;
-                    using roc::host_numerics::OutputSelection;
-                    using roc::host_numerics::ScalarType;
-                    using roc::host_numerics::Shape;
-                    using roc::host_numerics::Tensor;
-                    using roc::host_numerics::matmul;
-                    using roc::host_numerics::referenceEpilogueInto;
+                    using roc::hostnumerics::ComparisonOptions;
+                    using roc::hostnumerics::EpilogueOptions;
+                    using roc::hostnumerics::IndexOrder;
+                    using roc::hostnumerics::Layout;
+                    using roc::hostnumerics::OutputSelection;
+                    using roc::hostnumerics::ScalarType;
+                    using roc::hostnumerics::Shape;
+                    using roc::hostnumerics::Tensor;
+                    using roc::hostnumerics::matmul;
+                    using roc::hostnumerics::referenceEpilogueInto;
 
                     auto referenceOutput = hd_gold[i].shareStorageWithLayout(
                         Layout(Shape{size_t(m[i]), size_t(n[i])},
@@ -1000,7 +1000,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                     const Layout comparisonLayout(Shape{size_t(m[i]), size_t(n[i])},
                                                   {1, ldd[i]},
                                                   i3 * stride_d[i]);
-                    const auto comparison = roc::host_numerics::compare(
+                    const auto comparison = roc::hostnumerics::compare(
                         hd[i].shareStorageWithLayout(comparisonLayout),
                         hd_gold[i].shareStorageWithLayout(comparisonLayout),
                         comparisonOptions);

@@ -11,8 +11,8 @@
 #include <Tensile/PerformanceMetricTypes.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
-#include <TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp>
-#include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
+#include <TensileLite/Client/hostnumerics/DataInitializationHelpers.hpp>
+#include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -25,7 +25,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <limits>
-#include <roc/host_numerics/validation.hpp>
+#include <roc/hostnumerics/validation.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -48,7 +48,7 @@ using TensileLite::Client::toHostNumericsScalarType;
 using TensileLite::Client::initializeHostBufferWithHostNumerics;
 
 // Shorthand for the production helper namespace under test.
-namespace dt = TensileLite::Client::HostNumerics::detail;
+namespace dt = TensileLite::Client::hostnumerics::detail;
 namespace
 {
     template <typename T>
@@ -523,7 +523,7 @@ TEST(HostNumericsStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
     auto layout = [](const TensorDescriptor& descriptor) {
         return TensileLite::Client::hostNumericsLayout(descriptor);
     };
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
     const ScalarType     scalarType = toHostNumericsScalarType(denseDescriptor.dataType());
     std::vector<int8_t>  componentPruned(original.size());
     std::vector<int8_t>  componentCompressed(adapterCompressed.size());
@@ -1011,7 +1011,7 @@ TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolut
 // =============================================================================
 TEST(TensileMxGenerationTranslation, MapsTypesAndInitializationPolicy)
 {
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
 
     const MxTensor generated = dt::generateMxData(rocisa::DataType::Float4,
                                                   rocisa::DataType::E5M3,
@@ -1028,7 +1028,7 @@ TEST(TensileMxGenerationTranslation, MapsTypesAndInitializationPolicy)
 
 TEST(TensileMxGenerationTranslation, PreservesTheFullCallerSeed)
 {
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
 
     const auto generateWithSeed = [](uint64_t seed) {
         return dt::generateMxData(rocisa::DataType::Float4,
@@ -1053,7 +1053,7 @@ TEST(TensileMxGenerationTranslation, PreservesTheFullCallerSeed)
 
 TEST(TensileMxGenerationTranslation, MapsArchitectureToPhysicalScaleLayout)
 {
-    using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
+    using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
 
     EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950"), MxScaleStorageLayout::Gfx950);
     EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950:sramecc+:xnack-"),
@@ -1064,7 +1064,7 @@ TEST(TensileMxGenerationTranslation, MapsArchitectureToPhysicalScaleLayout)
 
 TEST(TensileMxGenerationTranslation, RejectsUnsupportedTypesAndModes)
 {
-    using namespace roc::host_numerics;
+    using namespace roc::hostnumerics;
 
     EXPECT_THROW(dt::generateMxData(rocisa::DataType::Float,
                                     rocisa::DataType::E8,
