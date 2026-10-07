@@ -89,6 +89,12 @@ ctest --test-dir "$hostnumerics_build" --output-on-failure
 For a C++-only build, set `HOSTNUMERICS_BUILD_PYTHON=OFF`; Python and nanobind
 are then unnecessary.
 
+`HOSTNUMERICS_BUILD_TESTING` and `HOSTNUMERICS_BUILD_PYTHON` both default to `ON`
+when building HostNumerics standalone and `OFF` when another project includes it
+with `add_subdirectory`. CI covers all four combinations, installation and an
+external C++ consumer for each, and the embedded defaults. The build with Python
+and tests also runs with Ninja Multi-Config.
+
 Install into a local prefix with:
 
 ```shell

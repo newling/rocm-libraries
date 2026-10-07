@@ -25,40 +25,86 @@ concurrency:
 
 jobs:
   standalone:
+    name: Python ${{ matrix.python }}, tests ${{ matrix.testing }}, ${{ matrix.generator }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["ON", "OFF"]
+        testing: ["ON", "OFF"]
+        generator: ["Ninja"]
+        include:
+          - python: "ON"
+            testing: "ON"
+            generator: "Ninja Multi-Config"
     steps:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: shared/hostnumerics
 
       - uses: actions/setup-python@v5
+        if: matrix.python == 'ON'
         with:
           python-version: "3.12"
 
       - name: Install dependencies
+        if: matrix.python == 'ON'
         run: python -m pip install nanobind==3.0.1
 
-      - name: Configure, build, and test
+      - name: Configure and build
         run: |
+          if [[ "${{ matrix.python }}" == ON ]]; then
+            python_options=("-DPython_EXECUTABLE=$(command -v python)")
+          else
+            python_options=(-DCMAKE_DISABLE_FIND_PACKAGE_Python=TRUE
+                            -DCMAKE_DISABLE_FIND_PACKAGE_nanobind=TRUE)
+          fi
           cmake -S shared/hostnumerics \
             -B "${RUNNER_TEMP}/hostnumerics-build" \
-            -G Ninja \
-            -DHOSTNUMERICS_BUILD_TESTING=ON \
-            -DHOSTNUMERICS_BUILD_PYTHON=ON \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build "${RUNNER_TEMP}/hostnumerics-build" --parallel "$(nproc)"
-          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-build" --output-on-failure
+            -G "${{ matrix.generator }}" \
+            -DHOSTNUMERICS_BUILD_TESTING=${{ matrix.testing }} \
+            -DHOSTNUMERICS_BUILD_PYTHON=${{ matrix.python }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            "${python_options[@]}"
+          cmake --build "${RUNNER_TEMP}/hostnumerics-build" \
+            --config Release --parallel "$(nproc)"
+
+      - name: Test
+        if: matrix.testing == 'ON'
+        run: |
+          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-build" \
+            -C Release --no-tests=error --output-on-failure
+
+      - name: Check tests are disabled
+        if: matrix.testing == 'OFF'
+        run: test ! -e "${RUNNER_TEMP}/hostnumerics-build/CTestTestfile.cmake"
 
       - name: Test installed package
         run: |
           cmake --install "${RUNNER_TEMP}/hostnumerics-build" \
+            --config Release \
             --prefix "${RUNNER_TEMP}/hostnumerics-install"
           cmake -S shared/hostnumerics/tests/package \
             -B "${RUNNER_TEMP}/hostnumerics-package-test" \
             -G Ninja \
             -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/hostnumerics-install"
           cmake --build "${RUNNER_TEMP}/hostnumerics-package-test" --parallel "$(nproc)"
-          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-package-test" --output-on-failure
+          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-package-test" \
+            --no-tests=error --output-on-failure
+
+      - name: Test installed Python package
+        if: matrix.python == 'ON'
+        run: |
           PYTHONPATH="$(find "${RUNNER_TEMP}/hostnumerics-install" \
             -type d -path '*/site-packages' -print -quit)" \
             python -c "import hostnumerics; print(hostnumerics.__version__)"
+
+      - name: Test embedded defaults
+        if: matrix.python == 'OFF' && matrix.testing == 'OFF'
+        run: |
+          cmake -S shared/hostnumerics/tests/embedded \
+            -B "${RUNNER_TEMP}/hostnumerics-embedded-test" \
+            -G Ninja
+          cmake --build "${RUNNER_TEMP}/hostnumerics-embedded-test" --parallel "$(nproc)"
+          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-embedded-test" \
+            --no-tests=error --output-on-failure
