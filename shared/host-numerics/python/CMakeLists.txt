@@ -1,7 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
+# nanobind 3.0.1, used in CI, requires Python 3.10 or newer.
+# This version is a lower bound; newer Python versions are accepted.
+find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
 
 find_package(nanobind CONFIG QUIET)
 if(NOT nanobind_FOUND)

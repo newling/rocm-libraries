@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# Match the component and monorepo minimum: CMake 3.25.2, released on 2023-01-19.
 cmake_minimum_required(VERSION 3.25.2)
 project(ROCHostNumericsPackageTest LANGUAGES CXX)
 
