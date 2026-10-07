@@ -91,9 +91,9 @@ are then unnecessary.
 
 `HOSTNUMERICS_BUILD_TESTING` and `HOSTNUMERICS_BUILD_PYTHON` both default to `ON`
 when building HostNumerics standalone and `OFF` when another project includes it
-with `add_subdirectory`. CI covers all four combinations, installation and an
-external C++ consumer for each, and the embedded defaults. The build with Python
-and tests also runs with Ninja Multi-Config.
+with `add_subdirectory`. CI covers ON/ON with Ninja Multi-Config and OFF/OFF with
+Ninja, including installation and an external C++ consumer for both. It also
+checks the embedded defaults.
 
 Install into a local prefix with:
 

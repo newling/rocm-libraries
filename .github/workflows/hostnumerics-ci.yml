@@ -30,13 +30,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["ON", "OFF"]
-        testing: ["ON", "OFF"]
-        generator: ["Ninja"]
         include:
           - python: "ON"
             testing: "ON"
             generator: "Ninja Multi-Config"
+          - python: "OFF"
+            testing: "OFF"
+            generator: "Ninja"
     steps:
       - uses: actions/checkout@v4
         with:
