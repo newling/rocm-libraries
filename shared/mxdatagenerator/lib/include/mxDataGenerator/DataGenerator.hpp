@@ -2254,7 +2254,7 @@ namespace DGen
         {
             using scaleInfo = scale_info_t<DTYPE>;
 
-            const auto scale_candidates = enumerateFiniteNonzeroScaleBytes<scaleInfo>();
+            static const auto scale_candidates = enumerateFiniteNonzeroScaleBytes<scaleInfo>();
 
             double  avg_scale = 0.0;
             index_t n         = 0;
