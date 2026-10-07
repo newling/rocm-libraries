@@ -64,6 +64,7 @@ write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/HostNumericsConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"
     COMPATIBILITY SameMajorVersion
+    ARCH_INDEPENDENT
 )
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/HostNumericsConfig.cmake"
