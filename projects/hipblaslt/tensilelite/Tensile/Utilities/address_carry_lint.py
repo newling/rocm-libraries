@@ -19,11 +19,11 @@ far from the carry-out; a vector carry, until its carry register is written agai
 is reported if the updated value can reach a use as an address before it is overwritten,
 following branches and loop back-edges for up to FLOW_STEPS instructions. The search does not
 know which branches go together, so a register reused for an integer can look like an address
-along a path that never runs. An add of two constants sets the register rather than advancing an
-address, and an add to the result of a bit operation such as xor is integer arithmetic, so
-neither is reported. Nor is an update whose high dword was last set, in the same block, by 32-bit
-integer arithmetic: the pair does not hold an address there. A finding is a lead to read, not a
-proof, and a clean result is not one
+along a path that never runs. Such reuse can produce conservative findings. Arithmetic on the
+high word, or a bit operation on the low word, does not prove that a pair stopped holding an
+address: a high-word increment advances the address by 4 GiB, and XOR with zero preserves it.
+A no-carry operation with only constant sources is treated as initializing a word rather than
+advancing an address. A finding is a lead to read, not a proof, and a clean result is not one
 either: the lint does not see addresses held in other forms, such as TDM descriptor groups.
 
 It is meant for Tensile-generated and hand-written kernels, which keep a 64-bit value in an
@@ -95,26 +95,6 @@ _ATOMIC_RETURN = re.compile(r"_rtn\b|\bglc\b|\bsc0\b|\bTH_ATOMIC_RETURN\b")
 JUMPS = {"s_branch", "s_setpc_b64", "s_endpgm"}
 # 32-bit copies, through which an updated low dword can reach the register used as the address.
 COPIES = {"s_mov_b32", "v_mov_b32"}
-# Bit operations whose result is a plain integer, never an address: an add that updates their
-# result in place, such as Tensile's sign extension of the workgroup mapping (xor, then subtract
-# the same constant), is integer arithmetic even when the register is an address elsewhere.
-# s_and_b32 is left out, since aligning an address and then advancing it needs a carry.
-INTEGER_BIT_OPS = {
-    "s_xor_b32",
-    "s_xnor_b32",
-    "s_not_b32",
-    "s_bfe_u32",
-    "s_bfe_i32",
-    "v_xor_b32",
-    "v_not_b32",
-    "v_bfe_u32",
-    "v_bfe_i32",
-}
-# 32-bit arithmetic that never makes the high dword of a 64-bit address. That comes from a
-# carry-in add, the high half of a product (s_mul_hi_u32), a copy, a load or a 64-bit operation.
-# A register pair whose high dword one of these just wrote holds two integers, as when Tensile's
-# grouped-GEMM prologue reuses a descriptor's registers for a batch index or an argument offset.
-INTEGER_HIGH_DEFS = {"s_add_u32", "s_sub_u32", "s_add_i32", "s_sub_i32", "s_mul_i32"}
 # Scalar instructions that write SCC, which ends a scalar carry chain.
 _SCC_WRITERS = re.compile(
     r"^s_(add|sub|addc|subb|addk|cmp|cmpk|bitcmp|and|or|xor|andn[12]|orn[12]|nand|nor|xnor|not|"
@@ -416,36 +396,12 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
             )
         return not todo
 
-    def updates_bit_op_result(i: int, low: Reg) -> bool:
-        """Whether instruction i updates low in place, and the last write to low before it, in
-        the same basic block, is a bit operation that makes a plain integer."""
-        if not any(parse_regs(o) == [low] for o in insts[i].operands[1:]):
-            return False
-        j = i
-        while j > 0 and not insts[j].labels:
-            j -= 1
-            if low in writes[j]:
-                return insts[j].mnemonic in INTEGER_BIT_OPS
-        return False
-
-    def high_holds_integer(i: int, high: Reg) -> bool:
-        """Whether the last write to high before instruction i, in the same basic block, is
-        32-bit integer arithmetic, so the pair is not an address there."""
-        j = i
-        while j > 0 and not insts[j].labels:
-            j -= 1
-            if high in writes[j]:
-                return insts[j].mnemonic in INTEGER_HIGH_DEFS
-        return False
-
     findings = []
     for i, inst in enumerate(insts):
         dst = writes[i]
         if len(dst) != 1 or dst[0] not in lows:
             continue
         low, high = dst[0], dst[0].plus(1)
-        if updates_bit_op_result(i, low) or high_holds_integer(i, high):
-            continue
         if inst.mnemonic in NO_CARRY:
             # SOPK add reads its destination even though only its immediate is explicit.
             if inst.mnemonic != "s_addk_i32" and not any(parse_regs(o) for o in inst.operands[1:]):

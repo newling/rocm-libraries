@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """The address-carry lint must report a 64-bit address update that drops the carry, and stay
-quiet on correct carry chains and on registers that are only reused for other arithmetic."""
+quiet on correct carry chains and values overwritten before any possible address use."""
 
 import functools
 import os
@@ -396,7 +396,9 @@ def test_gfx12_scalar_add_names_are_recognized():
 
 # From gfx950 F4 MX kernels: s12 holds the sign-extended workgroup mapping, and reaches the A
 # descriptor only on a path where the K == 0 branch skips setting it, which the K == 0 check
-# before the tail loop rules out. The lint cannot tell, so it relies on the xor to see an integer.
+# before the tail loop rules out. That later guard is absent from this reduced fixture, and the
+# lint does not track predicate relationships. Keep its conservative warning explicit instead
+# of treating every XOR result as a non-address.
 _WGM = """
     s_mov_b32 s12, s7
     s_and_b32 s12, s12, 0x3ff
@@ -412,11 +414,10 @@ label_LoadA_End:
     """
 
 
-def test_an_add_to_a_bit_operation_result_is_integer_arithmetic():
-    assert _reasons(_WGM.format(bit_op="s_xor_b32 s12, s12, 0x200")) == []
-    # Without the xor the subtract follows an and, which could align an address, so it stays.
-    reasons = _reasons(_WGM.format(bit_op=""))
-    assert len(reasons) == 1 and "s12" in reasons[0]
+def test_reused_bit_op_result_warns_when_branch_feasibility_is_unknown():
+    for bit_op in ("s_xor_b32 s12, s12, 0x200", ""):
+        reasons = _reasons(_WGM.format(bit_op=bit_op))
+        assert len(reasons) == 1 and "s12" in reasons[0]
 
 
 def test_an_add_to_a_bit_operation_result_in_another_block_is_reported():
@@ -433,7 +434,9 @@ label_Next:
 # From gfx942 and gfx950 grouped-GEMM prologues, which reuse a descriptor's registers for a
 # batch index (s[48:49]) or an argument offset (s[68:69]) before setting the descriptor. The
 # lint can reach the descriptor's later use only through the K == 0 branch that skips setting
-# it, a path that never runs; the integer high dword shows the pair is not an address.
+# it, a path that never runs in the full kernel. This reduced fixture does not establish that
+# fact. Without predicate tracking, a conservative warning is preferable to exempting all
+# pointers whose high word was updated by arithmetic.
 @pytest.mark.parametrize(
     "high, low",
     [
@@ -441,7 +444,7 @@ label_Next:
         ("s_add_u32 s49, s49, s46", "s_add_u32 s48, s48, s11"),
     ],
 )
-def test_an_update_whose_high_dword_holds_an_integer_is_not_reported(high, low):
+def test_reused_high_word_warns_when_branch_feasibility_is_unknown(high, low):
     asm = """
     s_load_dwordx4 s[20:23], s[48:49], 0x0
     {high}
@@ -453,10 +456,9 @@ label_LoadA_End:
     buffer_load_dwordx2 v[14:15], v0, s[48:51], 0 offen
     s_endpgm
 """
-    assert _reasons(asm.format(high=high, low=low)) == []
-    # Without the integer high dword the pair is an address, and the dropped carry is reported.
-    reasons = _reasons(asm.format(high="", low=low))
-    assert len(reasons) == 1 and "s48" in reasons[0]
+    for high_word in (high, ""):
+        reasons = _reasons(asm.format(high=high_word, low=low))
+        assert len(reasons) == 1 and "s48" in reasons[0]
 
 
 def test_a_high_dword_from_a_product_or_a_copy_is_still_an_address():
@@ -468,6 +470,40 @@ def test_a_high_dword_from_a_product_or_a_copy_is_still_an_address():
     """
         reasons = _reasons(asm)
         assert len(reasons) == 1 and "s48" in reasons[0], high
+
+
+@pytest.mark.parametrize(
+    "setup",
+    ["s_add_u32 s9, s9, 1", "s_xor_b32 s8, s8, 0"],
+    ids=["high-word-arithmetic", "low-word-bit-op"],
+)
+def test_arithmetic_on_address_words_does_not_hide_a_missing_carry(setup):
+    # Arithmetic can preserve an address: advance its high word, or XOR the low word
+    # with zero. The following low-word wrap still needs to carry into s9.
+    prefix = f"""
+    s_mov_b32 s8, 0xfffffff0
+    s_mov_b32 s9, 0x1234
+    {setup}
+    s_add_u32 s8, s8, 64
+    """
+    use = "s_load_dword s0, s[8:9], 0\n"
+    assert _reasons(prefix + "s_addc_u32 s9, s9, 0\n" + use) == []
+    findings = lint(prefix + use)
+    assert len(findings) == 1
+    assert findings[0].text == "s_add_u32 s8, s8, 64"
+
+
+def test_a_vector_bit_op_does_not_hide_a_missing_carry():
+    prefix = """
+    v_mov_b32 v4, 0xfffffff0
+    v_mov_b32 v5, 0x1234
+    v_xor_b32 v4, 0, v4
+    v_add_co_u32 v4, vcc, 64, v4
+    """
+    use = "global_load_dword v0, v[4:5], off\n"
+    assert _reasons(prefix + "v_addc_co_u32 v5, vcc, v5, 0, vcc\n" + use) == []
+    findings = lint(prefix + use)
+    assert len(findings) == 1 and "v4" in findings[0].reason
 
 
 def test_registers_are_judged_within_their_own_kernel():
