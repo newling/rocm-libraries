@@ -5687,8 +5687,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                     fp.N           = N[i];
                     fp.K           = K[i];
                     fp.batch_count = num_batches[i];
-                    fp.transA      = transA == HIPBLAS_OP_T;
-                    fp.transB      = transB == HIPBLAS_OP_T;
+                    fp.transA      = transA != HIPBLAS_OP_N;
+                    fp.transB      = transB != HIPBLAS_OP_N;
                     fp.A = {fcA[i].get(), TiA, A_row[i], A_col[i], A_row[i], A_row[i] * A_col[i]};
                     fp.B = {fcB[i].get(), TiB, B_row[i], B_col[i], B_row[i], B_row[i] * B_col[i]};
                     fp.C = {fcC[i].get(), To, M[i], N[i], M[i], M[i] * N[i]};

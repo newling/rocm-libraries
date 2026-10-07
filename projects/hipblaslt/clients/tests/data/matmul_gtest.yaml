@@ -3149,6 +3149,24 @@ Tests:
   unit_check: 1
   fast_check: 1
 
+# For real inputs, conjugate transpose has the same layout and values as transpose.
+# Unequal M, N and K expose a wrong transpose flag in the compact input copies.
+- name: matmul_fast_check_conjugate_transpose
+  category: pre_checkin
+  function:
+    matmul: *single_precision
+  matrix_size:
+    - { M: 13, N: 11, K: 17, lda: 19, ldb: 19, ldc: 17, ldd: 19 }
+    - { M: 13, N: 19, K: 7, lda: 17, ldb: 23, ldc: 17, ldd: 19 }
+  transA: [ N, T, C ]
+  transB: [ N, T, C ]
+  alpha: 2.0
+  beta: -2.0
+  batch_count: 3
+  initialization: integer_exact
+  unit_check: 1
+  fast_check: 1
+
 # Both checks with the epilogue fast_check supports (bias and scaleAlpha_vector),
 # and with C and D sharing memory, where D's padding must keep C's poison value.
 # lda equals A's row count here; see the padded-lda case below.
