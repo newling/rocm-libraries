@@ -21,7 +21,9 @@ following branches and loop back-edges for up to FLOW_STEPS instructions. The se
 know which branches go together, so a register reused for an integer can look like an address
 along a path that never runs. An add of two constants sets the register rather than advancing an
 address, and an add to the result of a bit operation such as xor is integer arithmetic, so
-neither is reported. A finding is a lead to read, not a proof, and a clean result is not one
+neither is reported. Nor is an update whose high dword was last set, in the same block, by 32-bit
+integer arithmetic: the pair does not hold an address there. A finding is a lead to read, not a
+proof, and a clean result is not one
 either: the lint does not see addresses held in other forms, such as TDM descriptor groups.
 
 It is meant for Tensile-generated and hand-written kernels, which keep a 64-bit value in an
@@ -108,6 +110,11 @@ INTEGER_BIT_OPS = {
     "v_bfe_u32",
     "v_bfe_i32",
 }
+# 32-bit arithmetic that never makes the high dword of a 64-bit address. That comes from a
+# carry-in add, the high half of a product (s_mul_hi_u32), a copy, a load or a 64-bit operation.
+# A register pair whose high dword one of these just wrote holds two integers, as when Tensile's
+# grouped-GEMM prologue reuses a descriptor's registers for a batch index or an argument offset.
+INTEGER_HIGH_DEFS = {"s_add_u32", "s_sub_u32", "s_add_i32", "s_sub_i32", "s_mul_i32"}
 # Scalar instructions that write SCC, which ends a scalar carry chain.
 _SCC_WRITERS = re.compile(
     r"^s_(add|sub|addc|subb|addk|cmp|cmpk|bitcmp|and|or|xor|andn[12]|orn[12]|nand|nor|xnor|not|"
@@ -421,13 +428,23 @@ def _lint_kernel(asm: str, first_line: int = 1) -> list[Finding]:
                 return insts[j].mnemonic in INTEGER_BIT_OPS
         return False
 
+    def high_holds_integer(i: int, high: Reg) -> bool:
+        """Whether the last write to high before instruction i, in the same basic block, is
+        32-bit integer arithmetic, so the pair is not an address there."""
+        j = i
+        while j > 0 and not insts[j].labels:
+            j -= 1
+            if high in writes[j]:
+                return insts[j].mnemonic in INTEGER_HIGH_DEFS
+        return False
+
     findings = []
     for i, inst in enumerate(insts):
         dst = writes[i]
         if len(dst) != 1 or dst[0] not in lows:
             continue
         low, high = dst[0], dst[0].plus(1)
-        if updates_bit_op_result(i, low):
+        if updates_bit_op_result(i, low) or high_holds_integer(i, high):
             continue
         if inst.mnemonic in NO_CARRY:
             # SOPK add reads its destination even though only its immediate is explicit.

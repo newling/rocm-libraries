@@ -430,6 +430,46 @@ label_Next:
     assert len(reasons) == 1 and "s8" in reasons[0]
 
 
+# From gfx942 and gfx950 grouped-GEMM prologues, which reuse a descriptor's registers for a
+# batch index (s[48:49]) or an argument offset (s[68:69]) before setting the descriptor. The
+# lint can reach the descriptor's later use only through the K == 0 branch that skips setting
+# it, a path that never runs; the integer high dword shows the pair is not an address.
+@pytest.mark.parametrize(
+    "high, low",
+    [
+        ("s_sub_u32 s49, s10, 1", "s_sub_u32 s48, s55, s52"),
+        ("s_add_u32 s49, s49, s46", "s_add_u32 s48, s48, s11"),
+    ],
+)
+def test_an_update_whose_high_dword_holds_an_integer_is_not_reported(high, low):
+    asm = """
+    s_load_dwordx4 s[20:23], s[48:49], 0x0
+    {high}
+    {low}
+    s_cmp_eq_u32 s23, 0
+    s_cbranch_scc1 label_LoadA_End
+    s_mov_b64 s[48:49], s[24:25]
+label_LoadA_End:
+    buffer_load_dwordx2 v[14:15], v0, s[48:51], 0 offen
+    s_endpgm
+"""
+    assert _reasons(asm.format(high=high, low=low)) == []
+    # Without the integer high dword the pair is an address, and the dropped carry is reported.
+    reasons = _reasons(asm.format(high="", low=low))
+    assert len(reasons) == 1 and "s48" in reasons[0]
+
+
+def test_a_high_dword_from_a_product_or_a_copy_is_still_an_address():
+    for high in ("s_mul_hi_u32 s49, s29, s4", "s_mov_b32 s49, s25"):
+        asm = f"""
+    {high}
+    s_add_u32 s48, s48, s11
+    s_load_dwordx2 s[10:11], s[48:49], 0x0
+    """
+        reasons = _reasons(asm)
+        assert len(reasons) == 1 and "s48" in reasons[0], high
+
+
 def test_registers_are_judged_within_their_own_kernel():
     asm = """
     .amdgpu_hsa_kernel first
