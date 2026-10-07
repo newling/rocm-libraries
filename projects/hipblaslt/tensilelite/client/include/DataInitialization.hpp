@@ -140,10 +140,10 @@ namespace TensileLite
                                                   void*                   array,
                                                   TensorDescriptor const& descriptor,
                                                   DataInitializationKey   key);
-        double hostNumericsDoubleValue(InitMode              mode,
+        double hostnumericsDoubleValue(InitMode              mode,
                                          DataInitializationKey key,
                                          double                freeValue = 0.0);
-        double hostNumericsUniformDouble(double lower, double upper, DataInitializationKey key);
+        double hostnumericsUniformDouble(double lower, double upper, DataInitializationKey key);
 
         static bool IsProblemDependent(InitMode const& mode)
         {

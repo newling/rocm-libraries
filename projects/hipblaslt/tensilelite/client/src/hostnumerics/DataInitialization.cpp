@@ -267,7 +267,7 @@ namespace TensileLite::Client
 
             std::vector<size_t> logicalDimensions = dense.sizes();
             logicalDimensions[sparseAxis]         = (dense.sizes()[sparseAxis] / 4 + 1) / 2;
-            const Layout metadataLayout = hostNumericsLayout(metadata);
+            const Layout metadataLayout = hostnumericsLayout(metadata);
             std::vector<ptrdiff_t> logicalStrides(dense.dimensions());
             logicalStrides[sparseAxis] = metadataLayout.stride(metadataAxis);
             if(metadata.sizes()[metadataAxis] != logicalDimensions[sparseAxis])
@@ -390,7 +390,7 @@ namespace TensileLite::Client
                                               DataInitializationKey   key)
     {
         const ScalarType type   = toHostNumericsScalarType(dataType);
-        Layout           layout = hostNumericsLayout(descriptor);
+        Layout           layout = hostnumericsLayout(descriptor);
         const size_t bytes = roc::hostnumerics::storageBytesForLayout(type, layout);
         if(array == nullptr && bytes != 0)
             throw std::invalid_argument("Null TensileLite tensor initialization buffer.");
@@ -403,7 +403,7 @@ namespace TensileLite::Client
                                           key);
     }
 
-    double hostNumericsDoubleValue(InitMode mode, DataInitializationKey key, double freeValue)
+    double hostnumericsDoubleValue(InitMode mode, DataInitializationKey key, double freeValue)
     {
         double value = 0;
         initializeHostBufferWithHostNumerics(
@@ -411,7 +411,7 @@ namespace TensileLite::Client
         return value;
     }
 
-    double hostNumericsUniformDouble(double lower, double upper, DataInitializationKey key)
+    double hostnumericsUniformDouble(double lower, double upper, DataInitializationKey key)
     {
         if(lower > upper)
             throw std::invalid_argument("TensileLite uniform lower bound exceeds upper bound.");
@@ -441,8 +441,8 @@ namespace TensileLite::Client
                 "TensileLite sparse data and compressed tensor types differ.");
         if(tensorMeta.dataType() != rocisa::DataType::Int8)
             throw std::invalid_argument("TensileLite sparse metadata must use byte storage.");
-        const Layout denseLayout      = hostNumericsLayout(tensor);
-        const Layout compressedLayout = hostNumericsLayout(tensorC);
+        const Layout denseLayout      = hostnumericsLayout(tensor);
+        const Layout compressedLayout = hostnumericsLayout(tensorC);
         const Layout metadataTensorLayout
             = logicalSparseMetadataLayout(tensor, tensorMeta, dim, static_cast<size_t>(metadataLayout));
         if(tensor.totalLogicalElements() == 0)

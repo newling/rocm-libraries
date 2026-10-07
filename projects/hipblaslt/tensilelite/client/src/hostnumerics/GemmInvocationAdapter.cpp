@@ -25,7 +25,7 @@ namespace TensileLite::Client::hostnumerics
     namespace detail
     {
         using TensileLite::Client::checkedHostNumericsPtrdiff;
-        using TensileLite::Client::hostNumericsLayout;
+        using TensileLite::Client::hostnumericsLayout;
         using roc::hostnumerics::ActivationFunction;
         using roc::hostnumerics::Layout;
         using roc::hostnumerics::MathMode;
@@ -108,7 +108,7 @@ namespace TensileLite::Client::hostnumerics
 
         inline size_t descriptorStorageBytes(ScalarType type, TensorDescriptor const& descriptor)
         {
-            return storageBytesForLayout(type, hostNumericsLayout(descriptor));
+            return storageBytesForLayout(type, hostnumericsLayout(descriptor));
         }
 
         inline std::span<std::byte> mutableDescriptorStorage(ScalarType              type,

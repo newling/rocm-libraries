@@ -1080,7 +1080,7 @@ namespace TensileLite
                     double value = 0.0;
                     if(activationAdditionalArgs.empty())
                     {
-                        value = hostNumericsUniformDouble(
+                        value = hostnumericsUniformDouble(
                             -2.0,
                             2.0,
                             DataInitializationKey{m_initializationSeed,
@@ -1852,7 +1852,7 @@ namespace TensileLite
                 }
 
                 const auto dataType = toHostNumericsScalarType(dataDesc.dataType());
-                const auto completeDataLayout = hostNumericsLayout(dataDesc);
+                const auto completeDataLayout = hostnumericsLayout(dataDesc);
                 if(completeDataLayout.shape().rank() < 2)
                     throw std::invalid_argument("TensileLite MX data must have rank at least two.");
                 const size_t dataBytes = dataDesc.totalAllocatedBytes();

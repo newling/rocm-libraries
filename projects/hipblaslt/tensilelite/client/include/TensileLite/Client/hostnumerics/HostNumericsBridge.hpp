@@ -33,7 +33,7 @@ namespace TensileLite::Client
         return static_cast<ptrdiff_t>(value);
     }
 
-    inline roc::hostnumerics::Layout hostNumericsLayout(TensorDescriptor const& descriptor)
+    inline roc::hostnumerics::Layout hostnumericsLayout(TensorDescriptor const& descriptor)
     {
         std::vector<ptrdiff_t> strides;
         strides.reserve(descriptor.strides().size());

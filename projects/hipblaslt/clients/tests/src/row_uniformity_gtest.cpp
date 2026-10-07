@@ -279,7 +279,7 @@ namespace
         bool useBias = false;
     };
 
-    roc::hostnumerics::ScalarType hostNumericsOperandType(hipDataType type)
+    roc::hostnumerics::ScalarType hostnumericsOperandType(hipDataType type)
     {
         switch(type)
         {
@@ -294,7 +294,7 @@ namespace
 
     size_t encodedElementBytes(hipDataType type)
     {
-        const auto& info = roc::hostnumerics::scalarTypeInfo(hostNumericsOperandType(type));
+        const auto& info = roc::hostnumerics::scalarTypeInfo(hostnumericsOperandType(type));
         if(info.storageBits % 8 != 0)
             throw std::invalid_argument("Row-uniformity operands must be byte-addressable");
         return info.storageBits / 8;
@@ -318,7 +318,7 @@ namespace
                                                      .upperUnbiasedExponent = 12,
                                                      .sourceType            = ScalarType::Float32}),
             {.seed = seed});
-        return generate(hostNumericsOperandType(type), Shape{elementCount}, recipe);
+        return generate(hostnumericsOperandType(type), Shape{elementCount}, recipe);
     }
 
     TEST(RowUniformityData_pre_checkin, SharedGenerationAndTensorCodecDefineOperands)
@@ -342,7 +342,7 @@ namespace
             EXPECT_FALSE(sameStorage(a, b));
 
             const auto decoded   = a.copyConvertedTo(roc::hostnumerics::ScalarType::Float32);
-            const auto roundTrip = decoded.copyConvertedTo(hostNumericsOperandType(type));
+            const auto roundTrip = decoded.copyConvertedTo(hostnumericsOperandType(type));
             EXPECT_TRUE(sameStorage(a, roundTrip));
 
             float forward = 0.0f;
@@ -751,7 +751,7 @@ namespace
             // Column k of a column-major A is M copies of a[k], so A goes up one
             // column at a time and never needs an M*K host buffer.
             const size_t               abBytes = encodedElementBytes(m_problem.abType);
-            roc::hostnumerics::Tensor column(hostNumericsOperandType(m_problem.abType),
+            roc::hostnumerics::Tensor column(hostnumericsOperandType(m_problem.abType),
                                               roc::hostnumerics::Shape{static_cast<size_t>(m)});
             for(int64_t idx = 0; idx < k; ++idx)
             {

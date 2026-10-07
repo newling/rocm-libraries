@@ -521,7 +521,7 @@ TEST(HostNumericsStructuredSparsity, TensileAdapterMatchesStandaloneComponent)
                        problem.metadataLayout());
 
     auto layout = [](const TensorDescriptor& descriptor) {
-        return TensileLite::Client::hostNumericsLayout(descriptor);
+        return TensileLite::Client::hostnumericsLayout(descriptor);
     };
     using namespace roc::hostnumerics;
     const ScalarType     scalarType = toHostNumericsScalarType(denseDescriptor.dataType());
