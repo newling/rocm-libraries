@@ -24,14 +24,12 @@ target_link_libraries(hostnumerics-python PRIVATE roc::hostnumerics)
 set_target_properties(hostnumerics-python
     PROPERTIES
         OUTPUT_NAME "_hostnumerics"
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/hostnumerics"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/hostnumerics"
 )
 
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/hostnumerics")
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/hostnumerics/__init__.py"
-    "${CMAKE_CURRENT_BINARY_DIR}/hostnumerics/__init__.py"
-    COPYONLY
+file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/hostnumerics/__init__.py"
+    INPUT "${CMAKE_CURRENT_SOURCE_DIR}/hostnumerics/__init__.py"
 )
 
 if(HOSTNUMERICS_BUILD_TESTING)
@@ -40,7 +38,7 @@ if(HOSTNUMERICS_BUILD_TESTING)
                 -s "${CMAKE_CURRENT_SOURCE_DIR}/tests" -p "test_*.py"
     )
     set_tests_properties(hostnumerics-python-import
-        PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}"
+        PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
 endif()
 
