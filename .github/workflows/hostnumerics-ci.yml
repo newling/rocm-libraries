@@ -1,0 +1,64 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+name: HostNumerics standalone CI
+
+on:
+  pull_request:
+    paths:
+      - "shared/hostnumerics/**"
+      - ".github/workflows/hostnumerics-ci.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "shared/hostnumerics/**"
+      - ".github/workflows/hostnumerics-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostnumerics-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  standalone:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: shared/hostnumerics
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install nanobind==3.0.1
+
+      - name: Configure, build, and test
+        run: |
+          cmake -S shared/hostnumerics \
+            -B "${RUNNER_TEMP}/hostnumerics-build" \
+            -G Ninja \
+            -DHOSTNUMERICS_BUILD_TESTING=ON \
+            -DHOSTNUMERICS_BUILD_PYTHON=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "${RUNNER_TEMP}/hostnumerics-build" --parallel "$(nproc)"
+          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-build" --output-on-failure
+
+      - name: Test installed package
+        run: |
+          cmake --install "${RUNNER_TEMP}/hostnumerics-build" \
+            --prefix "${RUNNER_TEMP}/hostnumerics-install"
+          cmake -S shared/hostnumerics/tests/package \
+            -B "${RUNNER_TEMP}/hostnumerics-package-test" \
+            -G Ninja \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/hostnumerics-install"
+          cmake --build "${RUNNER_TEMP}/hostnumerics-package-test" --parallel "$(nproc)"
+          ctest --test-dir "${RUNNER_TEMP}/hostnumerics-package-test" --output-on-failure
+          PYTHONPATH="$(find "${RUNNER_TEMP}/hostnumerics-install" \
+            -type d -path '*/site-packages' -print -quit)" \
+            python -c "import hostnumerics; print(hostnumerics.__version__)"

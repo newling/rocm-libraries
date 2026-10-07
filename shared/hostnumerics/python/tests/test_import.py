@@ -3,9 +3,9 @@
 
 import unittest
 
-import roc_host_numerics
+import hostnumerics
 
 
 class ImportTests(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(roc_host_numerics.__version__, "0.1.0")
+        self.assertEqual(hostnumerics.__version__, "0.1.0")
