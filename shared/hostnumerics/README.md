@@ -101,13 +101,25 @@ Install into a local prefix with:
 cmake --install "$hostnumerics_build" --prefix "$hostnumerics_build/install"
 ```
 
-The installed `HostNumerics` CMake package exports
-`roc::hostnumerics-core` and `roc::hostnumerics`. Consumers can add the install
-prefix to `CMAKE_PREFIX_PATH` and use:
+The installed `HostNumerics` CMake package exports two C++ targets with these
+intended responsibilities:
+
+- `roc::hostnumerics-core` will provide scalar types and conversions, plus the
+  tensor model (shape, layout, and storage). It can be used independently of
+  numerical operations.
+- `roc::hostnumerics` will add input generation, reference operations such as
+  GEMM, and numerical comparison. It links core transitively, so consumers
+  needing these operations only need to link `roc::hostnumerics`.
+
+This bootstrap defines both as `INTERFACE` targets that only expose the version
+header. The prototype implements them as static libraries.
+
+Consumers can add the install prefix to `CMAKE_PREFIX_PATH` and use:
 
 ```cmake
 find_package(HostNumerics CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE roc::hostnumerics)
 ```
 
-The Python package is named `hostnumerics`.
+The Python bindings will expose both layers through the single `hostnumerics`
+package. In this bootstrap, it exposes only `__version__`.
