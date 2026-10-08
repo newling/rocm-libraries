@@ -1061,6 +1061,27 @@ namespace
         EXPECT_EQ(counters().hits, 0u);
     }
 
+    // A matmul-only caller also needs the notice explaining why its cache is
+    // inactive; it never enters the heuristic's file-selection path.
+    TEST_F(TuningCache_pre_checkin, NullAlgoReportsMissingCachePath)
+    {
+        if(!haveSolutions(1))
+            GTEST_SKIP() << "the heuristic offers no solution for this problem";
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+
+        useCache("");
+        std::string output;
+        {
+            CerrCapture capture;
+            int         launched = -1;
+            ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched));
+            EXPECT_EQ(launched, m_identities[0].index);
+            output = capture.str();
+        }
+        EXPECT_NE(output.find("load=no-path"), std::string::npos) << output;
+    }
+
     // With a tuning mode set only the cache is consulted, never the override
     // file.
     TEST_F(TuningCache_pre_checkin, CacheModeIgnoresTheOverrideFile)
@@ -1344,6 +1365,79 @@ namespace
             later = capture.str();
         }
         EXPECT_EQ(later, "");
+    }
+
+    // Logging reads its environment once. Re-exec with info enabled so this
+    // checks the real sink without changing the parent process's logger.
+    TEST_F(TuningCache_pre_checkin, CacheInfoEventsAreReportedOnceOnBothPaths)
+    {
+#if GTEST_HAS_DEATH_TEST
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        for(const char* name : {"HIPBLASLT_LOG_LEVEL", "HIPBLASLT_LOG_MASK", "HIPBLASLT_LOG_FILE"})
+        {
+            const char* value = std::getenv(name);
+            m_savedEnv.emplace_back(name, value ? std::optional<std::string>(value) : std::nullopt);
+            unsetenv(name);
+        }
+        setenv("HIPBLASLT_LOG_MASK", "8", 1);
+
+        const auto oldStyle                     = ::testing::GTEST_FLAG(death_test_style);
+        ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+        EXPECT_EXIT(([&] {
+                        const auto count = [](const std::string& output, const char* text) {
+                            size_t found = 0;
+                            size_t at    = 0;
+                            while((at = output.find(text, at)) != std::string::npos)
+                            {
+                                ++found;
+                                at += std::strlen(text);
+                            }
+                            return found;
+                        };
+
+                        writeTuningFile(
+                            m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}});
+                        useCache(m_path);
+                        bool        ok = true;
+                        std::string hits;
+                        {
+                            CerrCapture capture;
+                            int         launched = -1;
+                            ok                   = launchGemm(AlgoFrom::Null, -1, &launched)
+                                                   && launchGemm(AlgoFrom::Null, -1, &launched);
+                            hits                 = capture.str();
+                        }
+
+                        writeTuningFile(m_path, m_stamp, {});
+                        useCache(m_path);
+                        std::string misses;
+                        {
+                            CerrCapture capture;
+                            int         selected = -1;
+                            int         extended = -1;
+                            int         launched = -1;
+                            ok     = runGemm(&selected) && runGemm(&selected)
+                                     && extHeuristicIndex(&extended)
+                                     && launchGemm(AlgoFrom::Null, -1, &launched) && ok;
+                            misses = capture.str();
+                        }
+                        std::remove(m_path.c_str());
+
+                        ok = ok && count(hits, "tuning-cache: cache-hit index=") == 1
+                             && count(misses, "tuning-cache: cache-miss,") == 1
+                             && count(misses, "No valid entries found in override file.") == 0;
+                        if(!ok)
+                            std::cerr << "Hit output:\n" << hits << "Miss output:\n" << misses;
+                        std::_Exit(ok ? 0 : 1);
+                    }()),
+                    ::testing::ExitedWithCode(0),
+                    "");
+        ::testing::GTEST_FLAG(death_test_style) = oldStyle;
+#else
+        GTEST_SKIP() << "this platform does not support subprocess assertions";
+#endif
     }
 
     // With no tuning mode set, the override file behaves as it always has and

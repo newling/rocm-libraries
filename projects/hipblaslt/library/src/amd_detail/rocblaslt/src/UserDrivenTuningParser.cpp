@@ -81,8 +81,8 @@ namespace TensileLite
 
         if(tuning.cachePath().empty())
         {
-            // Without a path nothing is ever loaded, so this is the only place
-            // that can tell a misconfigured process why nothing happens.
+            // Without a path nothing is ever loaded, so report why this
+            // tuning lookup is inactive.
             announceTuningModeOnce(TuningLoadStatus::NoPath);
             return {};
         }

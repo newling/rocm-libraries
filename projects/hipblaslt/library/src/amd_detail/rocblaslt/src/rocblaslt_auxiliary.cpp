@@ -249,23 +249,13 @@ namespace
         return false;
     }
 
-    /**
-     * Count a lookup and report its result: in the override file's historical
-     * wording with no tuning mode set, and once per key in cache mode, where
-     * replay repeats the same lookup on every call.
-     */
-    void record_lookup(const char*                         func,
-                       const TensileLite::ProblemOverride& key,
-                       bool                                matched,
-                       int                                 index)
+    // Reporting is separate from counting: direct replay keeps its own cheap
+    // tally but shares the heuristic's once-per-key notices.
+    void log_lookup(const char*                         func,
+                    const TensileLite::ProblemOverride& key,
+                    bool                                matched,
+                    int                                 index)
     {
-        auto& counters = TensileLite::TuningCounters::instance();
-        if(matched)
-            counters.hits++;
-        else
-            counters.misses++;
-        TensileLite::recordTuningLookup(key, matched);
-
         if(override_file_in_play())
         {
             if(matched)
@@ -282,6 +272,20 @@ namespace
             else
                 log_info(func, "tuning-cache: cache-miss, no valid entry for this problem");
         }
+    }
+
+    void record_lookup(const char*                         func,
+                       const TensileLite::ProblemOverride& key,
+                       bool                                matched,
+                       int                                 index)
+    {
+        auto& counters = TensileLite::TuningCounters::instance();
+        if(matched)
+            counters.hits++;
+        else
+            counters.misses++;
+        TensileLite::recordTuningLookup(key, matched);
+        log_lookup(func, key, matched, index);
     }
 
     /**
@@ -315,12 +319,14 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
         // Still a lookup that fell back, and counted as one, or a cache that
         // loaded nothing would report that nothing was asked. The key is built
         // only in cache mode, where it is tallied.
-        TensileLite::TuningCounters::instance().misses++;
-        if(!override_file_in_play())
-            TensileLite::recordTuningLookup(RocblasltContractionProblem2ProblemOverride(problem),
-                                            false);
-
-        log_info(__func__, "No valid entries found in override file.");
+        if(override_file_in_play())
+        {
+            TensileLite::TuningCounters::instance().misses++;
+            log_info(__func__, "No valid entries found in override file.");
+        }
+        else
+            record_lookup(
+                __func__, RocblasltContractionProblem2ProblemOverride(problem), false, -1);
     }
     else
     {
@@ -420,10 +426,13 @@ bool problem_override_from_file_cpp(
     {
         // Counted for the same reason as the C API. The key is already on the
         // gemm data, so there is nothing to build.
-        TensileLite::TuningCounters::instance().misses++;
-        TensileLite::recordTuningLookup(TensileDataGemm2ProblemOverride(gemmData), false);
-
-        log_info(__func__, "No valid entries found in override file.");
+        if(override_file_in_play())
+        {
+            TensileLite::TuningCounters::instance().misses++;
+            log_info(__func__, "No valid entries found in override file.");
+        }
+        else
+            record_lookup(__func__, TensileDataGemm2ProblemOverride(gemmData), false, -1);
     }
     else
     {
@@ -643,6 +652,7 @@ int tuning_cache_replay(rocblaslt_handle                    handle,
     if(told < tally)
         TensileLite::recordTuningLookup(key, index >= 0);
 
+    log_lookup(__func__, key, index >= 0, index);
     return index;
 }
 
