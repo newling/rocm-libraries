@@ -78,7 +78,9 @@ def regenerate_uid_for_solution(
     LibraryIO.reorderSolutionsParams(data)
 
     if inplace:
-        LibraryIO.writeYAML(str(yaml_path), data)
+        LibraryIO.writeYAML(
+            str(yaml_path), data, explicit_start=False, explicit_end=False, sort_keys=False
+        )
 
     return new_uid
 

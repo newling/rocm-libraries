@@ -124,6 +124,27 @@ def test_regenerate_uid_for_solution_replaces_uid(tmp_path: Path) -> None:
     assert updated["Solutions"][1]["SolutionUID"] == encode_solution_uid(new_uid)
 
 
+@pytest.mark.parametrize("with_nested_values", [False, True])
+def test_regenerate_uid_preserves_serialized_key_order(
+    tmp_path: Path, with_nested_values: bool
+) -> None:
+    """UID placement must survive both flow and block YAML serialization."""
+    yaml_path = tmp_path / "logic.yaml"
+    data = _sample_logic_data()
+    if with_nested_values:
+        for solution in data["Solutions"]:
+            solution["WorkGroup"] = [16, 16, 1]
+    LibraryIO.writeYAML(str(yaml_path), data)
+
+    regenerate_uid_for_solution(yaml_path, 1, inplace=True)
+
+    updated = LibraryIO.readYAML(str(yaml_path))
+    for solution in updated["Solutions"]:
+        assert list(solution)[:4] == [
+            "SolutionIndex", "SolutionUID", "KernelNameMin", "SolutionNameMin"
+        ]
+
+
 def test_regenerate_uid_for_solution_without_inplace_does_not_write(
     tmp_path: Path,
 ) -> None:
