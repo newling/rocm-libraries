@@ -30,8 +30,9 @@ the optional, unquoted `SolutionUID` field immediately after the local
   SolutionUID: 0u3E
 ```
 
-YAML readers decode the text immediately and all identity, comparison, and
-mapping operations use the unsigned 64-bit value.
+For a stored base62 UID, `read_solution_uid` returns the unsigned 64-bit
+value. `LibraryIO.readYAML` preserves the encoded field as a string, so
+callers must decode it before numeric comparisons or mappings.
 
 ## Regenerate a UID
 
@@ -46,5 +47,6 @@ python3 -m Tensile.TensileGenerateUID path/to/logic.yaml --index 5 --inplace
 `--inplace`, the command prints the new canonical `0u` UID without modifying
 the file.
 
-Repository-wide assignment, runtime selection, and mandatory uniqueness are
-introduced by later migration steps.
+Repository-wide assignment, runtime selection, and mandatory UID presence are
+introduced by later migration steps. The current uniqueness gate checks the
+validity and uniqueness of any UIDs that are present.
