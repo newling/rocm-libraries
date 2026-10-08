@@ -13,6 +13,12 @@ from types import ModuleType
 from typing import Dict, List, Tuple
 
 import pytest
+import yaml
+
+try:
+    from yaml import CSafeLoader as yamlLoader
+except ImportError:
+    from yaml import SafeLoader as yamlLoader
 
 
 def _load_solution_id_gen() -> ModuleType:
@@ -115,6 +121,86 @@ def test_collect_yaml_files_includes_all_yaml_names(tmp_path: Path) -> None:
     assert _collect_yaml_files(tmp_path) == [conventional, user_args]
 
 
+def _compose_uid_node(loader, anchors: dict, scope: str | None) -> yaml.Node | None:
+    """Compose identity fields without retaining the rest of a logic file.
+
+    Consumes one node. ``scope`` selects the logic root, its solutions list,
+    one solution mapping, all fields, or no fields (``None``). Returns the
+    retained YAML node, or ``None`` for a discarded node; ``anchors`` retains
+    nodes that later aliases may reference.
+
+    The YAML parser handles quoting, comments and flow collections. Anchored
+    nodes and merge values are retained in full so aliases and inherited fields
+    have the same meaning as in a normal safe load. Unanchored tuning tables
+    and kernel parameters are consumed without building their object trees.
+    """
+    event = loader.get_event()
+    if isinstance(event, yaml.AliasEvent):
+        if event.anchor not in anchors:
+            raise ValueError(f"Undefined YAML alias: {event.anchor}")
+        return anchors[event.anchor]
+
+    if event.anchor is not None:
+        if event.anchor in anchors:
+            raise ValueError(f"Duplicate YAML anchor: {event.anchor}")
+        scope = "all"
+
+    node = None
+    if isinstance(event, yaml.ScalarEvent):
+        if scope is not None:
+            tag = event.tag or loader.resolve(yaml.ScalarNode, event.value, event.implicit)
+            node = yaml.ScalarNode(tag, event.value, event.start_mark, event.end_mark)
+        if event.anchor is not None:
+            anchors[event.anchor] = node
+        return node
+
+    mapping = isinstance(event, yaml.MappingStartEvent)
+    node_type = yaml.MappingNode if mapping else yaml.SequenceNode
+    end_event = yaml.MappingEndEvent if mapping else yaml.SequenceEndEvent
+    if scope is not None:
+        tag = event.tag or loader.resolve(node_type, None, event.implicit)
+        node = node_type(tag, [], event.start_mark, event.end_mark)
+    if event.anchor is not None:
+        anchors[event.anchor] = node
+
+    index = 0
+    while not loader.check_event(end_event):
+        key = _compose_uid_node(loader, anchors, "all" if scope else None) if mapping else None
+        child_scope = None
+        if scope == "all":
+            child_scope = "all"
+        elif mapping and key is not None:
+            if key.tag == "tag:yaml.org,2002:merge":
+                child_scope = "all"
+            elif key.tag == "tag:yaml.org,2002:str":
+                if scope == "logic" and key.value == "Solutions":
+                    child_scope = "solutions"
+                elif scope == "solution" and key.value in {"SolutionIndex", "SolutionUID"}:
+                    child_scope = "all"
+        elif not mapping:
+            if scope == "logic" and index == 5:
+                child_scope = "solutions"
+            elif scope == "solutions":
+                child_scope = "solution"
+
+        child = _compose_uid_node(loader, anchors, child_scope)
+        if node is not None:
+            if mapping:
+                if child_scope is not None:
+                    node.value.append((key, child))
+            else:
+                # Preserve positions in legacy list-format logic.
+                node.value.append(
+                    child if child_scope is not None else yaml.ScalarNode("tag:yaml.org,2002:null", "")
+                )
+        index += 1
+
+    node_end = loader.get_event()
+    if node is not None:
+        node.end_mark = node_end.end_mark
+    return node
+
+
 def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
     """Extract SolutionUID entries from one logic YAML.
 
@@ -131,49 +217,51 @@ def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
         ValueError: If a UID is malformed, zero, out of range, or an index
             value is not an integer.
     """
+    with yaml_path.open(encoding="utf-8") as handle:
+        loader = yamlLoader(handle)
+        try:
+            loader.get_event()  # StreamStartEvent
+            if loader.check_event(yaml.StreamEndEvent):
+                return [], 0
+            loader.get_event()  # DocumentStartEvent
+            node = _compose_uid_node(loader, {}, "logic")
+            loader.get_event()  # DocumentEndEvent
+            if not loader.check_event(yaml.StreamEndEvent):
+                raise ValueError(f"Expected one YAML document: {yaml_path}")
+            data = loader.construct_document(node)
+        finally:
+            loader.dispose()
+
+    if isinstance(data, dict):
+        solutions = data.get("Solutions", [])
+    elif isinstance(data, list) and len(data) > 5:
+        solutions = data[5]
+    else:
+        solutions = []
+    if not isinstance(solutions, list):
+        raise ValueError(f"Expected a Solutions list: {yaml_path}")
+
     entries: List[Tuple[int, str, int]] = []
     missing = 0
-    current_index: int | None = None
-    current_uid: int | None = None
-
-    def flush_solution() -> None:
-        """Record the current solution before scanning the next one.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
-        """
-        nonlocal missing, current_index, current_uid
-        if current_index is None:
-            return
-        if current_uid is None:
+    for solution in solutions:
+        if not isinstance(solution, dict) or "SolutionIndex" not in solution:
+            raise ValueError(f"Expected a solution mapping with SolutionIndex: {yaml_path}")
+        local_index = solution["SolutionIndex"]
+        if type(local_index) is not int:
+            raise ValueError(f"SolutionIndex must be an integer: {yaml_path}")
+        if "SolutionUID" not in solution:
             missing += 1
-        else:
-            entries.append((current_uid, str(yaml_path), current_index))
-        current_index = None
-        current_uid = None
-
-    with yaml_path.open(encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            stripped = line.strip()
-            if stripped.startswith("- SolutionIndex:") or stripped.startswith("SolutionIndex:"):
-                flush_solution()
-                current_index = int(stripped.split(":", 1)[1].strip())
-            elif current_index is not None and stripped.startswith("SolutionUID:"):
-                encoded_uid = stripped.split(":", 1)[1].strip()
-                current_uid = decode_solution_uid(encoded_uid)
-                if current_uid == 0:
-                    raise ValueError(
-                        f"Stored SolutionUID must not be zero: {yaml_path} "
-                        f"(SolutionIndex={current_index})"
-                    )
-
-    flush_solution()
+            continue
+        try:
+            uid = decode_solution_uid(solution["SolutionUID"])
+        except (TypeError, ValueError) as exc:
+            raise type(exc)(f"{yaml_path} (SolutionIndex={local_index}): {exc}") from exc
+        if uid == 0:
+            raise ValueError(
+                f"Stored SolutionUID must not be zero: {yaml_path} "
+                f"(SolutionIndex={local_index})"
+            )
+        entries.append((uid, str(yaml_path), local_index))
     return entries, missing
 
 
@@ -221,6 +309,120 @@ def find_duplicate_uids(
     for uid, yaml_path, local_index in entries:
         seen.setdefault(uid, []).append((yaml_path, local_index))
     return {uid: locations for uid, locations in seen.items() if len(locations) > 1}
+
+
+@pytest.mark.parametrize(
+    "solution_yaml",
+    [
+        "- SolutionIndex: 7\n  SolutionUID: 0u1\n",
+        "- SolutionUID: 0u1\n  SolutionIndex: 7\n",
+        "- {SolutionIndex: 7, SolutionUID: 0u1}\n",
+        "- SolutionIndex: 7 # local index\n  SolutionUID: 0U1 # persistent ID\n",
+        "- SolutionIndex: 7\n  SolutionUID: '0u1'\n",
+        '- SolutionIndex: 7\n  SolutionUID: "0u1"\n',
+    ],
+)
+def test_scan_yaml_file_reads_solution_mappings(tmp_path: Path, solution_yaml: str) -> None:
+    """Equivalent YAML mappings must produce the same numeric identity."""
+    path = tmp_path / "logic.yaml"
+    path.write_text("Solutions:\n" + solution_yaml, encoding="utf-8")
+    assert _scan_yaml_file(path) == ([(1, str(path), 7)], 0)
+
+
+@pytest.mark.parametrize("uid_first", [False, True])
+@pytest.mark.parametrize("uid_yaml", ["123", "null", "0u0", "0u01", "0u_", "0uLygHa16AHYG"])
+def test_scan_yaml_file_rejects_invalid_stored_uids(
+    tmp_path: Path, uid_yaml: str, uid_first: bool
+) -> None:
+    """Field order must not hide an invalid UID."""
+    fields = ["SolutionIndex: 7", f"SolutionUID: {uid_yaml}"]
+    if uid_first:
+        fields.reverse()
+    path = tmp_path / "logic.yaml"
+    path.write_text("Solutions:\n- " + "\n  ".join(fields) + "\n", encoding="utf-8")
+    with pytest.raises((TypeError, ValueError)) as error:
+        _scan_yaml_file(path)
+    assert str(path) in str(error.value)
+
+
+def test_scan_yaml_file_ignores_fields_outside_solution_mapping(tmp_path: Path) -> None:
+    """Text and nested metadata are not solution definitions."""
+    path = tmp_path / "logic.yaml"
+    path.write_text(
+        "Notes: |\n  SolutionIndex: 2\n  SolutionUID: 0u2\n"
+        "Solutions:\n- SolutionIndex: 7\n  SolutionUID: 0u1\n"
+        "  Metadata:\n    SolutionUID: 0u3\n",
+        encoding="utf-8",
+    )
+    assert _scan_yaml_file(path) == ([(1, str(path), 7)], 0)
+
+
+def test_scan_yaml_file_reads_legacy_solutions(tmp_path: Path) -> None:
+    """Legacy list-format logic stores solutions at element five."""
+    path = tmp_path / "logic.yaml"
+    path.write_text(
+        "- {MinimumRequiredVersion: 5.0.0}\n- schedule\n- gfx908\n- []\n- {}\n"
+        "- - SolutionUID: 0u1\n    SolutionIndex: 7\n",
+        encoding="utf-8",
+    )
+    assert _scan_yaml_file(path) == ([(1, str(path), 7)], 0)
+
+
+@pytest.mark.parametrize(
+    "logic_yaml",
+    [
+        "UID: &uid 0u1\nSolutions:\n- SolutionIndex: 7\n  SolutionUID: *uid\n",
+        "Defaults: &defaults {SolutionUID: 0u1}\n"
+        "Solutions:\n- <<: *defaults\n  SolutionIndex: 7\n",
+        "<<:\n  Solutions:\n  - {SolutionIndex: 7, SolutionUID: 0u1}\n",
+        "Template: &solution {SolutionIndex: 7, SolutionUID: 0u1}\n"
+        "Solutions: [*solution]\n",
+        '"Soluti\\u006fns":\n- {SolutionIndex: 7, "SolutionU\\u0049D": 0u1}\n',
+    ],
+)
+def test_scan_yaml_file_resolves_yaml_identity_fields(tmp_path: Path, logic_yaml: str) -> None:
+    """Aliases, merges and escaped keys retain the loader's YAML semantics."""
+    path = tmp_path / "logic.yaml"
+    path.write_text(logic_yaml, encoding="utf-8")
+    assert _scan_yaml_file(path) == ([(1, str(path), 7)], 0)
+
+
+@pytest.mark.parametrize("index_yaml", ["null", "true", "7.5", "'7'"])
+def test_scan_yaml_file_requires_integer_index(tmp_path: Path, index_yaml: str) -> None:
+    path = tmp_path / "logic.yaml"
+    path.write_text(
+        f"Solutions:\n- SolutionIndex: {index_yaml}\n  SolutionUID: 0u1\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="SolutionIndex must be an integer"):
+        _scan_yaml_file(path)
+
+
+def test_scan_yaml_file_rejects_multiple_documents(tmp_path: Path) -> None:
+    path = tmp_path / "logic.yaml"
+    path.write_text(
+        "---\nSolutions: [{SolutionIndex: 0, SolutionUID: 0u1}]\n"
+        "---\nSolutions: [{SolutionIndex: 1, SolutionUID: 0u2}]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Expected one YAML document"):
+        _scan_yaml_file(path)
+
+
+def test_collect_solution_uids_finds_duplicates_across_layouts(tmp_path: Path) -> None:
+    """The corpus gate must see duplicates despite layout and prefix differences."""
+    asm_full = tmp_path / "asm_full"
+    asm_full.mkdir()
+    first = asm_full / "a.yaml"
+    second = asm_full / "b.yaml"
+    first.write_text("Solutions:\n- SolutionIndex: 0\n  SolutionUID: 0u1\n", encoding="utf-8")
+    second.write_text(
+        "Solutions:\n- {SolutionUID: 0U1, SolutionIndex: 3}\n- SolutionIndex: 4\n",
+        encoding="utf-8",
+    )
+    entries, missing = collect_solution_uids(tmp_path, process_count=2)
+    assert missing == 1
+    assert find_duplicate_uids(entries) == {1: [(str(first), 0), (str(second), 3)]}
 
 
 @pytest.fixture(name="logic_root")
