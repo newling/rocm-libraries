@@ -1134,6 +1134,37 @@ namespace
         EXPECT_EQ(counters().invalidated, 1u);
     }
 
+    // Rebuilds can reuse an index for several recorded names. Those rows are
+    // distinct entries even though revisiting each row must not count it again.
+    TEST_F(TuningCache_pre_checkin, DistinctStaleNamesAtOneIndexCountSeparately)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        const auto index = m_identities[1].index;
+        writeTuningFile(
+            m_path,
+            m_stamp,
+            {{index, std::string("StaleKernelA")}, {index, std::string("StaleKernelB")}});
+        useCache(m_path);
+
+        int selected = -1;
+        int launched = -1;
+        ASSERT_TRUE(runGemm(&selected));
+        EXPECT_EQ(selected, m_identities[0].index);
+        EXPECT_EQ(counters().loaded, 2u);
+        EXPECT_EQ(counters().invalidated, 2u);
+
+        for(int repeat = 0; repeat < 2; ++repeat)
+        {
+            ASSERT_TRUE(runGemm(&selected));
+            ASSERT_TRUE(extHeuristicIndex(&selected));
+            ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched));
+        }
+        EXPECT_EQ(launched, m_identities[0].index);
+        EXPECT_EQ(counters().invalidated, 2u);
+    }
+
     // A caller that passes an algo gets that algo, whatever the cache holds.
     TEST_F(TuningCache_pre_checkin, ExplicitAlgoLaunchesAsGivenInCacheMode)
     {
