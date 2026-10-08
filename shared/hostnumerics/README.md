@@ -53,9 +53,22 @@ branch.
 
 The first three stages develop and test HostNumerics independently of the
 consumers. They keep it outside the default monorepo build and provide fast
-feedback through the standalone CPU CI job. The target is for the component
+feedback through the standalone CPU CI jobs. The target is for the component
 build and tests to take on the order of two minutes, excluding runner queue and
 setup time.
+
+Stage 1 (build and package foundations) and stage 2 (tensor and datatype core)
+PRs must use the `ci:skip` label while their changes are confined to standalone
+HostNumerics, its dedicated CI, and related documentation or ownership. TheRock
+currently treats these new paths as unclassified and schedules broad ROCm builds
+by default. Add the label when creating each PR, and ensure the HostNumerics
+standalone jobs and normal repository checks pass. TheRock's configuration and
+summary jobs may still run; the label skips its build and test jobs.
+
+The `ci:skip` label applies to the whole PR. Remove it before adding consumer
+changes, default monorepo-build wiring, or other changes that require TheRock
+coverage. Automatic skipping for standalone changes would require an update to
+CI path classification.
 
 Consumer migrations must preserve existing product tests, supported numerical
 behavior, and tolerances. Independent numerical tests should establish the
