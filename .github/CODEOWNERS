@@ -104,6 +104,10 @@
 /projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 /projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 
+/shared/hostnumerics/**/*.cmake                    @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/*.cmake.in                 @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/CMakeLists.txt              @ROCm/rocm-math-lib-build-infra
+
 /shared/mxdatagenerator/**/*.cmake                  @ROCm/rocm-math-lib-build-infra
 /shared/mxdatagenerator/**/CMakeLists.txt           @ROCm/rocm-math-lib-build-infra
 
