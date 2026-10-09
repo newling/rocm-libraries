@@ -19,8 +19,7 @@ NB_MODULE(_hostnumerics, module) {
         .value("SignedInteger", ScalarCategory::SignedInteger)
         .value("UnsignedInteger", ScalarCategory::UnsignedInteger)
         .value("FloatingPoint", ScalarCategory::FloatingPoint)
-        .value("Complex", ScalarCategory::Complex)
-        .value("Scale", ScalarCategory::Scale);
+        .value("Complex", ScalarCategory::Complex);
 
     nb::enum_<ScalarType>(module, "ScalarType")
         .value("Boolean", ScalarType::Boolean)
@@ -40,16 +39,16 @@ NB_MODULE(_hostnumerics, module) {
         .value("Float8E5M2", ScalarType::Float8E5M2)
         .value("Float8E4M3Fnuz", ScalarType::Float8E4M3Fnuz)
         .value("Float8E5M2Fnuz", ScalarType::Float8E5M2Fnuz)
+        .value("E4M3", ScalarType::E4M3)
+        .value("E5M3", ScalarType::E5M3)
+        .value("E8M0", ScalarType::E8M0)
+        .value("E8M0Zero", ScalarType::E8M0Zero)
         .value("Float16", ScalarType::Float16)
         .value("BFloat16", ScalarType::BFloat16)
         .value("Float32", ScalarType::Float32)
         .value("Float64", ScalarType::Float64)
         .value("ComplexFloat32", ScalarType::ComplexFloat32)
-        .value("ComplexFloat64", ScalarType::ComplexFloat64)
-        .value("E4M3", ScalarType::E4M3)
-        .value("E5M3", ScalarType::E5M3)
-        .value("E8M0", ScalarType::E8M0)
-        .value("E8M0Zero", ScalarType::E8M0Zero);
+        .value("ComplexFloat64", ScalarType::ComplexFloat64);
 
     nb::class_<ScalarTypeInfo>(module, "ScalarTypeInfo")
         .def_prop_ro("name", [](const ScalarTypeInfo& info) { return std::string(info.name); })
@@ -58,6 +57,7 @@ NB_MODULE(_hostnumerics, module) {
         .def_ro("exponent_bits", &ScalarTypeInfo::exponentBits)
         .def_ro("mantissa_bits", &ScalarTypeInfo::mantissaBits)
         .def_ro("exponent_bias", &ScalarTypeInfo::exponentBias)
+        .def_ro("is_signed", &ScalarTypeInfo::isSigned)
         .def_ro("supports_nan", &ScalarTypeInfo::supportsNaN)
         .def_ro("supports_infinity", &ScalarTypeInfo::supportsInfinity)
         .def("is_packed", &ScalarTypeInfo::isPacked);

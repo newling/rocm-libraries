@@ -12,6 +12,8 @@ int main() {
         if (!condition) throw std::runtime_error(message);
     };
 
+    static_assert(scalarTypeInfo(ScalarType::Float32).exponentBits == 8);
+
     // IEEE binary16 has a five-bit exponent, ten fraction bits, and bias 15.
     const auto& half = scalarTypeInfo(ScalarType::Float16);
     require(half.name == "f16" && half.category == ScalarCategory::FloatingPoint &&
@@ -28,8 +30,8 @@ int main() {
                 !packed.supportsInfinity,
             "Incorrect finite six-bit encoding metadata.");
     require(scalarTypeInfo(ScalarType::Int4).category == ScalarCategory::SignedInteger &&
-                scalarTypeInfo(ScalarType::E8M0).category == ScalarCategory::Scale,
-            "Incorrect integer or scale category.");
+                scalarTypeInfo(ScalarType::E8M0).category == ScalarCategory::FloatingPoint,
+            "Incorrect integer or floating-point category.");
 
     // Check each identifier independently of its position in the metadata table.
     constexpr std::pair<ScalarType, std::string_view> expectedNames[] = {
@@ -50,16 +52,16 @@ int main() {
         {ScalarType::Float8E5M2, "f8e5m2"},
         {ScalarType::Float8E4M3Fnuz, "f8e4m3fnuz"},
         {ScalarType::Float8E5M2Fnuz, "f8e5m2fnuz"},
+        {ScalarType::E4M3, "e4m3"},
+        {ScalarType::E5M3, "e5m3"},
+        {ScalarType::E8M0, "e8m0"},
+        {ScalarType::E8M0Zero, "e8m0_zero"},
         {ScalarType::Float16, "f16"},
         {ScalarType::BFloat16, "bf16"},
         {ScalarType::Float32, "f32"},
         {ScalarType::Float64, "f64"},
         {ScalarType::ComplexFloat32, "c64"},
         {ScalarType::ComplexFloat64, "c128"},
-        {ScalarType::E4M3, "e4m3"},
-        {ScalarType::E5M3, "e5m3"},
-        {ScalarType::E8M0, "e8m0"},
-        {ScalarType::E8M0Zero, "e8m0_zero"},
     };
     static_assert(std::size(expectedNames) == scalarTypeCount);
     for (const auto& [type, name] : expectedNames) {
@@ -67,14 +69,21 @@ int main() {
         require(scalarTypeInfo(type).category < ScalarCategory::Count,
                 "Scalar metadata has an invalid category.");
     }
+
+    for (ScalarType type :
+         {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
+        const auto& info = scalarTypeInfo(type);
+        require(info.category == ScalarCategory::FloatingPoint && !info.isSigned,
+                "Unsigned floating-point metadata mismatch.");
+    }
+    require(scalarTypeInfo(ScalarType::Float32).isSigned &&
+                scalarTypeInfo(ScalarType::ComplexFloat32).isSigned &&
+                scalarTypeInfo(ScalarType::Int4).isSigned &&
+                !scalarTypeInfo(ScalarType::UInt8).isSigned &&
+                !scalarTypeInfo(ScalarType::Boolean).isSigned,
+            "Scalar signedness metadata mismatch.");
+
     for (ScalarType invalid : {ScalarType::Count, static_cast<ScalarType>(0xffff)}) {
         require(!isConcreteScalarType(invalid), "Invalid scalar type classified as concrete.");
-        bool rejected = false;
-        try {
-            (void)scalarTypeInfo(invalid);
-        } catch (const std::invalid_argument&) {
-            rejected = true;
-        }
-        require(rejected, "Metadata lookup accepted an invalid scalar type.");
     }
 }

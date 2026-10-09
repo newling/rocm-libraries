@@ -4,9 +4,9 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <stdexcept>
 #include <string_view>
 
 namespace roc::hostnumerics {
@@ -16,12 +16,11 @@ enum class ScalarCategory : uint8_t {
     UnsignedInteger,
     FloatingPoint,
     Complex,
-    Scale,
     Count,
 };
 
 // Dense table index for every supported scalar encoding. Count is one-past-last
-// and exists only to size the metadata table. Metadata lookup rejects Count.
+// and exists only to size the metadata table; it is not a scalar encoding.
 enum class ScalarType : uint16_t {
     Boolean,
     Int4,
@@ -38,14 +37,10 @@ enum class ScalarType : uint16_t {
     Float6E3M2,
     Float8E4M3,
     Float8E5M2,
+    // FNUZ means finite, NaN, unsigned zero: no infinities or negative zero.
+    // The former negative-zero byte (0x80) encodes NaN; exponent biases are 8 and 16.
     Float8E4M3Fnuz,
     Float8E5M2Fnuz,
-    Float16,
-    BFloat16,
-    Float32,
-    Float64,
-    ComplexFloat32,
-    ComplexFloat64,
     // Unsigned float: four exponent bits and three fraction bits in an eight-bit slot.
     // The top bit is ignored when decoding and zero when encoding; 0x7f is NaN.
     // Float8E4M3 instead uses the top bit as a sign bit.
@@ -56,6 +51,12 @@ enum class ScalarType : uint16_t {
     E8M0,
     // E8M0 with byte 0x00 representing zero instead of 2^-127.
     E8M0Zero,
+    Float16,
+    BFloat16,
+    Float32,
+    Float64,
+    ComplexFloat32,
+    ComplexFloat64,
     Count,
 };
 
@@ -71,6 +72,8 @@ struct ScalarTypeInfo {
     uint8_t mantissaBits;
     // Bias subtracted from an encoded exponent; zero when exponentBits is zero.
     int16_t exponentBias;
+    // Whether each real component can represent negative values.
+    bool isSigned;
     // Whether the encoding has at least one representation for NaN.
     bool supportsNaN;
     // Whether the encoding has representations for positive and negative infinity.
@@ -88,47 +91,85 @@ inline constexpr bool isConcreteScalarType(ScalarType type) {
     return static_cast<size_t>(type) < scalarTypeCount;
 }
 
-// Exponent and fraction widths are per real component. NaN/Inf columns describe support.
-// clang-format off
-inline constexpr std::array<ScalarTypeInfo, scalarTypeCount> scalarTypeInfos{{
-    // Name          Category                          Bits Exp Frac Bias NaN    Inf
-    {"bool",         ScalarCategory::Boolean,            8,  0,   0,   0, false, false},
-    {"i4",           ScalarCategory::SignedInteger,      4,  0,   0,   0, false, false},
-    {"i8",           ScalarCategory::SignedInteger,      8,  0,   0,   0, false, false},
-    {"i16",          ScalarCategory::SignedInteger,     16,  0,   0,   0, false, false},
-    {"i32",          ScalarCategory::SignedInteger,     32,  0,   0,   0, false, false},
-    {"i64",          ScalarCategory::SignedInteger,     64,  0,   0,   0, false, false},
-    {"u8",           ScalarCategory::UnsignedInteger,    8,  0,   0,   0, false, false},
-    {"u16",          ScalarCategory::UnsignedInteger,   16,  0,   0,   0, false, false},
-    {"u32",          ScalarCategory::UnsignedInteger,   32,  0,   0,   0, false, false},
-    {"u64",          ScalarCategory::UnsignedInteger,   64,  0,   0,   0, false, false},
-    {"f4e2m1",       ScalarCategory::FloatingPoint,      4,  2,   1,   1, false, false},
-    {"f6e2m3",       ScalarCategory::FloatingPoint,      6,  2,   3,   1, false, false},
-    {"f6e3m2",       ScalarCategory::FloatingPoint,      6,  3,   2,   3, false, false},
-    {"f8e4m3",       ScalarCategory::FloatingPoint,      8,  4,   3,   7, true,  false},
-    {"f8e5m2",       ScalarCategory::FloatingPoint,      8,  5,   2,  15, true,  true },
-    {"f8e4m3fnuz",   ScalarCategory::FloatingPoint,      8,  4,   3,   8, true,  false},
-    {"f8e5m2fnuz",   ScalarCategory::FloatingPoint,      8,  5,   2,  16, true,  false},
-    {"f16",          ScalarCategory::FloatingPoint,     16,  5,  10,  15, true,  true },
-    {"bf16",         ScalarCategory::FloatingPoint,     16,  8,   7, 127, true,  true },
-    {"f32",          ScalarCategory::FloatingPoint,     32,  8,  23, 127, true,  true },
-    {"f64",          ScalarCategory::FloatingPoint,     64, 11,  52, 1023, true,  true },
-    {"c64",          ScalarCategory::Complex,           64,  8,  23, 127, true,  true },
-    {"c128",         ScalarCategory::Complex,          128, 11,  52, 1023, true,  true },
-    {"e4m3",         ScalarCategory::Scale,              8,  4,   3,   7, true,  false},
-    {"e5m3",         ScalarCategory::Scale,              8,  5,   3,  15, true,  false},
-    {"e8m0",         ScalarCategory::Scale,              8,  8,   0, 127, true,  false},
-    {"e8m0_zero",    ScalarCategory::Scale,              8,  8,   0, 127, true,  false},
-}};
-// clang-format on
+namespace detail {
+constexpr ScalarTypeInfo getSignedInteger(std::string_view name, uint16_t bits) {
+    return {name, ScalarCategory::SignedInteger, bits, 0, 0, 0, true, false, false};
+}
 
-// Invalid identifiers throw std::invalid_argument, including in release builds.
+constexpr ScalarTypeInfo getUnsignedInteger(std::string_view name, uint16_t bits) {
+    return {name, ScalarCategory::UnsignedInteger, bits, 0, 0, 0, false, false, false};
+}
+
+struct FloatingPointOptions {
+    bool isSigned = true;
+    bool supportsNaN = true;
+    bool supportsInfinity = true;
+};
+
+constexpr ScalarTypeInfo getFloatingPoint(std::string_view name, uint16_t bits,
+                                          uint8_t exponentBits, uint8_t mantissaBits,
+                                          int16_t exponentBias, FloatingPointOptions options = {}) {
+    return {name,
+            ScalarCategory::FloatingPoint,
+            bits,
+            exponentBits,
+            mantissaBits,
+            exponentBias,
+            options.isSigned,
+            options.supportsNaN,
+            options.supportsInfinity};
+}
+
+constexpr ScalarTypeInfo getComplex(std::string_view name, ScalarTypeInfo component) {
+    component.name = name;
+    component.category = ScalarCategory::Complex;
+    component.storageBits *= 2;
+    return component;
+}
+}  // namespace detail
+
+inline constexpr std::array<ScalarTypeInfo, scalarTypeCount> scalarTypeInfos{{
+    {"bool", ScalarCategory::Boolean, 8, 0, 0, 0, false, false, false},
+    detail::getSignedInteger("i4", 4),
+    detail::getSignedInteger("i8", 8),
+    detail::getSignedInteger("i16", 16),
+    detail::getSignedInteger("i32", 32),
+    detail::getSignedInteger("i64", 64),
+    detail::getUnsignedInteger("u8", 8),
+    detail::getUnsignedInteger("u16", 16),
+    detail::getUnsignedInteger("u32", 32),
+    detail::getUnsignedInteger("u64", 64),
+    detail::getFloatingPoint("f4e2m1", 4, 2, 1, 1,
+                             {.supportsNaN = false, .supportsInfinity = false}),
+    detail::getFloatingPoint("f6e2m3", 6, 2, 3, 1,
+                             {.supportsNaN = false, .supportsInfinity = false}),
+    detail::getFloatingPoint("f6e3m2", 6, 3, 2, 3,
+                             {.supportsNaN = false, .supportsInfinity = false}),
+    detail::getFloatingPoint("f8e4m3", 8, 4, 3, 7, {.supportsInfinity = false}),
+    detail::getFloatingPoint("f8e5m2", 8, 5, 2, 15),
+    detail::getFloatingPoint("f8e4m3fnuz", 8, 4, 3, 8, {.supportsInfinity = false}),
+    detail::getFloatingPoint("f8e5m2fnuz", 8, 5, 2, 16, {.supportsInfinity = false}),
+    detail::getFloatingPoint("e4m3", 8, 4, 3, 7, {.isSigned = false, .supportsInfinity = false}),
+    detail::getFloatingPoint("e5m3", 8, 5, 3, 15, {.isSigned = false, .supportsInfinity = false}),
+    detail::getFloatingPoint("e8m0", 8, 8, 0, 127, {.isSigned = false, .supportsInfinity = false}),
+    detail::getFloatingPoint("e8m0_zero", 8, 8, 0, 127,
+                             {.isSigned = false, .supportsInfinity = false}),
+    detail::getFloatingPoint("f16", 16, 5, 10, 15),
+    detail::getFloatingPoint("bf16", 16, 8, 7, 127),
+    detail::getFloatingPoint("f32", 32, 8, 23, 127),
+    detail::getFloatingPoint("f64", 64, 11, 52, 1023),
+    detail::getComplex("c64", detail::getFloatingPoint("f32", 32, 8, 23, 127)),
+    detail::getComplex("c128", detail::getFloatingPoint("f64", 64, 11, 52, 1023)),
+}};
+
+// The caller must supply a concrete scalar type, including in release builds.
 inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
-    if (!isConcreteScalarType(type)) throw std::invalid_argument("Invalid ScalarType.");
+    assert(isConcreteScalarType(type));
     return scalarTypeInfos[static_cast<size_t>(type)];
 }
 
 inline constexpr std::string_view scalarTypeName(ScalarType type) {
     return scalarTypeInfo(type).name;
 }
+
 }  // namespace roc::hostnumerics
