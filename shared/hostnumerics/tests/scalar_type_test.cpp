@@ -4,6 +4,7 @@
 #include <initializer_list>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <stdexcept>
+#include <utility>
 
 int main() {
     using namespace roc::hostnumerics;
@@ -30,9 +31,42 @@ int main() {
                 scalarTypeInfo(ScalarType::E8M0).category == ScalarCategory::Scale,
             "Incorrect integer or scale category.");
 
-    for (size_t index = 0; index < scalarTypeCount; ++index)
-        require(!scalarTypeName(static_cast<ScalarType>(index)).empty(),
-                "A concrete scalar type has no metadata.");
+    // Check each identifier independently of its position in the metadata table.
+    constexpr std::pair<ScalarType, std::string_view> expectedNames[] = {
+        {ScalarType::Boolean, "bool"},
+        {ScalarType::Int4, "i4"},
+        {ScalarType::Int8, "i8"},
+        {ScalarType::Int16, "i16"},
+        {ScalarType::Int32, "i32"},
+        {ScalarType::Int64, "i64"},
+        {ScalarType::UInt8, "u8"},
+        {ScalarType::UInt16, "u16"},
+        {ScalarType::UInt32, "u32"},
+        {ScalarType::UInt64, "u64"},
+        {ScalarType::Float4E2M1, "f4e2m1"},
+        {ScalarType::Float6E2M3, "f6e2m3"},
+        {ScalarType::Float6E3M2, "f6e3m2"},
+        {ScalarType::Float8E4M3, "f8e4m3"},
+        {ScalarType::Float8E5M2, "f8e5m2"},
+        {ScalarType::Float8E4M3Fnuz, "f8e4m3fnuz"},
+        {ScalarType::Float8E5M2Fnuz, "f8e5m2fnuz"},
+        {ScalarType::Float16, "f16"},
+        {ScalarType::BFloat16, "bf16"},
+        {ScalarType::Float32, "f32"},
+        {ScalarType::Float64, "f64"},
+        {ScalarType::ComplexFloat32, "c64"},
+        {ScalarType::ComplexFloat64, "c128"},
+        {ScalarType::E4M3, "e4m3"},
+        {ScalarType::E5M3, "e5m3"},
+        {ScalarType::E8M0, "e8m0"},
+        {ScalarType::E8M0Zero, "e8m0_zero"},
+    };
+    static_assert(std::size(expectedNames) == scalarTypeCount);
+    for (const auto& [type, name] : expectedNames) {
+        require(scalarTypeName(type) == name, "Scalar identifier has the wrong metadata row.");
+        require(scalarTypeInfo(type).category < ScalarCategory::Count,
+                "Scalar metadata has an invalid category.");
+    }
     for (ScalarType invalid : {ScalarType::Count, static_cast<ScalarType>(0xffff)}) {
         require(!isConcreteScalarType(invalid), "Invalid scalar type classified as concrete.");
         bool rejected = false;
