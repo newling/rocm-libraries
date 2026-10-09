@@ -17,6 +17,11 @@ namespace rocRoller::hostnumerics
         using roc::hostnumerics::Shape;
         using roc::hostnumerics::Tensor;
 
+        bool isSupportedScaleType(DataType type)
+        {
+            return type == DataType::E4M3 || type == DataType::E5M3 || type == DataType::E8M0;
+        }
+
         Tensor normalizeBlockScale(Tensor      values,
                                    size_t      freeExtent,
                                    size_t      reductionExtent,
@@ -65,12 +70,10 @@ namespace rocRoller::hostnumerics
                                               size_t                   blockSize)
     {
         using roc::hostnumerics::Layout;
-        using roc::hostnumerics::ScalarCategory;
-        using roc::hostnumerics::scalarTypeInfo;
         using roc::hostnumerics::Shape;
         using roc::hostnumerics::Tensor;
         auto const scalarType = hostScalarType(type);
-        if(scalarTypeInfo(scalarType).category != ScalarCategory::Scale)
+        if(!isSupportedScaleType(type))
             throw std::invalid_argument("rocRoller runtime scale requires a scale data type.");
         if(values.size() != 1)
             throw std::invalid_argument("rocRoller runtime scale storage must contain one scalar.");
@@ -89,14 +92,12 @@ namespace rocRoller::hostnumerics
                                               size_t                   blockSize)
     {
         using roc::hostnumerics::Layout;
-        using roc::hostnumerics::ScalarCategory;
-        using roc::hostnumerics::scalarTypeInfo;
         using roc::hostnumerics::storageBytesForLayout;
         using roc::hostnumerics::Tensor;
 
         auto const layout     = hostScaleLayout(dataDescriptor, blockedDimension, blockSize);
         auto const scalarType = hostScalarType(type);
-        if(scalarTypeInfo(scalarType).category != ScalarCategory::Scale)
+        if(!isSupportedScaleType(type))
             throw std::invalid_argument("rocRoller block scales require a scale data type.");
         if(values.size() == 1)
             return Tensor::copyEncodedBackingStorage(

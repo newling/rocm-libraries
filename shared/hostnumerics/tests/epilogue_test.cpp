@@ -7,6 +7,18 @@ namespace hostnumerics_test {
 void testReferenceEpilogue() {
     using namespace roc::hostnumerics;
 
+    const Tensor ordinary(ScalarType::Float32, Shape{1, 1});
+    for (ScalarType type :
+         {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
+        const Tensor unsupported(type, ordinary.shape());
+        requireInvalidArgument(
+            [&] { referenceEpilogueInto(unsupported, {.output = ordinary}, EpilogueOptions{}); },
+            "Epilogue accepted an unsupported unsigned floating-point input.");
+        requireInvalidArgument(
+            [&] { referenceEpilogueInto(ordinary, {.output = unsupported}, EpilogueOptions{}); },
+            "Epilogue accepted an unsupported unsigned floating-point output.");
+    }
+
     const std::array<float, 4> input{-2, 1, 3, -4};
     const std::array<float, 2> bias{1, 2};
     Tensor output(ScalarType::Float16, Shape{2, 2});

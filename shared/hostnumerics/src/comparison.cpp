@@ -96,7 +96,6 @@ int ulpMantissaBits(ScalarType type) {
         info.category == ScalarCategory::UnsignedInteger ||
         info.category == ScalarCategory::Boolean)
         return 0;
-    if (info.category == ScalarCategory::Scale) return info.mantissaBits;
     return info.mantissaBits;
 }
 

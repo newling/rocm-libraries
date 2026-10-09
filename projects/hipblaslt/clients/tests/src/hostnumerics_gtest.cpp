@@ -232,6 +232,28 @@ namespace
     }
 } // namespace
 
+TEST(HostNumericsInitialization, UnsignedFloatingPointMatrixBDoesNotAlternateSigns)
+{
+    using namespace roc::hostnumerics;
+    for(auto type : {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero})
+    {
+        SCOPED_TRACE(std::string(scalarTypeName(type)));
+        Tensor a(type, Shape{4, 8});
+        Tensor b(type, a.shape());
+        hipblaslt::hostnumerics::initializeMatrix(
+            a, hipblaslt::hostnumerics::MatrixRole::A, hipblaslt_initialization::rand_int, 37);
+        hipblaslt::hostnumerics::initializeMatrix(
+            b, hipblaslt::hostnumerics::MatrixRole::B, hipblaslt_initialization::rand_int, 37);
+        for(size_t row = 0; row < 4; ++row)
+            for(size_t column = 0; column < 8; ++column)
+            {
+                const double value = b.loadAs<double>({row, column});
+                EXPECT_GT(value, 0.0);
+                EXPECT_EQ(value, a.loadAs<double>({row, column}));
+            }
+    }
+}
+
 TEST(HostNumericsTensorStorage, HipHostBufferTensorRetainsAndMutatesThePinnedAllocation)
 {
     using namespace roc::hostnumerics;

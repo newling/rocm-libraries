@@ -7,6 +7,17 @@ namespace hostnumerics_test {
 void testStructuredSparsity() {
     using namespace roc::hostnumerics;
 
+    for (ScalarType type :
+         {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
+        StructuredSparsityPattern pattern;
+        pattern.fixedPositions = {0, 2};
+        for (size_t elements : {size_t{0}, size_t{4}}) {
+            requireInvalidArgument(
+                [&] { (void)applyStructuredSparsity(Tensor(type, Shape{elements}), pattern); },
+                "Structured sparsity accepted an unsupported unsigned floating-point input.");
+        }
+    }
+
     std::array<float, 20> inputStorage;
     inputStorage.fill(-99);
     Tensor input =

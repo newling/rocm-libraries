@@ -81,6 +81,21 @@ void testRuntimeReferenceGemm() {
     require(zeroReduction.shape() == Shape({2, 3}) &&
                 compare(zeroReduction, Tensor(ScalarType::Float32, Shape{2, 3})).passed(),
             "Owning reference GEMM did not initialize an empty reduction to zero.");
+
+    const Tensor ordinary(ScalarType::Float32, Shape{1, 1});
+    for (ScalarType type :
+         {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
+        const Tensor unsupported(type, Shape{1, 1});
+        requireInvalidArgument([&] { (void)matmul(unsupported, ordinary, ScalarType::Float32); },
+                               "GEMM accepted an unsupported unsigned floating-point A.");
+        requireInvalidArgument([&] { (void)matmul(ordinary, unsupported, ScalarType::Float32); },
+                               "GEMM accepted an unsupported unsigned floating-point B.");
+        requireInvalidArgument([&] { (void)matmul(ordinary, ordinary, type); },
+                               "GEMM accepted an unsupported unsigned floating-point output.");
+        requireInvalidArgument(
+            [&] { (void)matmul(Tensor(type, Shape{0, 1}), ordinary, ScalarType::Float32); },
+            "Empty GEMM accepted an unsupported unsigned floating-point operand.");
+    }
 }
 
 void testRuntimeMixedAndBlockScaledGemm() {

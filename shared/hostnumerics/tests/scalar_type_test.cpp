@@ -41,16 +41,16 @@ void testScalarTypeInfoContract() {
         {ScalarType::Float8E5M2, "f8e5m2"},
         {ScalarType::Float8E4M3Fnuz, "f8e4m3fnuz"},
         {ScalarType::Float8E5M2Fnuz, "f8e5m2fnuz"},
+        {ScalarType::E4M3, "e4m3"},
+        {ScalarType::E5M3, "e5m3"},
+        {ScalarType::E8M0, "e8m0"},
+        {ScalarType::E8M0Zero, "e8m0_zero"},
         {ScalarType::Float16, "f16"},
         {ScalarType::BFloat16, "bf16"},
         {ScalarType::Float32, "f32"},
         {ScalarType::Float64, "f64"},
         {ScalarType::ComplexFloat32, "c64"},
         {ScalarType::ComplexFloat64, "c128"},
-        {ScalarType::E4M3, "e4m3"},
-        {ScalarType::E5M3, "e5m3"},
-        {ScalarType::E8M0, "e8m0"},
-        {ScalarType::E8M0Zero, "e8m0_zero"},
     };
     static_assert(std::size(expectedNames) == scalarTypeCount);
     for (const auto& [type, name] : expectedNames) {
@@ -58,6 +58,19 @@ void testScalarTypeInfoContract() {
         require(scalarTypeInfo(type).category < ScalarCategory::Count,
                 "Scalar metadata has an invalid category.");
     }
+
+    for (ScalarType type :
+         {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
+        const auto& info = scalarTypeInfo(type);
+        require(info.category == ScalarCategory::FloatingPoint && !info.isSigned,
+                "Unsigned floating-point metadata mismatch.");
+    }
+    require(scalarTypeInfo(ScalarType::Float32).isSigned &&
+                scalarTypeInfo(ScalarType::ComplexFloat32).isSigned &&
+                scalarTypeInfo(ScalarType::Int4).isSigned &&
+                !scalarTypeInfo(ScalarType::UInt8).isSigned &&
+                !scalarTypeInfo(ScalarType::Boolean).isSigned,
+            "Scalar signedness metadata mismatch.");
 
     require(scalarTypeCount == scalarTypeInfos.size(),
             "Scalar type count and metadata table size differ.");
@@ -69,8 +82,6 @@ void testScalarTypeInfoContract() {
     }
     for (ScalarType invalid : {ScalarType::Count, static_cast<ScalarType>(0xffff)}) {
         require(!isConcreteScalarType(invalid), "Invalid scalar type classified as concrete.");
-        requireThrows<std::invalid_argument>([invalid] { (void)scalarTypeInfo(invalid); },
-                                             "Scalar metadata accepted an invalid identifier.");
         requireThrows<std::invalid_argument>(
             [invalid] { (void)visitScalarType(invalid, []<typename>() { return true; }); },
             "Scalar visitor accepted an invalid identifier.");
@@ -116,9 +127,17 @@ void testScalarTypeInfoContract() {
                 float6.storageBits == 6 && float6.isPacked(),
             "Float6 cross-byte metadata contract mismatch.");
 
-    requireThrows<std::invalid_argument>(
-        [] { (void)Tensor::scalar(ScalarType::Count, 0); },
-        "Rank-zero tensor construction accepted the Count sentinel.");
+    for (ScalarType invalid : {ScalarType::Count, static_cast<ScalarType>(0xffff)}) {
+        requireThrows<std::invalid_argument>(
+            [invalid] { (void)Tensor::scalar(invalid, 0); },
+            "Rank-zero tensor construction accepted an invalid scalar type.");
+        requireThrows<std::invalid_argument>(
+            [invalid] { (void)Tensor(invalid, Shape{0}); },
+            "Empty tensor construction accepted an invalid scalar type.");
+        requireThrows<std::invalid_argument>(
+            [invalid] { (void)Tensor::allocateUninitialized(invalid, Shape{0}); },
+            "Uninitialized tensor allocation accepted an invalid scalar type.");
+    }
 }
 
 }  // namespace scalar_codec_test

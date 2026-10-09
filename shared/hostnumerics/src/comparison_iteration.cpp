@@ -29,7 +29,6 @@ bool isUnwrittenSentinelValue(ScalarType type, const ComparisonValue& value) {
         case ScalarCategory::UnsignedInteger:
             return value.real == std::ldexp(1.0, info.storageBits) - 1.0;
         case ScalarCategory::FloatingPoint:
-        case ScalarCategory::Scale:
             return info.supportsInfinity ? std::isinf(value.real) : std::isnan(value.real);
         case ScalarCategory::Complex:
             return std::isinf(value.real) && std::isinf(value.imaginary);

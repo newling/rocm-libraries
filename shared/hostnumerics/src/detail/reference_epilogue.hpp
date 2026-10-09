@@ -111,10 +111,10 @@ inline void validateEpilogueValueType(ScalarType type, const char* name) {
     if (!isConcreteScalarType(type))
         throw std::invalid_argument(std::string("Reference epilogue ") + name +
                                     " type is invalid.");
-    const ScalarCategory category = scalarTypeInfo(type).category;
-    if (category == ScalarCategory::Scale)
+    if (type == ScalarType::E4M3 || type == ScalarType::E5M3 || type == ScalarType::E8M0 ||
+        type == ScalarType::E8M0Zero)
         throw std::invalid_argument(std::string("Reference epilogue ") + name +
-                                    " must use an arithmetic scalar type.");
+                                    " has an unsupported scalar type.");
 }
 
 inline void validateEpilogueActivation(const EpilogueOptions& problem) {

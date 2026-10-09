@@ -911,11 +911,12 @@ struct GenerationRecipeAccess {
                                                 const Pattern& pattern) {
         if (!detail::isContiguous(destination.layout(), recipe.settings_.indexOrder)) return false;
 
-        constexpr ScalarCategory category = scalarTypeInfo(Tag::type).category;
+        constexpr auto& info = scalarTypeInfo(Tag::type);
+        constexpr bool signedFloatingPoint =
+            info.category == ScalarCategory::FloatingPoint && info.isSigned;
         constexpr bool signedNumerical =
-            category == ScalarCategory::FloatingPoint || category == ScalarCategory::SignedInteger;
-        constexpr bool lowPrecisionFloatingPoint = category == ScalarCategory::FloatingPoint &&
-                                                   scalarTypeInfo(Tag::type).storageBits <= 16;
+            signedFloatingPoint || info.category == ScalarCategory::SignedInteger;
+        constexpr bool lowPrecisionFloatingPoint = signedFloatingPoint && info.storageBits <= 16;
         constexpr bool discretePattern =
             std::is_same_v<Pattern, Component::ChoicePattern> ||
             std::is_same_v<Pattern, Component::UniformIntegerPattern> ||
@@ -959,8 +960,7 @@ struct GenerationRecipeAccess {
             }
         }
 
-        constexpr bool subByteOrByteFloatingPoint =
-            category == ScalarCategory::FloatingPoint && scalarTypeInfo(Tag::type).storageBits <= 8;
+        constexpr bool subByteOrByteFloatingPoint = signedFloatingPoint && info.storageBits <= 8;
         if constexpr (subByteOrByteFloatingPoint &&
                       std::is_same_v<Pattern, Component::UniformRealPattern>) {
             constexpr size_t minimumLookupElementCount = 16384;

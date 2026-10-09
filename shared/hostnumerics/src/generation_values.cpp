@@ -250,9 +250,7 @@ double randomEncodedExponentValue(const RandomEncodedExponentGenerationParameter
 
 std::span<const uint8_t> finiteEncodedValues(ScalarType type) {
     const ScalarTypeInfo& info = scalarTypeInfo(type);
-    if ((info.category != ScalarCategory::FloatingPoint &&
-         info.category != ScalarCategory::Scale) ||
-        info.storageBits > 8)
+    if (info.category != ScalarCategory::FloatingPoint || info.storageBits > 8)
         throw std::invalid_argument(
             "Uniform finite encoded generation requires a floating-point encoding of at most "
             "eight bits.");
@@ -262,8 +260,7 @@ std::span<const uint8_t> finiteEncodedValues(ScalarType type) {
         for (size_t typeIndex = 0; typeIndex < scalarTypeCount; ++typeIndex) {
             const ScalarType candidateType = static_cast<ScalarType>(typeIndex);
             const ScalarTypeInfo& candidateInfo = scalarTypeInfo(candidateType);
-            if ((candidateInfo.category != ScalarCategory::FloatingPoint &&
-                 candidateInfo.category != ScalarCategory::Scale) ||
+            if (candidateInfo.category != ScalarCategory::FloatingPoint ||
                 candidateInfo.storageBits > 8)
                 continue;
             const uint32_t encodingCount = uint32_t{1} << candidateInfo.storageBits;

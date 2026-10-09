@@ -115,6 +115,44 @@ void testValueSemanticsAndExamples() {
     }
 }
 
+void testUnsignedFloatingPointRecipes() {
+    const std::array recipes{
+        GenerationRecipe::realOnly(GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}}),
+                                   {.seed = 19}),
+        GenerationRecipe::realOnly(GenerationRecipe::uniformInteger({.lower = 1, .upper = 4}),
+                                   {.seed = 19}),
+        GenerationRecipe::realOnly(GenerationRecipe::uniformReal({.lower = 1.0, .upper = 4.0}),
+                                   {.seed = 19}),
+    };
+    for (ScalarType type :
+         {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0, ScalarType::E8M0Zero}) {
+        for (const auto& recipe : recipes) {
+            const Tensor bulk = generate(type, Shape{16'384}, recipe);
+            Tensor elementwise(type, bulk.shape());
+            for (size_t index = 0; index < bulk.elementCount(); ++index) {
+                generateAt(elementwise, index, recipe);
+                const double value = bulk.loadAs<double>({index});
+                require(value >= 1.0 && value <= 4.0,
+                        "Unsigned floating-point generation left the requested range.");
+            }
+            requireEqualStorage(bulk, elementwise,
+                                "Unsigned floating-point bulk and elementwise generation differ.");
+        }
+    }
+
+    const auto alternating = GenerationRecipe::realOnly(
+        GenerationRecipe::uniformInteger({.lower = 2, .upper = 2})
+            .withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = true}));
+    for (ScalarType type : {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0}) {
+        requireThrows<std::domain_error>([&] { (void)generate(type, Shape{2}, alternating); },
+                                         "Unsigned floating-point generation accepted negatives.");
+    }
+    // E8M0Zero preserves its exponent-extraction conversion, which discards the input sign.
+    const Tensor exponentOnly = generate(ScalarType::E8M0Zero, Shape{2}, alternating);
+    require(exponentOnly.loadAs<double>({0}) == 2.0 && exponentOnly.loadAs<double>({1}) == 2.0,
+            "E8M0Zero generation changed its exponent-extraction conversion.");
+}
+
 void testSeedAndComplexPolicies() {
     constexpr uint64_t seed = 37;
     constexpr UniformIntegerGenerationParameters parameters{.lower = -100, .upper = 100};
@@ -300,6 +338,7 @@ void testCallableOverload() {
 int main() {
     try {
         testValueSemanticsAndExamples();
+        testUnsignedFloatingPointRecipes();
         testSeedAndComplexPolicies();
         testValidationFailures();
         testCallableOverload();

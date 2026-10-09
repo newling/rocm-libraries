@@ -60,9 +60,10 @@ StructuredSparsityPlan validateStructuredSparsityProblem(
     if (inputShape[problem.pattern.axis] % problem.pattern.groupSize != 0)
         throw std::invalid_argument(
             "Structured sparsity axis extent must be divisible by group size.");
-    if (scalarTypeInfo(problem.input.type()).category == ScalarCategory::Scale)
-        throw std::invalid_argument(
-            "Structured sparsity does not accept scale-only scalar encodings.");
+    const ScalarType inputType = problem.input.type();
+    if (inputType == ScalarType::E4M3 || inputType == ScalarType::E5M3 ||
+        inputType == ScalarType::E8M0 || inputType == ScalarType::E8M0Zero)
+        throw std::invalid_argument("Structured sparsity input has an unsupported scalar type.");
     if (problem.pattern.selection != StructuredSparsitySelection::Fixed &&
         problem.pattern.selection != StructuredSparsitySelection::Random)
         throw std::invalid_argument("Structured sparsity selection is invalid.");

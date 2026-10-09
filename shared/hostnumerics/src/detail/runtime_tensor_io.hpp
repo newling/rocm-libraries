@@ -28,10 +28,6 @@ inline bool isComplexScalarType(ScalarType type) {
     return scalarTypeInfo(type).category == ScalarCategory::Complex;
 }
 
-inline bool isScaleScalarType(ScalarType type) {
-    return scalarTypeInfo(type).category == ScalarCategory::Scale;
-}
-
 template <typename Accumulator>
 using RuntimeLoadFunction = Accumulator (*)(std::span<const std::byte>, ptrdiff_t);
 

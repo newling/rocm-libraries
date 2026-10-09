@@ -33,6 +33,7 @@ bool detail::byteRangesOverlap(std::span<const std::byte> left, std::span<const 
 }
 
 size_t storageBytesForLayout(ScalarType type, const Layout& layout) {
+    if (!isConcreteScalarType(type)) throw std::invalid_argument("Invalid Tensor scalar type.");
     const auto [lower, upper] = detail::elementBounds(layout);
     if (upper < lower) return 0;
     if (lower < 0) throw std::invalid_argument("Tensor layout addresses before the storage base.");
@@ -57,10 +58,10 @@ Tensor::Tensor(ScalarType type, Layout layout)
       m_storage(allocateZeroInitializedStorage(storageBytesForLayout(m_type, m_layout))) {}
 
 Tensor Tensor::allocateUninitialized(ScalarType type, Layout layout) {
+    const size_t bytes = storageBytesForLayout(type, layout);
     if (scalarTypeInfo(type).isPacked())
         throw std::invalid_argument(
             "Uninitialized Tensor allocation requires a byte-addressable scalar type.");
-    const size_t bytes = storageBytesForLayout(type, layout);
     return Tensor(type, std::move(layout), allocateUninitializedStorage(bytes));
 }
 

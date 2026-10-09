@@ -142,7 +142,7 @@ namespace hipblaslt::hostnumerics
                 if(category == ScalarCategory::SignedInteger
                    || category == ScalarCategory::UnsignedInteger
                    || category == ScalarCategory::FloatingPoint
-                   || category == ScalarCategory::Complex || category == ScalarCategory::Scale)
+                   || category == ScalarCategory::Complex)
                     return GenerationRecipe::uniformInteger({.lower = 1, .upper = 10});
                 throw std::invalid_argument(
                     "Random-integer initialization requires an arithmetic tensor type.");
@@ -383,11 +383,7 @@ namespace hipblaslt::hostnumerics
             {
             case hipblaslt_initialization::rand_int:
             {
-                const ScalarCategory category    = scalarTypeInfo(type).category;
-                const bool           alternating = role == MatrixRole::B
-                                         && category != ScalarCategory::Boolean
-                                         && category != ScalarCategory::UnsignedInteger
-                                         && category != ScalarCategory::Scale;
+                const bool alternating = role == MatrixRole::B && scalarTypeInfo(type).isSigned;
                 return randomIntegerRecipe(type, {.alternating = alternating, .seed = seed});
             }
             case hipblaslt_initialization::trig_float:

@@ -102,7 +102,6 @@ Accumulator runtimeScalar(const Tensor& value, const char* name) {
         case ScalarCategory::UnsignedInteger:
             return checkedRuntimeScalar<Accumulator>(value.item<uint64_t>(), name);
         case ScalarCategory::FloatingPoint:
-        case ScalarCategory::Scale:
             return checkedRuntimeScalar<Accumulator>(value.item<double>(), name);
         case ScalarCategory::Complex:
             return checkedRuntimeScalar<Accumulator>(value.item<std::complex<double>>(), name);

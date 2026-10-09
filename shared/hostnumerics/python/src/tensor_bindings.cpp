@@ -68,7 +68,6 @@ nb::list tensorValues(Tensor tensor) {
             appendTensorValues<std::complex<double>>(result, tensor);
             break;
         case ScalarCategory::FloatingPoint:
-        case ScalarCategory::Scale:
             appendTensorValues<double>(result, tensor);
             break;
         case ScalarCategory::Count:
@@ -88,7 +87,6 @@ nb::object tensorItem(const Tensor& tensor) {
         case ScalarCategory::Complex:
             return nb::cast(tensor.item<std::complex<double>>());
         case ScalarCategory::FloatingPoint:
-        case ScalarCategory::Scale:
             return nb::cast(tensor.item<double>());
         case ScalarCategory::Count:
             break;

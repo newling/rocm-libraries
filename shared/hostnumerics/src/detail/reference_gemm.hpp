@@ -67,7 +67,9 @@ inline void validateRuntimeGemm(const GemmInvocation& problem) {
 
     const bool complexAccumulator = isComplexScalarType(problem.accumulatorType);
     auto validateOperandType = [&](ScalarType type, const char* name) {
-        if (type == ScalarType::Count || type == ScalarType::Boolean || isScaleScalarType(type))
+        if (!isConcreteScalarType(type) || type == ScalarType::Boolean ||
+            type == ScalarType::E4M3 || type == ScalarType::E5M3 || type == ScalarType::E8M0 ||
+            type == ScalarType::E8M0Zero)
             throw std::invalid_argument(std::string("Reference GEMM ") + name +
                                         " has an unsupported scalar type.");
         if (!complexAccumulator && isComplexScalarType(type))
