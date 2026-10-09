@@ -88,37 +88,39 @@ inline constexpr bool isConcreteScalarType(ScalarType type) {
     return static_cast<size_t>(type) < scalarTypeCount;
 }
 
-// Columns follow ScalarTypeInfo's fields: name, category, storage bits, exponent bits,
-// mantissa bits, exponent bias, NaN support, and infinity support.
+// Exponent and fraction widths are per real component. NaN/Inf columns describe support.
+// clang-format off
 inline constexpr std::array<ScalarTypeInfo, scalarTypeCount> scalarTypeInfos{{
-    {"bool", ScalarCategory::Boolean, 8, 0, 0, 0, false, false},
-    {"i4", ScalarCategory::SignedInteger, 4, 0, 0, 0, false, false},
-    {"i8", ScalarCategory::SignedInteger, 8, 0, 0, 0, false, false},
-    {"i16", ScalarCategory::SignedInteger, 16, 0, 0, 0, false, false},
-    {"i32", ScalarCategory::SignedInteger, 32, 0, 0, 0, false, false},
-    {"i64", ScalarCategory::SignedInteger, 64, 0, 0, 0, false, false},
-    {"u8", ScalarCategory::UnsignedInteger, 8, 0, 0, 0, false, false},
-    {"u16", ScalarCategory::UnsignedInteger, 16, 0, 0, 0, false, false},
-    {"u32", ScalarCategory::UnsignedInteger, 32, 0, 0, 0, false, false},
-    {"u64", ScalarCategory::UnsignedInteger, 64, 0, 0, 0, false, false},
-    {"f4e2m1", ScalarCategory::FloatingPoint, 4, 2, 1, 1, false, false},
-    {"f6e2m3", ScalarCategory::FloatingPoint, 6, 2, 3, 1, false, false},
-    {"f6e3m2", ScalarCategory::FloatingPoint, 6, 3, 2, 3, false, false},
-    {"f8e4m3", ScalarCategory::FloatingPoint, 8, 4, 3, 7, true, false},
-    {"f8e5m2", ScalarCategory::FloatingPoint, 8, 5, 2, 15, true, true},
-    {"f8e4m3fnuz", ScalarCategory::FloatingPoint, 8, 4, 3, 8, true, false},
-    {"f8e5m2fnuz", ScalarCategory::FloatingPoint, 8, 5, 2, 16, true, false},
-    {"f16", ScalarCategory::FloatingPoint, 16, 5, 10, 15, true, true},
-    {"bf16", ScalarCategory::FloatingPoint, 16, 8, 7, 127, true, true},
-    {"f32", ScalarCategory::FloatingPoint, 32, 8, 23, 127, true, true},
-    {"f64", ScalarCategory::FloatingPoint, 64, 11, 52, 1023, true, true},
-    {"c64", ScalarCategory::Complex, 64, 8, 23, 127, true, true},
-    {"c128", ScalarCategory::Complex, 128, 11, 52, 1023, true, true},
-    {"e4m3", ScalarCategory::Scale, 8, 4, 3, 7, true, false},
-    {"e5m3", ScalarCategory::Scale, 8, 5, 3, 15, true, false},
-    {"e8m0", ScalarCategory::Scale, 8, 8, 0, 127, true, false},
-    {"e8m0_zero", ScalarCategory::Scale, 8, 8, 0, 127, true, false},
+    // Name          Category                          Bits Exp Frac Bias NaN    Inf
+    {"bool",         ScalarCategory::Boolean,            8,  0,   0,   0, false, false},
+    {"i4",           ScalarCategory::SignedInteger,      4,  0,   0,   0, false, false},
+    {"i8",           ScalarCategory::SignedInteger,      8,  0,   0,   0, false, false},
+    {"i16",          ScalarCategory::SignedInteger,     16,  0,   0,   0, false, false},
+    {"i32",          ScalarCategory::SignedInteger,     32,  0,   0,   0, false, false},
+    {"i64",          ScalarCategory::SignedInteger,     64,  0,   0,   0, false, false},
+    {"u8",           ScalarCategory::UnsignedInteger,    8,  0,   0,   0, false, false},
+    {"u16",          ScalarCategory::UnsignedInteger,   16,  0,   0,   0, false, false},
+    {"u32",          ScalarCategory::UnsignedInteger,   32,  0,   0,   0, false, false},
+    {"u64",          ScalarCategory::UnsignedInteger,   64,  0,   0,   0, false, false},
+    {"f4e2m1",       ScalarCategory::FloatingPoint,      4,  2,   1,   1, false, false},
+    {"f6e2m3",       ScalarCategory::FloatingPoint,      6,  2,   3,   1, false, false},
+    {"f6e3m2",       ScalarCategory::FloatingPoint,      6,  3,   2,   3, false, false},
+    {"f8e4m3",       ScalarCategory::FloatingPoint,      8,  4,   3,   7, true,  false},
+    {"f8e5m2",       ScalarCategory::FloatingPoint,      8,  5,   2,  15, true,  true },
+    {"f8e4m3fnuz",   ScalarCategory::FloatingPoint,      8,  4,   3,   8, true,  false},
+    {"f8e5m2fnuz",   ScalarCategory::FloatingPoint,      8,  5,   2,  16, true,  false},
+    {"f16",          ScalarCategory::FloatingPoint,     16,  5,  10,  15, true,  true },
+    {"bf16",         ScalarCategory::FloatingPoint,     16,  8,   7, 127, true,  true },
+    {"f32",          ScalarCategory::FloatingPoint,     32,  8,  23, 127, true,  true },
+    {"f64",          ScalarCategory::FloatingPoint,     64, 11,  52, 1023, true,  true },
+    {"c64",          ScalarCategory::Complex,           64,  8,  23, 127, true,  true },
+    {"c128",         ScalarCategory::Complex,          128, 11,  52, 1023, true,  true },
+    {"e4m3",         ScalarCategory::Scale,              8,  4,   3,   7, true,  false},
+    {"e5m3",         ScalarCategory::Scale,              8,  5,   3,  15, true,  false},
+    {"e8m0",         ScalarCategory::Scale,              8,  8,   0, 127, true,  false},
+    {"e8m0_zero",    ScalarCategory::Scale,              8,  8,   0, 127, true,  false},
 }};
+// clang-format on
 
 // Invalid identifiers throw std::invalid_argument, including in release builds.
 inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
