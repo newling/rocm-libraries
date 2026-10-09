@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <utility>
+
 #include "_scalar_codec_test_support.hpp"
 
 namespace scalar_codec_test {
@@ -20,6 +22,43 @@ void testScalarTypeInfoContract() {
     static_assert(nativeScalarType<std::complex<double>> == ScalarType::ComplexFloat64);
     static_assert(nativeScalarType<const float&> == ScalarType::Float32);
 
+    // Check each identifier independently of its position in the metadata table.
+    constexpr std::pair<ScalarType, std::string_view> expectedNames[] = {
+        {ScalarType::Boolean, "bool"},
+        {ScalarType::Int4, "i4"},
+        {ScalarType::Int8, "i8"},
+        {ScalarType::Int16, "i16"},
+        {ScalarType::Int32, "i32"},
+        {ScalarType::Int64, "i64"},
+        {ScalarType::UInt8, "u8"},
+        {ScalarType::UInt16, "u16"},
+        {ScalarType::UInt32, "u32"},
+        {ScalarType::UInt64, "u64"},
+        {ScalarType::Float4E2M1, "f4e2m1"},
+        {ScalarType::Float6E2M3, "f6e2m3"},
+        {ScalarType::Float6E3M2, "f6e3m2"},
+        {ScalarType::Float8E4M3, "f8e4m3"},
+        {ScalarType::Float8E5M2, "f8e5m2"},
+        {ScalarType::Float8E4M3Fnuz, "f8e4m3fnuz"},
+        {ScalarType::Float8E5M2Fnuz, "f8e5m2fnuz"},
+        {ScalarType::Float16, "f16"},
+        {ScalarType::BFloat16, "bf16"},
+        {ScalarType::Float32, "f32"},
+        {ScalarType::Float64, "f64"},
+        {ScalarType::ComplexFloat32, "c64"},
+        {ScalarType::ComplexFloat64, "c128"},
+        {ScalarType::E4M3, "e4m3"},
+        {ScalarType::E5M3, "e5m3"},
+        {ScalarType::E8M0, "e8m0"},
+        {ScalarType::E8M0Zero, "e8m0_zero"},
+    };
+    static_assert(std::size(expectedNames) == scalarTypeCount);
+    for (const auto& [type, name] : expectedNames) {
+        require(scalarTypeName(type) == name, "Scalar identifier has the wrong metadata row.");
+        require(scalarTypeInfo(type).category < ScalarCategory::Count,
+                "Scalar metadata has an invalid category.");
+    }
+
     require(scalarTypeCount == scalarTypeInfos.size(),
             "Scalar type count and metadata table size differ.");
     for (size_t index = 0; index < scalarTypeCount; ++index) {
@@ -28,13 +67,14 @@ void testScalarTypeInfoContract() {
         require(visitScalarType(type, [type]<typename Tag>() { return Tag::type == type; }),
                 "Scalar type visitor and dense enum ordering differ.");
     }
-    require(!isConcreteScalarType(ScalarType::Count),
-            "ScalarType::Count was classified as a concrete scalar type.");
-    requireThrows<std::invalid_argument>([] { (void)scalarTypeInfo(ScalarType::Count); },
-                                         "Scalar metadata accepted the Count sentinel.");
-    requireThrows<std::invalid_argument>(
-        [] { (void)visitScalarType(ScalarType::Count, []<typename>() { return true; }); },
-        "Scalar visitor accepted the Count sentinel.");
+    for (ScalarType invalid : {ScalarType::Count, static_cast<ScalarType>(0xffff)}) {
+        require(!isConcreteScalarType(invalid), "Invalid scalar type classified as concrete.");
+        requireThrows<std::invalid_argument>([invalid] { (void)scalarTypeInfo(invalid); },
+                                             "Scalar metadata accepted an invalid identifier.");
+        requireThrows<std::invalid_argument>(
+            [invalid] { (void)visitScalarType(invalid, []<typename>() { return true; }); },
+            "Scalar visitor accepted an invalid identifier.");
+    }
 
     require(visitScalarType(ScalarType::Float32,
                             []<typename Tag>() {

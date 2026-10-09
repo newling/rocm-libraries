@@ -71,6 +71,8 @@ nb::list tensorValues(Tensor tensor) {
         case ScalarCategory::Scale:
             appendTensorValues<double>(result, tensor);
             break;
+        case ScalarCategory::Count:
+            throw std::invalid_argument("Tensor values have an invalid scalar type.");
     }
     return result;
 }
@@ -88,6 +90,8 @@ nb::object tensorItem(const Tensor& tensor) {
         case ScalarCategory::FloatingPoint:
         case ScalarCategory::Scale:
             return nb::cast(tensor.item<double>());
+        case ScalarCategory::Count:
+            break;
     }
     throw std::invalid_argument("Tensor item has an invalid scalar type.");
 }

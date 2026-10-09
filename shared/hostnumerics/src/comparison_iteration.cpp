@@ -35,6 +35,8 @@ bool isUnwrittenSentinelValue(ScalarType type, const ComparisonValue& value) {
             return std::isinf(value.real) && std::isinf(value.imaginary);
         case ScalarCategory::Boolean:
             return false;
+        case ScalarCategory::Count:
+            break;
     }
     return false;
 }

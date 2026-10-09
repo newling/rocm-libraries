@@ -106,6 +106,8 @@ Accumulator runtimeScalar(const Tensor& value, const char* name) {
             return checkedRuntimeScalar<Accumulator>(value.item<double>(), name);
         case ScalarCategory::Complex:
             return checkedRuntimeScalar<Accumulator>(value.item<std::complex<double>>(), name);
+        case ScalarCategory::Count:
+            break;
     }
     throw std::invalid_argument("Invalid runtime scalar type.");
 }
