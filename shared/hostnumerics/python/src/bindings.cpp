@@ -4,6 +4,7 @@
 #include "bindings.hpp"
 
 #include <nanobind/nanobind.h>
+
 #include <roc/hostnumerics/version.hpp>
 
 namespace nb = nanobind;

@@ -33,7 +33,7 @@ if(TEST_CONFIG)
     list(APPEND configure_arguments "-DCMAKE_BUILD_TYPE=${TEST_CONFIG}")
 endif()
 
-set(component_build_command "${CMAKE_COMMAND}" --build "${COMPONENT_BINARY_DIR}")
+set(component_build_command "${CMAKE_COMMAND}" --build "${COMPONENT_BINARY_DIR}" --parallel 2)
 if(TEST_CONFIG)
     list(APPEND component_build_command --config "${TEST_CONFIG}")
 endif()
@@ -45,9 +45,14 @@ if(NOT component_build_result EQUAL 0)
     message(FATAL_ERROR "HostNumerics package artifacts failed to build.")
 endif()
 
+set(install_command
+    "${CMAKE_COMMAND}" --install "${COMPONENT_BINARY_DIR}" --prefix "${install_dir}"
+)
+if(TEST_CONFIG)
+    list(APPEND install_command --config "${TEST_CONFIG}")
+endif()
 execute_process(
-    COMMAND
-        "${CMAKE_COMMAND}" --install "${COMPONENT_BINARY_DIR}" --prefix "${install_dir}"
+    COMMAND ${install_command}
     RESULT_VARIABLE install_result
 )
 if(NOT install_result EQUAL 0)
@@ -70,7 +75,7 @@ endif()
 
 set(
     build_command
-    "${CMAKE_COMMAND}" --build "${build_dir}"
+    "${CMAKE_COMMAND}" --build "${build_dir}" --parallel 2
     --target hostnumerics-amd-gpu-layout-package-test
 )
 if(TEST_CONFIG)

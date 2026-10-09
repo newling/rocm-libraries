@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Use the monorepo baseline, also used by hipBLASLt and rocRoller.
+# Use the monorepo CMake baseline.
 # CMake 3.25.2 was released on 2023-01-19.
 cmake_minimum_required(VERSION 3.25.2)
 project(HostNumerics VERSION 0.1.0 LANGUAGES CXX)
