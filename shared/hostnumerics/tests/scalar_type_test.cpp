@@ -7,6 +7,8 @@
 
 namespace scalar_codec_test {
 void testScalarTypeInfoContract() {
+    using roc::hostnumerics::NativeScalar;
+
     static_assert(nativeScalarType<bool> == ScalarType::Boolean);
     static_assert(nativeScalarType<uint8_t> == ScalarType::UInt8);
     static_assert(nativeScalarType<int8_t> == ScalarType::Int8);
@@ -21,6 +23,16 @@ void testScalarTypeInfoContract() {
     static_assert(nativeScalarType<std::complex<float>> == ScalarType::ComplexFloat32);
     static_assert(nativeScalarType<std::complex<double>> == ScalarType::ComplexFloat64);
     static_assert(nativeScalarType<const float&> == ScalarType::Float32);
+    static_assert(nativeScalarType<const volatile int32_t&> == ScalarType::Int32);
+    static_assert(nativeScalarType<volatile std::complex<float>&&> == ScalarType::ComplexFloat32);
+    static_assert(NativeScalar<bool> && NativeScalar<int32_t> &&
+                  NativeScalar<std::complex<double>>);
+    static_assert(NativeScalar<const volatile float&>);
+    static_assert(!NativeScalar<void>);
+    static_assert(!NativeScalar<float*>);
+    static_assert(!NativeScalar<float[2]>);
+    static_assert(!NativeScalar<long double>);
+    static_assert(!NativeScalar<std::string_view>);
 
     // Check each identifier independently of its position in the metadata table.
     constexpr std::pair<ScalarType, std::string_view> expectedNames[] = {
