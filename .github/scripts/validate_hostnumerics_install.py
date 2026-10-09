@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -75,6 +76,9 @@ def _validate_install_tree(
         path.with_suffix("") if path.suffix == ".in" else path
         for path in _files_below(public_include_dir)
     }
+    package_config = (build_dir / "HostNumericsConfig.cmake").read_text()
+    if re.search(r"set\(\s*HostNumerics_BLAS_AVAILABLE\s+OFF\s*\)", package_config):
+        expected_public_files.discard(Path("roc/hostnumerics/backends/blas.hpp"))
     if not expected_public_files:
         raise ValidationError(f"no public files found below {public_include_dir}")
 
