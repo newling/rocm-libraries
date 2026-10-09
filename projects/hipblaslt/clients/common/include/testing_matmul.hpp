@@ -349,6 +349,7 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
                                                  bool                 do_swizzle,
                                                  hipDataType          TiA,
                                                  hipDataType          TiB,
+                                                 hipDataType          TiC,
                                                  hipDataType          To,
                                                  hipDataType          Tc)
 {
@@ -393,8 +394,7 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
         if(char_to_hipblas_operation(arg.transA) != HIPBLAS_OP_T
            || char_to_hipblas_operation(arg.transB) != HIPBLAS_OP_N)
             return "fast_check with MX scales requires transA=T and transB=N";
-        // The reference recomputes each element's scale as its linear index over the block size,
-        // which holds only when no K block is partial.
+        // Keep the established fast_check MX coverage to complete K blocks.
         if(arg.K[0] % blockSize(arg.scaleA) != 0 || arg.K[0] % blockSize(arg.scaleB) != 0)
             return "fast_check supports MX scales only when K is a multiple of the scale block";
         if(arg.batch_count > 1)
@@ -413,7 +413,7 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
     if(arg.bias_vector && arg.bias_stride > 0 && arg.bias_stride < bias_length)
         return "fast_check requires bias_stride to be at least the bias vector's length, "
                + std::to_string(bias_length);
-    for(hipDataType t : {TiA, TiB, To, Tc})
+    for(hipDataType t : {TiA, TiB, TiC, To, Tc})
     {
         std::string why;
         if(!fast_check_supported_type(t, &why))
@@ -580,8 +580,9 @@ void testing_matmul(const Arguments& arg)
         // fast_check models the rounding of large results into 16-bit outputs, so the limit
         // applies only when a host reference comparison runs.
         // A misspelled pattern must fail here rather than be hidden by the skip below.
-        IntegerExactPattern pattern = IntegerExactPattern::standard;
-        if(!parse_integer_exact_pattern(arg.integer_exact_pattern, pattern))
+        hipblaslt::hostnumerics::IntegerExactPattern pattern
+            = hipblaslt::hostnumerics::IntegerExactPattern::Standard;
+        if(!hipblaslt::hostnumerics::parseIntegerExactPattern(arg.integer_exact_pattern, pattern))
         {
             std::string why = std::string("unknown integer_exact_pattern '")
                               + arg.integer_exact_pattern + "'; use ternary or sparse_k";
@@ -596,9 +597,9 @@ void testing_matmul(const Arguments& arg)
         // and beta are at most 2 and nothing else scales the result.
         const bool host_reference = arg.unit_check || arg.norm_check || arg.allclose_check;
         const bool sparse_k_bounded
-            = pattern == IntegerExactPattern::sparse_k && std::fabs(arg.alpha) <= 2
-              && std::fabs(arg.beta) <= 2 && !arg.scaleAlpha_vector && !arg.bias_vector
-              && arg.scaleA == hipblaslt_scaling_format::none
+            = pattern == hipblaslt::hostnumerics::IntegerExactPattern::SparseK
+              && std::fabs(arg.alpha) <= 2 && std::fabs(arg.beta) <= 2 && !arg.scaleAlpha_vector
+              && !arg.bias_vector && arg.scaleA == hipblaslt_scaling_format::none
               && arg.scaleB == hipblaslt_scaling_format::none && !arg.scaleC && !arg.scaleD;
         if(is_16bit && (host_reference || !arg.fast_check) && !sparse_k_bounded)
         {
@@ -812,7 +813,7 @@ void testing_matmul_with_bias(const Arguments&                                  
     std::vector<HipHostBuffer> hA, hB, hC, hD_gold, hD_1;
     // Contiguous host copies of the A, B and C regions, without padding, for fast_check, and the
     // expected probe sums, which depend only on the inputs and are shared by every solution.
-    std::vector<std::unique_ptr<char[]>> fcA(problem_count), fcB(problem_count), fcC(problem_count);
+    std::vector<std::shared_ptr<char[]>> fcA(problem_count), fcB(problem_count), fcC(problem_count);
     std::vector<hipDataType>             fcTypeA(problem_count), fcTypeB(problem_count);
     std::vector<FastCheckExpected>       fcExpected(problem_count);
     std::vector<HipHostBuffer> hScaleAlphaVec, hScaleA, hScaleB, hScaleC, hScaleD, hScaleE,
@@ -825,13 +826,22 @@ void testing_matmul_with_bias(const Arguments&                                  
 
     gpu_mem_gbytes = static_cast<double>(preparation.rotatingBytes) / (1024 * 1024 * 1024);
 
-    // fast_check alone needs no padded host copies of A, B and D, and no host reference.
+    // fast_check alone needs compact host inputs and no full host reference.
     const bool fast_check_only
         = arg.fast_check && !(arg.unit_check || arg.norm_check || arg.allclose_check);
+    const bool compactHostInputs = fast_check_only && !arg.dump_matrix;
+    const auto hostInputElements = [&](const hipblaslt::client::MatmulMatrix& matrix) {
+        return compactHostInputs ? matrix.layout.shape().elementCount() : matrix.allocationElements;
+    };
+    const auto hostInputLayout = [&](const hipblaslt::client::MatmulMatrix& matrix) {
+        return compactHostInputs ? roc::hostnumerics::Layout::contiguousFirstDimensionFastest(
+                                       matrix.layout.shape())
+                                 : matrix.layout;
+    };
     if(arg.fast_check)
     {
         std::string why = fast_check_unsupported_reason(
-            arg, batchMode, do_swizzle_a || do_swizzle_b, TiA, TiB, To, Tc);
+            arg, batchMode, do_swizzle_a || do_swizzle_b, TiA, TiB, TiC, To, Tc);
         for(int i = 0; i < problem_count && why.empty(); i++)
         {
             if(isBlockScaling(arg.scaleA) && (matmulProblems[i].a.leadingDimension() != matmulProblems[i].a.rows() || matmulProblems[i].b.leadingDimension() != matmulProblems[i].b.rows()))
@@ -910,14 +920,15 @@ void testing_matmul_with_bias(const Arguments&                                  
         }
     }
 
-    IntegerExactPattern      iePattern = IntegerExactPattern::standard;
-    IntegerExactPatternScope iePatternScope;
+    hipblaslt::hostnumerics::IntegerExactPattern iePattern
+        = hipblaslt::hostnumerics::IntegerExactPattern::Standard;
     if(arg.integer_exact_pattern[0])
     {
         std::string why;
         if(arg.initialization != hipblaslt_initialization::integer_exact)
             why = "integer_exact_pattern requires initialization: integer_exact";
-        else if(!parse_integer_exact_pattern(arg.integer_exact_pattern, iePattern))
+        else if(!hipblaslt::hostnumerics::parseIntegerExactPattern(arg.integer_exact_pattern,
+                                                                   iePattern))
             why = std::string("unknown integer_exact_pattern '") + arg.integer_exact_pattern
                   + "'; use ternary or sparse_k";
         if(!why.empty())
@@ -964,6 +975,37 @@ void testing_matmul_with_bias(const Arguments&                                  
         return static_cast<void*>(buffer.as<std::byte>()
                                   + static_cast<size_t>(block) * (buffer.getNumBytes() / blockCount));
     };
+    // Scatter compact generated inputs without allocating their device padding on the host.
+    // Copying only the logical region also preserves C's poison when C and D share storage.
+    const auto copyHostInputToDevice = [&](HipDeviceBuffer&                       device,
+                                           const HipHostBuffer&                   host,
+                                           const hipblaslt::client::MatmulMatrix& matrix) {
+        if(!compactHostInputs)
+            return synchronize(device, host, block_count, stream);
+        const size_t elementBytes = fast_check_element_size(matrix.apiType);
+        const size_t rows         = static_cast<size_t>(matrix.rows());
+        const size_t columns      = static_cast<size_t>(matrix.columns());
+        if(rows == 0 || columns == 0)
+            return hipSuccess;
+        for(int32_t block = 0; block < block_count; ++block)
+            for(size_t batch = 0; batch < matrix.layout.shape()[2]; ++batch)
+            {
+                const size_t offset = static_cast<size_t>(block) * matrix.allocationElements
+                                      + batch * static_cast<size_t>(matrix.batchStride());
+                const auto error = hipMemcpy2DAsync(
+                    device.as<char>() + offset * elementBytes,
+                    static_cast<size_t>(matrix.leadingDimension()) * elementBytes,
+                    host.as<char>() + batch * rows * columns * elementBytes,
+                    rows * elementBytes,
+                    rows * elementBytes,
+                    columns,
+                    device.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice,
+                    stream);
+                if(error != hipSuccess)
+                    return error;
+            }
+        return hipStreamSynchronize(stream);
+    };
     if(rotating > 0)
     {
         hipblaslt_cout << "Rotating buffer " << rotating / (1024 * 1024) << " MiB. "
@@ -980,31 +1022,41 @@ void testing_matmul_with_bias(const Arguments&                                  
     // workspace is at most user_allocated_workspace.
     if(arg.fast_check)
     {
-        const size_t sizeTo = realDataTypeSize(To), sizeAlpha = realDataTypeSize(Talpha);
+        const size_t sizeTo = realDataTypeSize(To), sizeC = realDataTypeSize(TiC),
+                     sizeAlpha = realDataTypeSize(Talpha);
         size_t       hostBytes = 0, deviceBytes = 0;
         for(int i = 0; i < problem_count; i++)
         {
             deviceBytes
-                += (matmulProblems[i].a.allocationElements * realDataTypeSize(TiA) + matmulProblems[i].b.allocationElements * realDataTypeSize(TiB)
-                    + (arg.c_equal_d ? 0 : matmulProblems[i].c.allocationElements) * sizeTo + matmulProblems[i].d.allocationElements * sizeTo
-                    + (matmulProblems[i].auxiliary ? matmulProblems[i].auxiliary->allocationElements : 0) * realDataTypeSize(Taux) + preparedProblems[i].biasElements * realDataTypeSize(Tbias)
+                += (matmulProblems[i].a.allocationElements * realDataTypeSize(TiA)
+                    + matmulProblems[i].b.allocationElements * realDataTypeSize(TiB)
+                    + matmulProblems[i].c.allocationElements * sizeC
+                    + (arg.c_equal_d ? 0 : matmulProblems[i].d.allocationElements) * sizeTo
+                    + (matmulProblems[i].auxiliary ? matmulProblems[i].auxiliary->allocationElements
+                                                   : 0)
+                          * realDataTypeSize(Taux)
+                    + preparedProblems[i].biasElements * realDataTypeSize(Tbias)
                     + (preparedProblems[i].scaleAlphaElements
-                       + (preparedProblems[i].a.scaleElements + preparedProblems[i].b.scaleElements) * matmulProblems[i].batchCount)
+                       + (preparedProblems[i].a.scaleElements + preparedProblems[i].b.scaleElements)
+                             * matmulProblems[i].batchCount)
                           * sizeAlpha)
                    * size_t(block_count);
             // MX keeps both a float reference and a float copy for fast_check.
             // Other inputs keep only the compact copy in their original type.
             const bool mxA = isBlockScaling(arg.scaleA), mxB = isBlockScaling(arg.scaleB);
-            hostBytes += size_t(matmulProblems[i].a.rows() * matmulProblems[i].a.columns() * matmulProblems[i].batchCount)
+            hostBytes += size_t(matmulProblems[i].a.rows() * matmulProblems[i].a.columns()
+                                * matmulProblems[i].batchCount)
                              * (mxA ? 2 * sizeof(float) : realDataTypeSize(TiA))
-                         + size_t(matmulProblems[i].b.rows() * matmulProblems[i].b.columns() * matmulProblems[i].batchCount)
+                         + size_t(matmulProblems[i].b.rows() * matmulProblems[i].b.columns()
+                                  * matmulProblems[i].batchCount)
                                * (mxB ? 2 * sizeof(float) : realDataTypeSize(TiB))
-                         + size_t(matmulProblems[i].m * matmulProblems[i].n * matmulProblems[i].batchCount) * sizeTo;
-            // The host buffers: MX generation also retains its packed host operands,
-            // even in fast_check_only mode. Count the remaining buffers as before.
-            hostBytes += matmulProblems[i].a.allocationElements * realDataTypeSize(TiA);
-            hostBytes += matmulProblems[i].b.allocationElements * realDataTypeSize(TiB);
-            hostBytes += matmulProblems[i].c.allocationElements * sizeTo;
+                         + size_t(matmulProblems[i].m * matmulProblems[i].n
+                                  * matmulProblems[i].batchCount)
+                               * sizeC;
+            // Generated host inputs remain compact when no full reference or dump is needed.
+            hostBytes += hostInputElements(matmulProblems[i].a) * realDataTypeSize(TiA);
+            hostBytes += hostInputElements(matmulProblems[i].b) * realDataTypeSize(TiB);
+            hostBytes += hostInputElements(matmulProblems[i].c) * sizeC;
             hostBytes += preparedProblems[i].outputCopyElements * (2 * sizeTo + 3 * sizeAlpha)
                          + 2 * preparedProblems[i].biasElements * realDataTypeSize(Tbias)
                          + (matmulProblems[i].auxiliary ? matmulProblems[i].auxiliary->allocationElements : 0) * realDataTypeSize(Taux) * (arg.use_e && !arg.gradient ? 2 : 1)
@@ -1331,9 +1383,9 @@ void testing_matmul_with_bias(const Arguments&                                  
             }
 
             // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
-            hA.emplace_back(TiA, matmulProblems[i].a.allocationElements);
-            hB.emplace_back(TiB, matmulProblems[i].b.allocationElements);
-            hC.emplace_back(TiC, matmulProblems[i].c.allocationElements);
+            hA.emplace_back(TiA, hostInputElements(problem.a));
+            hB.emplace_back(TiB, hostInputElements(problem.b));
+            hC.emplace_back(TiC, hostInputElements(problem.c));
             hD_gold.emplace_back(To, preparedProblems[i].outputCopyElements);
             hD_1.emplace_back(To, preparedProblems[i].outputCopyElements);
             if(preparedProblems[i].biasElements * block_count != 0)
@@ -1527,7 +1579,6 @@ void testing_matmul_with_bias(const Arguments&                                  
             = arg.ulp_check
               && (arg.initialization == hipblaslt_initialization::hpl
                   || arg.initialization == hipblaslt_initialization::trig_float);
-        set_integer_exact_pattern_state(iePattern, size_t(matmulProblems[i].k), transA != HIPBLAS_OP_N);
 
         const uint64_t initializationBaseSeed
             = arg.initialization == hipblaslt_initialization::norm_dist_one_special
@@ -1600,21 +1651,23 @@ void testing_matmul_with_bias(const Arguments&                                  
                                               size_t batch) {
             const size_t                     rows    = static_cast<size_t>(matrix.rows());
             const size_t                     columns = static_cast<size_t>(matrix.columns());
-            const roc::hostnumerics::Layout layout
+            const roc::hostnumerics::Layout  layout
                 = separateBatchStorage ? roc::hostnumerics::Layout(
                                              roc::hostnumerics::Shape{rows, columns},
                                              {matrix.layout.stride(0), matrix.layout.stride(1)})
-                                       : matrix.layout;
+                                       : hostInputLayout(matrix);
             auto tensor
                 = buffer.tensor(hipblaslt::hostnumerics::scalarType(matrix.apiType), layout);
             std::ranges::fill(tensor.rawEncodedBackingStorage(), std::byte{0});
-            hipblaslt::hostnumerics::initializeMatrix(tensor,
-                                                       role,
-                                                       arg.initialization,
-                                                       matrixSeed(role, batch),
-                                                       forceNaN,
-                                                       std::nullopt,
-                                                       positiveOnlyInitialization);
+            hipblaslt::hostnumerics::initializeMatrix(
+                tensor,
+                role,
+                arg.initialization,
+                matrixSeed(role, batch),
+                forceNaN,
+                std::nullopt,
+                positiveOnlyInitialization,
+                {.pattern = iePattern, .reductionAxis = transA != HIPBLAS_OP_N ? 0u : 1u});
         };
 
         auto mxScaleBatchOutput = [](HipHostBuffer& buffer, size_t offset, size_t batchBytes) {
@@ -1626,17 +1679,18 @@ void testing_matmul_with_bias(const Arguments&                                  
             return std::span<uint8_t>(buffer.as<uint8_t>() + offset, capacity);
         };
         auto generateMxBatch
-            = [&](hipDataType                                                   dataType,
-                  hipDataType                                                   scaleType,
+            = [&](hipDataType                                                  dataType,
+                  hipDataType                                                  scaleType,
                   const roc::hostnumerics::Tensor&                             dataOutput,
-                  std::span<uint8_t>                                            scaleOutput,
-                  uint64_t                                                      rows,
-                  uint64_t                                                      columns,
-                  uint64_t                                                      leadingDimension,
-                  size_t                                                        blockRows,
-                  size_t                                                        blockColumns,
+                  std::span<uint8_t>                                           scaleOutput,
+                  uint64_t                                                     rows,
+                  uint64_t                                                     columns,
+                  uint64_t                                                     leadingDimension,
+                  size_t                                                       blockRows,
+                  size_t                                                       blockColumns,
                   const roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan& scalePlan,
-                  uint64_t                                                      seed) {
+                  uint64_t                                                     seed,
+                  hipblaslt::hostnumerics::MatrixRole                          role) {
                   if(blockRows == 0 || blockColumns == 0
                      || blockColumns > std::numeric_limits<size_t>::max() / blockRows)
                       throw std::invalid_argument("Invalid hipBLASLt MX scale block dimensions.");
@@ -1644,12 +1698,13 @@ void testing_matmul_with_bias(const Arguments&                                  
                       dataType,
                       scaleType,
                       roc::hostnumerics::Shape{static_cast<size_t>(rows),
-                                                static_cast<size_t>(columns)},
+                                               static_cast<size_t>(columns)},
                       leadingDimension,
                       blockColumns > 1 ? 1 : 0,
                       blockRows * blockColumns,
                       arg.initialization,
-                      seed);
+                      seed,
+                      role);
                   dataOutput.copyLogicalElementsFrom(generated.data);
 
                   // gfx950 consumes [MN, K blocks] for either operand orientation.
@@ -1730,10 +1785,11 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scaleA_col,
                     scalePlanA,
                     matrixSeed(hipblaslt::hostnumerics::MatrixRole::A,
-                               problem.a.batchStride() == 0 ? 0 : static_cast<size_t>(b))));
+                               problem.a.batchStride() == 0 ? 0 : static_cast<size_t>(b)),
+                    hipblaslt::hostnumerics::MatrixRole::A));
             }
             refA.emplace_back(std::move(refAAll));
-            CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
+            CHECK_HIP_ERROR(copyHostInputToDevice(dA[i], hA[i], problem.a));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
         }
         else
@@ -1822,10 +1878,11 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scaleB_col,
                     scalePlanB,
                     matrixSeed(hipblaslt::hostnumerics::MatrixRole::B,
-                               problem.b.batchStride() == 0 ? 0 : static_cast<size_t>(b))));
+                               problem.b.batchStride() == 0 ? 0 : static_cast<size_t>(b)),
+                    hipblaslt::hostnumerics::MatrixRole::B));
             }
             refB.emplace_back(std::move(refBAll));
-            CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
+            CHECK_HIP_ERROR(copyHostInputToDevice(dB[i], hB[i], problem.b));
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
         }
         else
@@ -1865,10 +1922,10 @@ void testing_matmul_with_bias(const Arguments&                                  
                                  0);
 
             if(!isBlockScaling(arg.scaleA) && !do_swizzle_a)
-                CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count, stream));
+                CHECK_HIP_ERROR(copyHostInputToDevice(dA[i], hA[i], problem.a));
             if(!isBlockScaling(arg.scaleB) && !do_swizzle_b)
-                CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count, stream));
-            CHECK_HIP_ERROR(synchronize(dC[i], hC[i], block_count, stream));
+                CHECK_HIP_ERROR(copyHostInputToDevice(dB[i], hB[i], problem.b));
+            CHECK_HIP_ERROR(copyHostInputToDevice(dC[i], hC[i], problem.c));
 
             if(arg.fast_check)
             {
@@ -1882,54 +1939,100 @@ void testing_matmul_with_bias(const Arguments&                                  
                     matmulProblems[i].batchCount,
                     matmulProblems[i].b.allocationElements,
                     stream));
-                CHECK_HIP_ERROR(fast_check_poison_padding_device(
-                    {dC[i].buf(), To, matmulProblems[i].m, matmulProblems[i].n, matmulProblems[i].c.leadingDimension(), matmulProblems[i].c.batchStride()},
-                    matmulProblems[i].batchCount,
-                    matmulProblems[i].c.allocationElements,
-                    stream));
+                CHECK_HIP_ERROR(
+                    fast_check_poison_padding_device({dC[i].buf(),
+                                                      TiC,
+                                                      matmulProblems[i].m,
+                                                      matmulProblems[i].n,
+                                                      matmulProblems[i].c.leadingDimension(),
+                                                      matmulProblems[i].c.batchStride()},
+                                                     matmulProblems[i].batchCount,
+                                                     matmulProblems[i].c.allocationElements,
+                                                     stream));
                 CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
-                fcA[i].reset(
-                    new char[size_t(matmulProblems[i].a.rows() * matmulProblems[i].a.columns() * matmulProblems[i].batchCount) * realDataTypeSize(TiA)]);
-                fcB[i].reset(
-                    new char[size_t(matmulProblems[i].b.rows() * matmulProblems[i].b.columns() * matmulProblems[i].batchCount) * realDataTypeSize(TiB)]);
-                CHECK_HIP_ERROR(fast_check_copy_region_to_host(
-                    fcA[i].get(),
-                    {dA[i].buf(), TiA, matmulProblems[i].a.rows(), matmulProblems[i].a.columns(), matmulProblems[i].a.leadingDimension(), matmulProblems[i].a.batchStride()},
-                    matmulProblems[i].batchCount,
-                    stream));
-                CHECK_HIP_ERROR(fast_check_copy_region_to_host(
-                    fcB[i].get(),
-                    {dB[i].buf(), TiB, matmulProblems[i].b.rows(), matmulProblems[i].b.columns(), matmulProblems[i].b.leadingDimension(), matmulProblems[i].b.batchStride()},
-                    matmulProblems[i].batchCount,
-                    stream));
-                fcTypeA[i] = TiA;
-                fcTypeB[i] = TiB;
-                // MX: check against the dequantized values, element times block scale, which the
-                // generator returns in the stored layout (lda and ldb equal the rows here).
+                const auto copyMxReferences
+                    = [](std::shared_ptr<char[]>&                      output,
+                         const std::vector<roc::hostnumerics::Tensor>& references) {
+                          using namespace roc::hostnumerics;
+                          size_t totalBytes = 0;
+                          for(const auto& reference : references)
+                              totalBytes += reference.shape().elementCount() * sizeof(float);
+                          output.reset(new char[totalBytes]);
+                          size_t offset = 0;
+                          for(const auto& reference : references)
+                          {
+                              const size_t bytes = reference.shape().elementCount() * sizeof(float);
+                              auto         destination = Tensor::shareExternalMutableBackingStorage(
+                                  ScalarType::Float32,
+                                  Layout::contiguousFirstDimensionFastest(reference.shape()),
+                                  std::shared_ptr<void>(output, output.get()),
+                                  std::span<std::byte>(
+                                      reinterpret_cast<std::byte*>(output.get() + offset), bytes));
+                              destination.copyLogicalElementsFrom(reference);
+                              offset += bytes;
+                          }
+                      };
+                // MX references are logical Tensors, one per batch. Copy their values in the
+                // stored column-major order expected by fast_check, including their block scales.
                 if(isBlockScaling(arg.scaleA))
                 {
-                    fcA[i].reset(new char[refA[i].size() * sizeof(float)]);
-                    std::memcpy(fcA[i].get(), refA[i].data(), refA[i].size() * sizeof(float));
+                    copyMxReferences(fcA[i], refA[i]);
                     fcTypeA[i] = HIP_R_32F;
+                }
+                else
+                {
+                    fcA[i].reset(
+                        new char[problem.a.layout.shape().elementCount() * realDataTypeSize(TiA)]);
+                    CHECK_HIP_ERROR(fast_check_copy_region_to_host(fcA[i].get(),
+                                                                   {dA[i].buf(),
+                                                                    TiA,
+                                                                    problem.a.rows(),
+                                                                    problem.a.columns(),
+                                                                    problem.a.leadingDimension(),
+                                                                    problem.a.batchStride()},
+                                                                   problem.batchCount,
+                                                                   stream));
+                    fcTypeA[i] = TiA;
                 }
                 if(isBlockScaling(arg.scaleB))
                 {
-                    fcB[i].reset(new char[refB[i].size() * sizeof(float)]);
-                    std::memcpy(fcB[i].get(), refB[i].data(), refB[i].size() * sizeof(float));
+                    copyMxReferences(fcB[i], refB[i]);
                     fcTypeB[i] = HIP_R_32F;
                 }
-                // fast_check reads C only when beta is nonzero.
-                if(get_computeInterface(preparedProblems[i].beta, Tc) != 0)
+                else
                 {
-                    fcC[i].reset(new char[size_t(matmulProblems[i].m * matmulProblems[i].n * matmulProblems[i].batchCount) * realDataTypeSize(To)]);
-                    CHECK_HIP_ERROR(fast_check_copy_region_to_host(
-                        fcC[i].get(),
-                        {dC[i].buf(), To, matmulProblems[i].m, matmulProblems[i].n, matmulProblems[i].c.leadingDimension(), matmulProblems[i].c.batchStride()},
-                        matmulProblems[i].batchCount,
-                        stream));
+                    fcB[i].reset(
+                        new char[problem.b.layout.shape().elementCount() * realDataTypeSize(TiB)]);
+                    CHECK_HIP_ERROR(fast_check_copy_region_to_host(fcB[i].get(),
+                                                                   {dB[i].buf(),
+                                                                    TiB,
+                                                                    problem.b.rows(),
+                                                                    problem.b.columns(),
+                                                                    problem.b.leadingDimension(),
+                                                                    problem.b.batchStride()},
+                                                                   problem.batchCount,
+                                                                   stream));
+                    fcTypeB[i] = TiB;
                 }
-                if(fast_check_only && arg.c_equal_d)
+                // fast_check reads C only when beta is nonzero.
+                if(compute_type_value_as_double(preparedProblems[i].beta, Tc) != 0)
+                {
+                    fcC[i].reset(new char[size_t(matmulProblems[i].m * matmulProblems[i].n
+                                                 * matmulProblems[i].batchCount)
+                                          * realDataTypeSize(TiC)]);
+                    CHECK_HIP_ERROR(
+                        fast_check_copy_region_to_host(fcC[i].get(),
+                                                       {dC[i].buf(),
+                                                        TiC,
+                                                        matmulProblems[i].m,
+                                                        matmulProblems[i].n,
+                                                        matmulProblems[i].c.leadingDimension(),
+                                                        matmulProblems[i].c.batchStride()},
+                                                       matmulProblems[i].batchCount,
+                                                       stream));
+                }
+                if(!compactHostInputs && arg.c_equal_d)
                     CHECK_HIP_ERROR(synchronize(hC[i], dC[i], 0, 0, 0, 0, 1, false, stream));
             }
 
@@ -3842,11 +3945,16 @@ void testing_matmul_with_bias(const Arguments&                                  
             fp.transB      = transB != HIPBLAS_OP_N;
             fp.A = {fcA[i].get(), fcTypeA[i], matmulProblems[i].a.rows(), matmulProblems[i].a.columns(), matmulProblems[i].a.rows(), matmulProblems[i].a.rows() * matmulProblems[i].a.columns()};
             fp.B = {fcB[i].get(), fcTypeB[i], matmulProblems[i].b.rows(), matmulProblems[i].b.columns(), matmulProblems[i].b.rows(), matmulProblems[i].b.rows() * matmulProblems[i].b.columns()};
-            fp.C           = {fcC[i].get(), To, matmulProblems[i].m, matmulProblems[i].n, matmulProblems[i].m, matmulProblems[i].m * matmulProblems[i].n};
+            fp.C            = {fcC[i].get(),
+                               TiC,
+                               matmulProblems[i].m,
+                               matmulProblems[i].n,
+                               matmulProblems[i].m,
+                               matmulProblems[i].m * matmulProblems[i].n};
             fp.D           = d_dev;
             fp.compute_type = Tc;
-            fp.alpha        = get_computeInterface(preparedProblems[i].alpha, Tc);
-            fp.beta         = get_computeInterface(preparedProblems[i].beta, Tc);
+            fp.alpha        = compute_type_value_as_double(preparedProblems[i].alpha, Tc);
+            fp.beta         = compute_type_value_as_double(preparedProblems[i].beta, Tc);
             if(arg.scaleAlpha_vector)
             {
                 fp.scale_alpha_vec      = hScaleAlphaVec[i].buf();
@@ -3971,7 +4079,19 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     for(int i = 0; i < problem_count; i++)
                     {
-                        CHECK_HIP_ERROR(synchronize(dC[i], hC[i], block_count));
+                        const auto& problem = matmulProblems[i];
+                        if(compactHostInputs)
+                            CHECK_HIP_ERROR(
+                                fast_check_poison_padding_device({dC[i].buf(),
+                                                                  TiC,
+                                                                  problem.m,
+                                                                  problem.n,
+                                                                  problem.c.leadingDimension(),
+                                                                  problem.c.batchStride()},
+                                                                 problem.batchCount,
+                                                                 problem.c.allocationElements,
+                                                                 stream));
+                        CHECK_HIP_ERROR(copyHostInputToDevice(dC[i], hC[i], problem.c));
                     }
                 }
             }
@@ -4218,10 +4338,18 @@ void testing_matmul_with_bias(const Arguments&                                  
                     if(!scan.passed || !res.passed)
                     {
                         std::vector<FastCheckBuffer> buffers
-                            = {{"A", dA[i].buf(), matmulProblems[i].a.allocationElements * realDataTypeSize(TiA)},
-                               {"B", dB[i].buf(), matmulProblems[i].b.allocationElements * realDataTypeSize(TiB)},
-                               {"C", dC[i].buf(), matmulProblems[i].c.allocationElements * realDataTypeSize(To)},
-                               {"D", dOutput[i].buf(), matmulProblems[i].d.allocationElements * realDataTypeSize(To)},
+                            = {{"A",
+                                dA[i].buf(),
+                                matmulProblems[i].a.allocationElements * realDataTypeSize(TiA)},
+                               {"B",
+                                dB[i].buf(),
+                                matmulProblems[i].b.allocationElements * realDataTypeSize(TiB)},
+                               {"C",
+                                dC[i].buf(),
+                                matmulProblems[i].c.allocationElements * realDataTypeSize(TiC)},
+                               {"D",
+                                dOutput[i].buf(),
+                                matmulProblems[i].d.allocationElements * realDataTypeSize(To)},
                                {"workspace", workspacePtr, workspaceBytes}};
                         if(arg.bias_vector)
                             buffers.push_back(
@@ -4442,7 +4570,19 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     for(int i = 0; i < problem_count; i++)
                     {
-                        CHECK_HIP_ERROR(synchronize(dC[i], hC[i], block_count));
+                        const auto& problem = matmulProblems[i];
+                        if(compactHostInputs)
+                            CHECK_HIP_ERROR(
+                                fast_check_poison_padding_device({dC[i].buf(),
+                                                                  TiC,
+                                                                  problem.m,
+                                                                  problem.n,
+                                                                  problem.c.leadingDimension(),
+                                                                  problem.c.batchStride()},
+                                                                 problem.batchCount,
+                                                                 problem.c.allocationElements,
+                                                                 stream));
+                        CHECK_HIP_ERROR(copyHostInputToDevice(dC[i], hC[i], problem.c));
                     }
                 }
             }

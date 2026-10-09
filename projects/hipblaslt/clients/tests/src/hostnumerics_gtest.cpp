@@ -305,7 +305,8 @@ TEST(HostNumericsMxGenerationBridge, MapsScaleLayoutsAndGeneratesTypedData)
                                               0,
                                               4,
                                               hipblaslt_initialization::hpl,
-                                              17);
+                                              17,
+                                              MatrixRole::A);
     EXPECT_EQ(generated.data.type(), ScalarType::Float4E2M1);
     EXPECT_EQ(generated.scales.type(), ScalarType::E8M0);
     EXPECT_EQ(generated.reference.shape(), (Shape{8, 4}));

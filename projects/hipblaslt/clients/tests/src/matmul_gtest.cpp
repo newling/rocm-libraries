@@ -376,6 +376,7 @@ namespace
                                                          HIP_R_8F_E4M3,
                                                          HIP_R_8F_E5M2,
                                                          HIP_R_32F,
+                                                         HIP_R_32F,
                                                          HIP_R_32F);
                 if(a == 'T' && b == 'N')
                     EXPECT_TRUE(why.empty()) << why;

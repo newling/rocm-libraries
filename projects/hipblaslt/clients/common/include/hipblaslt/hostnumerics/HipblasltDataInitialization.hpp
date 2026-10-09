@@ -35,6 +35,23 @@ namespace hipblaslt::hostnumerics
         C,
     };
 
+    enum class IntegerExactPattern
+    {
+        Standard,
+        Ternary,
+        SparseK,
+    };
+
+    bool parseIntegerExactPattern(std::string_view name, IntegerExactPattern& pattern);
+
+    struct IntegerExactOptions
+    {
+        IntegerExactPattern pattern = IntegerExactPattern::Standard;
+        // Stored matrix dimension containing K, before applying op(A).
+        // SparseK restricts A to at most 17 nonzero terms per logical row.
+        size_t reductionAxis = 1;
+    };
+
     enum class OneSpecialValue : uint8_t
     {
         PositiveInfinity,
@@ -47,14 +64,15 @@ namespace hipblaslt::hostnumerics
     // base; generateMxData does not advance or hide seed state.
     inline constexpr uint64_t mxDefaultSeed = 1'713'573'849U;
 
-    ::roc::hostnumerics::MxTensor generateMxData(hipDataType                 dataType,
-                                                  hipDataType                 scaleType,
-                                                  ::roc::hostnumerics::Shape shape,
-                                                  uint64_t                    leadingDimension,
-                                                  size_t                      blockAxis,
-                                                  size_t                      blockSize,
-                                                  hipblaslt_initialization    initialization,
-                                                  uint64_t                    seed);
+    ::roc::hostnumerics::MxTensor generateMxData(hipDataType                dataType,
+                                                 hipDataType                scaleType,
+                                                 ::roc::hostnumerics::Shape shape,
+                                                 uint64_t                   leadingDimension,
+                                                 size_t                     blockAxis,
+                                                 size_t                     blockSize,
+                                                 hipblaslt_initialization   initialization,
+                                                 uint64_t                   seed,
+                                                 MatrixRole                 role);
 
     ::roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout
         mxScaleStorageLayoutForArchName(std::string_view archName);
@@ -82,12 +100,13 @@ namespace hipblaslt::hostnumerics
     // Applies the hipBLASLt initialization policy directly to an existing
     // Tensor. The caller owns storage and supplies the exact seed used by the
     // selected recipe; MatrixRole only selects operand-specific value rules.
-    void initializeMatrix(::roc::hostnumerics::Tensor   destination,
+    void initializeMatrix(::roc::hostnumerics::Tensor    destination,
                           MatrixRole                     role,
                           hipblaslt_initialization       initialization,
                           uint64_t                       seed,
                           bool                           forceNaN        = false,
                           std::optional<OneSpecialValue> oneSpecialValue = std::nullopt,
-                          bool                           positiveOnly    = false);
+                          bool                           positiveOnly    = false,
+                          IntegerExactOptions            integerExact    = {});
 
 } // namespace hipblaslt::hostnumerics

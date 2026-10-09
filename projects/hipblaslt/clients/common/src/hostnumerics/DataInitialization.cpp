@@ -293,7 +293,8 @@ namespace hipblaslt::hostnumerics
 
         MxDataGeneration mxDataGeneration(hipblaslt_initialization initialization,
                                           ScalarType               dataType,
-                                          uint64_t                 seed)
+                                          uint64_t                 seed,
+                                          MatrixRole               role)
         {
             auto recipe = [&](GenerationRecipe::Component component) {
                 return GenerationRecipe::realOnly(
@@ -341,6 +342,9 @@ namespace hipblaslt::hostnumerics
                 return MxDataGeneration::preserveRange(
                     recipe(GenerationRecipe::uniformReal({.lower = -6.0, .upper = 6.0})),
                     {.lower = -6.0, .upper = 6.0});
+            case hipblaslt_initialization::integer_exact:
+                return MxDataGeneration::quantize(recipe(GenerationRecipe::uniformInteger(
+                    {.lower = role == MatrixRole::B ? -2 : 0, .upper = 2})));
             default:
                 throw std::invalid_argument("Unsupported hipBLASLt MX data initialization mode.");
             }
@@ -350,7 +354,8 @@ namespace hipblaslt::hostnumerics
         {
             if(initialization == hipblaslt_initialization::zero)
                 return MxScaleGenerationMode::Minimum;
-            if(initialization == hipblaslt_initialization::rand_int)
+            if(initialization == hipblaslt_initialization::rand_int
+               || initialization == hipblaslt_initialization::integer_exact)
                 return MxScaleGenerationMode::One;
             return MxScaleGenerationMode::Derived;
         }
@@ -360,7 +365,8 @@ namespace hipblaslt::hostnumerics
                                                 hipblaslt_initialization initialization,
                                                 uint64_t                 seed,
                                                 bool                     forceNaN,
-                                                bool                     positiveOnly)
+                                                bool                     positiveOnly,
+                                                IntegerExactPattern      integerExactPattern)
         {
             const ScalarType type        = destination.type();
             const bool     complexOutput = scalarTypeInfo(type).category == ScalarCategory::Complex;
@@ -422,8 +428,10 @@ namespace hipblaslt::hostnumerics
             case hipblaslt_initialization::integer_exact:
             {
                 GenerationRecipe::Component component
-                    = GenerationRecipe::uniformInteger({.lower = 0, .upper = 2});
-                if(role == MatrixRole::B)
+                    = integerExactPattern == IntegerExactPattern::Ternary
+                          ? GenerationRecipe::uniformInteger({.lower = -1, .upper = 1})
+                          : GenerationRecipe::uniformInteger({.lower = 0, .upper = 2});
+                if(role == MatrixRole::B && integerExactPattern != IntegerExactPattern::Ternary)
                 {
                     component = component.withAlternatingSign(
                         {.dimensions = {0, 1}, .negativeWhenOdd = false});
@@ -468,6 +476,45 @@ namespace hipblaslt::hostnumerics
             throw std::invalid_argument("Unsupported hipBLASLt host matrix initialization mode.");
         }
 
+        void initializeSparseK(Tensor destination, uint64_t seed, size_t reductionAxis)
+        {
+            const Shape& shape = destination.shape();
+            if((shape.rank() != 2 && shape.rank() != 3) || reductionAxis > 1)
+                throw std::invalid_argument(
+                    "Sparse-K initialization requires a matrix with an optional batch axis.");
+
+            generate(destination, GenerationRecipe::realOnly(GenerationRecipe::zero()));
+            const size_t kExtent = shape[reductionAxis];
+            if(kExtent == 0)
+                return;
+            // Each row retains one term per approximately sixteenth of K,
+            // plus the final term. Vary the position by row to cover all of K.
+            constexpr size_t terms   = 16;
+            const size_t     spacing = kExtent / terms + (kExtent % terms != 0);
+            const size_t     batches = shape.rank() == 3 ? shape[2] : 1;
+            const auto       nonzero = GenerationRecipe::realOnly(
+                GenerationRecipe::uniformInteger({.lower = 1, .upper = 2}), {.seed = seed});
+            for(size_t batch = 0; batch < batches; ++batch)
+                for(size_t row = 0; row < shape[1 - reductionAxis]; ++row)
+                {
+                    const auto keep = [&](size_t k) {
+                        const size_t r = reductionAxis == 0 ? k : row;
+                        const size_t c = reductionAxis == 0 ? row : k;
+                        generateAt(destination, r + shape[0] * (c + shape[1] * batch), nonzero);
+                    };
+                    for(size_t start = 0; start < kExtent;)
+                    {
+                        const size_t offset = (start / spacing + row) % spacing;
+                        if(offset < kExtent - start)
+                            keep(start + offset);
+                        if(kExtent - start <= spacing)
+                            break;
+                        start += spacing;
+                    }
+                    keep(kExtent - 1);
+                }
+        }
+
         void injectOneSpecial(Tensor view, std::optional<OneSpecialValue> requestedValue)
         {
             const size_t logicalElements = view.shape().elementCount();
@@ -499,6 +546,19 @@ namespace hipblaslt::hostnumerics
         }
     } // namespace
 
+    bool parseIntegerExactPattern(std::string_view name, IntegerExactPattern& pattern)
+    {
+        if(name.empty() || name == "standard")
+            pattern = IntegerExactPattern::Standard;
+        else if(name == "ternary")
+            pattern = IntegerExactPattern::Ternary;
+        else if(name == "sparse_k")
+            pattern = IntegerExactPattern::SparseK;
+        else
+            return false;
+        return true;
+    }
+
     MxTensor generateMxData(hipDataType              dataType,
                             hipDataType              scaleType,
                             Shape                    shape,
@@ -506,7 +566,8 @@ namespace hipblaslt::hostnumerics
                             size_t                   blockAxis,
                             size_t                   blockSize,
                             hipblaslt_initialization initialization,
-                            uint64_t                 seed)
+                            uint64_t                 seed,
+                            MatrixRole               role)
     {
         if(shape.rank() != 2)
             throw std::invalid_argument("hipBLASLt MX generation requires a rank-two shape.");
@@ -515,7 +576,14 @@ namespace hipblaslt::hostnumerics
         const ScalarType hostDataType = scalarType(dataType);
         const ScalarType hostScaleType
             = scaleType == HIP_R_8F_E4M3 ? ScalarType::E4M3 : scalarType(scaleType);
-        MxDataGeneration dataGeneration = mxDataGeneration(initialization, hostDataType, seed);
+        if(initialization == hipblaslt_initialization::integer_exact
+           && ((hostDataType != ScalarType::Float8E4M3 && hostDataType != ScalarType::Float8E5M2)
+               || hostScaleType != ScalarType::E8M0
+               || (role != MatrixRole::A && role != MatrixRole::B)))
+            throw std::invalid_argument(
+                "hipBLASLt integer_exact MX generation requires FP8 A/B and E8M0 scales.");
+        MxDataGeneration dataGeneration
+            = mxDataGeneration(initialization, hostDataType, seed, role);
 
         MxGenerationOptions options;
         options.dataType         = hostDataType;
@@ -524,7 +592,23 @@ namespace hipblaslt::hostnumerics
         options.blockAxis        = blockAxis;
         options.blockSize        = blockSize;
         options.scale            = mxScaleGenerationMode(initialization);
-        return generateMx(std::move(shape), std::move(dataGeneration), options);
+        auto generated           = generateMx(std::move(shape), std::move(dataGeneration), options);
+        if(initialization == hipblaslt_initialization::integer_exact)
+        {
+            const uint64_t scaleSeed = hipblaslt::hostnumerics::initialization::seedForSequence(
+                seed, role == MatrixRole::A ? 0x41 : 0x42);
+            generate(
+                generated.scales,
+                GenerationRecipe::realOnly(GenerationRecipe::choice({.values = {1.0, 2.0, 4.0}}),
+                                           {.seed = scaleSeed}));
+            generate(generated.reference, [&](std::span<const size_t> index) {
+                const size_t scale = generated.scaleIndices.loadAs<uint32_t>(index);
+                const size_t fast  = generated.scales.shape()[1];
+                return generated.data.loadAs<float>(index)
+                       * generated.scales.loadAs<float>({scale / fast, scale % fast});
+            });
+        }
+        return generated;
     }
 
     amd_gpu_layout::MxScaleStorageLayout mxScaleStorageLayoutForArchName(std::string_view archName)
@@ -659,12 +743,28 @@ namespace hipblaslt::hostnumerics
                           uint64_t                       seed,
                           bool                           forceNaN,
                           std::optional<OneSpecialValue> oneSpecialValue,
-                          bool                           positiveOnly)
+                          bool                           positiveOnly,
+                          IntegerExactOptions            integerExact)
     {
         validateInitialization(role, initialization, oneSpecialValue, positiveOnly);
+        if(integerExact.pattern != IntegerExactPattern::Standard
+           && initialization != hipblaslt_initialization::integer_exact)
+            throw std::invalid_argument(
+                "An integer-exact pattern requires integer_exact initialization.");
+        if(!forceNaN && integerExact.pattern == IntegerExactPattern::SparseK
+           && role == MatrixRole::A)
+        {
+            initializeSparseK(destination, seed, integerExact.reductionAxis);
+            return;
+        }
         generate(destination,
-                 matrixGenerationRecipe(
-                     destination, role, initialization, seed, forceNaN, positiveOnly));
+                 matrixGenerationRecipe(destination,
+                                        role,
+                                        initialization,
+                                        seed,
+                                        forceNaN,
+                                        positiveOnly,
+                                        integerExact.pattern));
 
         if(initialization == hipblaslt_initialization::norm_dist_one_special)
             injectOneSpecial(destination, oneSpecialValue);
