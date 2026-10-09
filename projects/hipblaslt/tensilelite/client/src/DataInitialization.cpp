@@ -124,7 +124,8 @@ namespace TensileLite
         enum class SwizzleTensorKind
         {
             Data,
-            MXScale
+            MXScale,
+            Count,
         };
 
         roc::hostnumerics::ScalarType swizzleScalarType(rocisa::DataType  dataType,

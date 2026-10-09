@@ -44,6 +44,8 @@ namespace
             return seedForSequence(seed, OperandSequence::MatrixB);
         case MatrixRole::C:
             return seedForSequence(seed, OperandSequence::MatrixC);
+        case MatrixRole::Count:
+            break;
         }
         throw std::invalid_argument("Unsupported hipBLASLt matrix role.");
     }

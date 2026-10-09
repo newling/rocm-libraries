@@ -54,6 +54,8 @@ detail::GemmSupportInfo detail::queryGemmSupport(const GemmInvocation& request,
                 .supported = false,
                 .reason = "The BLAS strategy requires the optional HostNumerics BLAS component.",
             };
+        case GemmBackend::Count:
+            break;
     }
     return {.supported = false, .reason = "Invalid reference GEMM backend."};
 }

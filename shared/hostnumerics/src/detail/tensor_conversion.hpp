@@ -35,6 +35,7 @@ class TensorConversion {
         Linear,
         TiledMatrix,
         General,
+        Count,
     };
 
     Tensor m_source;

@@ -229,6 +229,8 @@ namespace rocRoller::hostnumerics
                 return realOnly(GenerationRecipe::normal(
                     {.mean              = initialization.normalMean,
                      .standardDeviation = initialization.normalStandardDeviation}));
+            case DataInitializationMode::Count:
+                break;
             }
             throw std::invalid_argument("Unknown rocRoller data initialization mode.");
         }
@@ -285,6 +287,8 @@ namespace rocRoller::hostnumerics
                 return MxDataGeneration::quantize(recipe(GenerationRecipe::normal(
                     {.mean              = initialization.normalMean,
                      .standardDeviation = initialization.normalStandardDeviation})));
+            case DataInitializationMode::Count:
+                break;
             }
             throw std::invalid_argument("Unknown rocRoller MX data initialization mode.");
         }
@@ -305,6 +309,8 @@ namespace rocRoller::hostnumerics
                 return MxScaleGenerationMode::Derived;
             case DataInitializationMode::Unbounded:
                 return MxScaleGenerationMode::RandomFinite;
+            case DataInitializationMode::Count:
+                break;
             }
             throw std::invalid_argument("Unknown rocRoller MX scale initialization mode.");
         }
@@ -435,6 +441,8 @@ namespace rocRoller::hostnumerics
                 return "TrigonometricFromFloat";
             case DataInitializationMode::NormalFromFloat:
                 return "NormalFromFloat";
+            case DataInitializationMode::Count:
+                break;
             }
             throw std::invalid_argument("Unknown rocRoller data initialization mode.");
         };

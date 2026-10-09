@@ -86,6 +86,8 @@ ActivationFunction activationFunction(Activation activation, double parameter0, 
             return SwishActivation{parameter0};
         case Activation::Clamp:
             return ClampActivation{parameter0, parameter1};
+        case Activation::Count:
+            break;
     }
     throw std::invalid_argument("Unsupported Python activation.");
 }

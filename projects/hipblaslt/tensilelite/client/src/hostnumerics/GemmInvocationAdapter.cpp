@@ -124,6 +124,7 @@ namespace TensileLite::Client::hostnumerics
         {
             Row,
             Column,
+            Count,
         };
 
         inline MatrixAxis inferBiasAxis(size_t length, size_t rows, size_t columns, int factorDim)
@@ -146,6 +147,7 @@ namespace TensileLite::Client::hostnumerics
             None,
             Scalar,
             Vector,
+            Count,
         };
 
         struct BatchInputs

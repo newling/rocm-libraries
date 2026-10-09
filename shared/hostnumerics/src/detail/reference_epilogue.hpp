@@ -71,6 +71,8 @@ Accumulator activationGradientFactor(Activation activation, Accumulator value,
         case Activation::ReluDerivative:
             throw std::invalid_argument(
                 "Gradient application does not accept an explicit derivative activation.");
+        case Activation::Count:
+            break;
     }
     throw std::invalid_argument("Unsupported epilogue activation.");
 }

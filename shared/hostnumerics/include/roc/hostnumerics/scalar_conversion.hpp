@@ -70,6 +70,8 @@ Floating roundForIntegerConversion(Floating value, IntegerRounding rounding) {
             const Floating parity = std::fmod(std::fabs(integral), Floating{2});
             return parity == Floating{0} ? integral : integral + direction;
         }
+        case IntegerRounding::Count:
+            break;
     }
     throw std::invalid_argument("Invalid integer rounding policy.");
 }
@@ -117,6 +119,8 @@ uint64_t convertIntegralToIntegerBits(Integral value, uint32_t bits, bool signed
                        : integerMaximumRaw(bits, signedDestination);
         case IntegerOverflow::ModuloWrap:
             return static_cast<uint64_t>(value) & mask;
+        case IntegerOverflow::Count:
+            break;
     }
     throw std::invalid_argument("Invalid integer overflow policy.");
 }
@@ -161,6 +165,8 @@ uint64_t convertFloatingToIntegerBits(Floating value, uint32_t bits, bool signed
             if (std::signbit(rounded)) raw = uint64_t{0} - raw;
             return raw & integerMask(bits);
         }
+        case IntegerOverflow::Count:
+            break;
     }
     throw std::invalid_argument("Invalid integer overflow policy.");
 }

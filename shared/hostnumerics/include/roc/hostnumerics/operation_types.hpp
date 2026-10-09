@@ -34,6 +34,7 @@ enum class Activation {
     Silu,
     Swish,
     Clamp,
+    Count,
 };
 
 struct IdentityActivation {};
@@ -83,12 +84,14 @@ using ActivationFunction =
 enum class MathMode {
     Default,
     XFloat32,  // Truncate Float32 operands to the xfloat32 representation.
+    Count,
 };
 
 // Selects the final conversion performed before writing an output tensor.
 enum class OutputConversion {
     Default,
     SaturatingInt8,  // Round and clamp to [-128, 127].
+    Count,
 };
 
 // Storage form used by OutputSelection.
@@ -96,6 +99,7 @@ enum class OutputSelectionKind {
     All,
     Strided,
     Explicit,
+    Count,
 };
 
 namespace detail {
@@ -218,6 +222,8 @@ class OutputSelection {
             case OutputSelectionKind::Explicit:
                 validateExplicitIndices(logicalElements);
                 return m_indices;
+            case OutputSelectionKind::Count:
+                break;
         }
         throw std::invalid_argument("Invalid output selection kind.");
     }
@@ -232,6 +238,8 @@ class OutputSelection {
             case OutputSelectionKind::Explicit:
                 validateExplicitIndices(logicalElements);
                 return m_indices.size();
+            case OutputSelectionKind::Count:
+                break;
         }
         throw std::invalid_argument("Invalid output selection kind.");
     }

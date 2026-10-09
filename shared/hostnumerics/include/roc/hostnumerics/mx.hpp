@@ -13,6 +13,7 @@ enum class MxDataQuantization {
     Nearest,
     PreserveRange,
     PreserveGeneratedEncoding,
+    Count,
 };
 
 struct MxRepresentedValueRange {
@@ -58,6 +59,7 @@ enum class MxScaleGenerationMode {
     Two,
     Maximum,
     NaN,
+    Count,
 };
 
 // Storage and scale policy for a rank-two, block-scaled MX tensor. Data

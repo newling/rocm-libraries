@@ -26,6 +26,7 @@ namespace hipblaslt::hostnumerics
     {
         Sine,
         Cosine,
+        Count,
     };
 
     enum class MatrixRole
@@ -33,6 +34,7 @@ namespace hipblaslt::hostnumerics
         A,
         B,
         C,
+        Count,
     };
 
     enum class IntegerExactPattern
@@ -40,6 +42,7 @@ namespace hipblaslt::hostnumerics
         Standard,
         Ternary,
         SparseK,
+        Count,
     };
 
     bool parseIntegerExactPattern(std::string_view name, IntegerExactPattern& pattern);
@@ -57,6 +60,7 @@ namespace hipblaslt::hostnumerics
         PositiveInfinity,
         NegativeInfinity,
         NaN,
+        Count,
     };
 
     // Preserve the seed used by the former mxDataGenerator implementation.

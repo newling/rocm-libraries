@@ -10,6 +10,7 @@ namespace roc::hostnumerics {
 enum class IndexOrder {
     FirstDimensionFastest,
     LastDimensionFastest,
+    Count,
 };
 
 }  // namespace roc::hostnumerics

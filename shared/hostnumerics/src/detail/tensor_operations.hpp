@@ -17,6 +17,7 @@ enum class BinaryOperation {
     Add,
     Subtract,
     Multiply,
+    Count,
 };
 
 struct BinaryInvocation {
@@ -93,6 +94,8 @@ void binaryTyped(const BinaryInvocation& invocation, BinaryOperation operation) 
                         return wrappingSubtract(leftValue, rightValue);
                     case BinaryOperation::Multiply:
                         return wrappingMultiply(leftValue, rightValue);
+                    case BinaryOperation::Count:
+                        break;
                 }
                 throw std::invalid_argument("Unsupported elementwise binary operation.");
             }();

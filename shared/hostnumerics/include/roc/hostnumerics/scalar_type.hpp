@@ -66,6 +66,7 @@ enum class ScalarType : uint16_t {
 enum class IntegerRounding : uint8_t {
     TowardZero,
     NearestEven,
+    Count,
 };
 
 enum class IntegerOverflow : uint8_t {
@@ -73,11 +74,13 @@ enum class IntegerOverflow : uint8_t {
     Saturate,
     // Reduce modulo 2^N, then interpret the N-bit result as two's complement when signed.
     ModuloWrap,
+    Count,
 };
 
 enum class BFloat16Rounding : uint8_t {
     NearestEven,
     Truncate,
+    Count,
 };
 
 struct ScalarConversionOptions {

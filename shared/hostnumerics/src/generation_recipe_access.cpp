@@ -241,6 +241,8 @@ struct GenerationRecipeAccess {
             case Component::UnaryTransform::Cosine:
                 value = std::cos(value);
                 break;
+            case Component::UnaryTransform::Count:
+                throw std::invalid_argument("Invalid generation transform.");
         }
         value = value * component.affineValue_.scale + component.affineValue_.offset;
 
@@ -1094,7 +1096,7 @@ struct GenerationRecipeAccess {
             bound.component.pattern_);
     }
 
-    enum class ComplexGenerationKind { RealOnly, Replicated, Cartesian };
+    enum class ComplexGenerationKind { RealOnly, Replicated, Cartesian, Count };
 
     template <typename Storage>
     static bool generateContiguousComplexValues(Tensor destination, const GenerationRecipe& recipe,

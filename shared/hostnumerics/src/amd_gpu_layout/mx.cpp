@@ -87,6 +87,8 @@ std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* natur
         }
         case MxScaleStorageLayout::Natural:
             break;
+        case MxScaleStorageLayout::Count:
+            break;
     }
     throw std::invalid_argument("Invalid MX scale storage layout.");
 }
