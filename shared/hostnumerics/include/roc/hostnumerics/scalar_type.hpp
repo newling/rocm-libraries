@@ -5,9 +5,11 @@
 
 #include <array>
 #include <cassert>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <type_traits>
 
 namespace roc::hostnumerics {
 enum class ScalarCategory : uint8_t {
@@ -171,5 +173,67 @@ inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
 inline constexpr std::string_view scalarTypeName(ScalarType type) {
     return scalarTypeInfo(type).name;
 }
+
+template <typename T>
+struct NativeScalarType;
+
+template <>
+struct NativeScalarType<bool> {
+    static constexpr ScalarType value = ScalarType::Boolean;
+};
+template <>
+struct NativeScalarType<uint8_t> {
+    static constexpr ScalarType value = ScalarType::UInt8;
+};
+template <>
+struct NativeScalarType<int8_t> {
+    static constexpr ScalarType value = ScalarType::Int8;
+};
+template <>
+struct NativeScalarType<uint16_t> {
+    static constexpr ScalarType value = ScalarType::UInt16;
+};
+template <>
+struct NativeScalarType<int16_t> {
+    static constexpr ScalarType value = ScalarType::Int16;
+};
+template <>
+struct NativeScalarType<uint32_t> {
+    static constexpr ScalarType value = ScalarType::UInt32;
+};
+template <>
+struct NativeScalarType<int32_t> {
+    static constexpr ScalarType value = ScalarType::Int32;
+};
+template <>
+struct NativeScalarType<uint64_t> {
+    static constexpr ScalarType value = ScalarType::UInt64;
+};
+template <>
+struct NativeScalarType<int64_t> {
+    static constexpr ScalarType value = ScalarType::Int64;
+};
+template <>
+struct NativeScalarType<float> {
+    static constexpr ScalarType value = ScalarType::Float32;
+};
+template <>
+struct NativeScalarType<double> {
+    static constexpr ScalarType value = ScalarType::Float64;
+};
+template <>
+struct NativeScalarType<std::complex<float>> {
+    static constexpr ScalarType value = ScalarType::ComplexFloat32;
+};
+template <>
+struct NativeScalarType<std::complex<double>> {
+    static constexpr ScalarType value = ScalarType::ComplexFloat64;
+};
+
+template <typename T>
+inline constexpr ScalarType nativeScalarType = NativeScalarType<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+concept NativeScalar = requires { NativeScalarType<std::remove_cvref_t<T>>::value; };
 
 }  // namespace roc::hostnumerics
