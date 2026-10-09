@@ -26,9 +26,9 @@ format itself), documented the same way as any other characterization decision
 Usage (from the rocm-libraries repo root; pass ``--characterization-dir`` so
 pathspecs match the monorepo layout, not the flat TensileLite test fixtures)::
 
-    python3 projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/tools/check_snapshot_diff.py \\
+    python3 projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/tools/check_snapshot_diff.py \\
         --repo-root . \\
-        --characterization-dir projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization \\
+        --characterization-dir projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization \\
         --base <base-sha-or-ref> --head <head-sha-or-ref>
 
 Exit codes: ``0`` OK (within threshold, or a valid override was found), ``1`` a
@@ -51,7 +51,7 @@ from pathlib import Path
 # directories, so a real, scoped fix touches a small handful of nodes, not dozens.
 DEFAULT_THRESHOLD = 3
 
-DEFAULT_CHARACTERIZATION_DIR = "Tensile/Tests/unit/characterization"
+DEFAULT_CHARACTERIZATION_DIR = "tensilelite/Tests/unit/characterization"
 
 # Matches the ADR template field documented in adr/README.md. Deliberately strict
 # (exact "yes", own line, column 0 like the other metadata fields) so a stray

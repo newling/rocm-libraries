@@ -38,7 +38,7 @@ csd = _load_module()
 
 pytestmark = pytest.mark.unit
 
-CHAR_DIR = "Tensile/Tests/unit/characterization"
+CHAR_DIR = "tensilelite/Tests/unit/characterization"
 
 
 # --------------------------------------------------------------------------- #
@@ -499,6 +499,23 @@ def test_main_end_to_end_pass(repo: _Repo):
         ]
     )
     assert rc == 0
+
+
+def test_main_checks_lowercase_package_by_default(repo: _Repo):
+    base_sha = repo._git("rev-parse", "HEAD").strip()
+    head_sha = _change_n_goldens(repo, csd.DEFAULT_THRESHOLD + 1, "blanket regen")
+
+    rc = csd.main(
+        [
+            "--base",
+            base_sha,
+            "--head",
+            head_sha,
+            "--repo-root",
+            str(repo.root),
+        ]
+    )
+    assert rc == 1
 
 
 def test_main_end_to_end_fail(repo: _Repo):
