@@ -10,8 +10,6 @@
 #include <string_view>
 
 namespace roc::hostnumerics {
-// Scalar types define the runtime numeric vocabulary shared by every HostNumerics component.
-// This header describes type identity and encoding metadata.
 enum class ScalarCategory : uint8_t {
     Boolean,
     SignedInteger,
@@ -47,22 +45,26 @@ enum class ScalarType : uint16_t {
     Float6E3M2,
     Float4E2M1,
     Int4,
+    // Unsigned powers of two: byte b represents 2^(b-127), except 0xff is NaN.
     E8M0,
+    // E8M0 with byte 0x00 representing zero instead of 2^-127.
     E8M0Zero,
+    // Unsigned float: five exponent bits and three fraction bits; 0xff is NaN.
     E5M3,
+    // Unsigned float: four exponent bits and three fraction bits in an eight-bit slot.
+    // The top bit is ignored when decoding and zero when encoding; 0x7f is NaN.
+    // Float8E4M3 instead uses the top bit as a sign bit.
     E4M3,
     Count,
 };
 
 struct ScalarTypeInfo {
-    // Short human-readable spelling used in diagnostics and bindings.
     std::string_view name;
-    // Broad conversion and comparison behavior of the scalar.
     ScalarCategory category;
-    // Encoded bits occupied by one logical scalar, including both complex components and any
-    // packed or reserved payload bits.
+    // Bits per element in tensor storage: 4 for Int4, 6 for Float6, 8 for Boolean
+    // and E4M3, and 64 for ComplexFloat32 (two 32-bit components).
     uint16_t storageBits;
-    // Encoded exponent bits per real component; zero for non-floating categories.
+    // Exponent and fraction widths are per real component; zero for integers and Boolean.
     uint8_t exponentBits;
     // Explicitly stored fraction bits per real component, excluding any implicit leading bit.
     uint8_t mantissaBits;
@@ -80,6 +82,7 @@ struct ScalarTypeInfo {
 
 inline constexpr size_t scalarTypeCount = static_cast<size_t>(ScalarType::Count);
 
+// Reject Count and unnamed values produced by casts from integers.
 inline constexpr bool isConcreteScalarType(ScalarType type) {
     return static_cast<size_t>(type) < scalarTypeCount;
 }
@@ -116,6 +119,7 @@ inline constexpr std::array<ScalarTypeInfo, scalarTypeCount> scalarTypeInfos{{
     {"e4m3", ScalarCategory::Scale, 8, 4, 3, 7, true, false},
 }};
 
+// Invalid identifiers throw std::invalid_argument, including in release builds.
 inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
     if (!isConcreteScalarType(type)) throw std::invalid_argument("Invalid ScalarType.");
     return scalarTypeInfos[static_cast<size_t>(type)];
