@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <string>
 #include <utility>
 
 #include "_scalar_codec_test_support.hpp"
@@ -9,6 +10,8 @@ namespace scalar_codec_test {
 void testScalarTypeInfoContract() {
     using roc::hostnumerics::NativeScalar;
 
+    // nativeScalarType<std::string> is a compilation error. Use NativeScalar<T>
+    // to query whether T has a mapping without causing an error.
     static_assert(nativeScalarType<bool> == ScalarType::Boolean);
     static_assert(nativeScalarType<uint8_t> == ScalarType::UInt8);
     static_assert(nativeScalarType<int8_t> == ScalarType::Int8);
@@ -32,6 +35,7 @@ void testScalarTypeInfoContract() {
     static_assert(!NativeScalar<float*>);
     static_assert(!NativeScalar<float[2]>);
     static_assert(!NativeScalar<long double>);
+    static_assert(!NativeScalar<std::string>);
     static_assert(!NativeScalar<std::string_view>);
 
     // Check each identifier independently of its position in the metadata table.

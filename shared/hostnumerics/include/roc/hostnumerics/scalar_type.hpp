@@ -210,6 +210,8 @@ inline constexpr size_t scalarElementGroupSize(ScalarType type) {
     return 8 / std::gcd(bits, size_t{8});
 }
 
+namespace detail {
+// Implementation of the native mapping, not a customization point.
 template <typename T>
 struct NativeScalarType;
 
@@ -265,12 +267,17 @@ template <>
 struct NativeScalarType<std::complex<double>> {
     static constexpr ScalarType value = ScalarType::ComplexFloat64;
 };
+}  // namespace detail
 
+// Tests whether a C++ type has a native mapping, ignoring cv/ref qualifiers.
+// C++23's optional <stdfloat> types, including float16_t and bfloat16_t, are not mapped.
 template <typename T>
-inline constexpr ScalarType nativeScalarType = NativeScalarType<std::remove_cvref_t<T>>::value;
+concept NativeScalar = requires { detail::NativeScalarType<std::remove_cvref_t<T>>::value; };
 
-template <typename T>
-concept NativeScalar = requires { NativeScalarType<std::remove_cvref_t<T>>::value; };
+// Unsupported types fail the NativeScalar constraint at compile time.
+template <NativeScalar T>
+inline constexpr ScalarType nativeScalarType =
+    detail::NativeScalarType<std::remove_cvref_t<T>>::value;
 
 namespace detail {
 template <ScalarType TypeValue, typename StorageType>
