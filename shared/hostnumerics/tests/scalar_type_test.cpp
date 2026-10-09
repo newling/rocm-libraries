@@ -5,10 +5,13 @@
 #include <initializer_list>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 int main() {
     using namespace roc::hostnumerics;
+    // nativeScalarType<std::string> is a compilation error. Use NativeScalar<T>
+    // to query whether T has a mapping without causing an error.
     static_assert(nativeScalarType<bool> == ScalarType::Boolean);
     static_assert(nativeScalarType<uint8_t> == ScalarType::UInt8);
     static_assert(nativeScalarType<int8_t> == ScalarType::Int8);
@@ -32,6 +35,7 @@ int main() {
     static_assert(!NativeScalar<float*>);
     static_assert(!NativeScalar<float[2]>);
     static_assert(!NativeScalar<long double>);
+    static_assert(!NativeScalar<std::string>);
     static_assert(!NativeScalar<std::string_view>);
 
     const auto require = [](bool condition, const char* message) {
