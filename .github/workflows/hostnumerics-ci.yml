@@ -37,8 +37,10 @@ env:
 
 jobs:
   standalone:
-    name: Python ${{ matrix.python }}, tests ${{ matrix.testing }}, ${{ matrix.generator }}
+    name: GCC, Python ${{ matrix.python }}, tests ${{ matrix.testing }}, ${{ matrix.generator }}
     runs-on: ubuntu-24.04
+    env:
+      CXX: g++
     strategy:
       fail-fast: false
       matrix:
@@ -164,7 +166,10 @@ jobs:
             --output-on-failure
 
   sanitizers:
+    name: Clang, ASan and UBSan
     runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -175,7 +180,7 @@ jobs:
       - name: Install host dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libopenblas-dev ninja-build
+          sudo apt-get install --yes clang-18 libclang-rt-18-dev libopenblas-dev libomp-18-dev ninja-build
 
       - name: Configure, build, and test with sanitizers
         run: |
@@ -186,10 +191,45 @@ jobs:
             -DHOSTNUMERICS_BUILD_PYTHON=OFF \
             -DHOSTNUMERICS_BUILD_BLAS_BACKEND=ON \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
           cmake --build "${RUNNER_TEMP}/hostnumerics-sanitizers" --parallel "$(nproc)"
           ctest \
             --test-dir "${RUNNER_TEMP}/hostnumerics-sanitizers" \
             --exclude-regex '^hostnumerics-package-components$' \
-            --output-on-failure
+            --no-tests=error --output-on-failure
+
+  clang-tidy:
+    name: Clang-tidy
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: shared/hostnumerics
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-18 clang-tidy-18 libopenblas-dev libomp-18-dev ninja-build
+
+      - name: Configure and build
+        run: |
+          cmake -S shared/hostnumerics \
+            -B "${RUNNER_TEMP}/hostnumerics-clang-tidy" \
+            -G Ninja \
+            -DHOSTNUMERICS_BUILD_TESTING=ON \
+            -DHOSTNUMERICS_BUILD_PYTHON=OFF \
+            -DHOSTNUMERICS_BUILD_BLAS_BACKEND=ON \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build "${RUNNER_TEMP}/hostnumerics-clang-tidy" --parallel "$(nproc)"
+
+      - name: Analyze HostNumerics sources and tests
+        run: |
+          run-clang-tidy-18 \
+            -p "${RUNNER_TEMP}/hostnumerics-clang-tidy" \
+            -clang-tidy-binary clang-tidy-18 \
+            -config-file shared/hostnumerics/.clang-tidy \
+            -j "$(nproc)" '(^|/)shared/hostnumerics/'
