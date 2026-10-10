@@ -457,7 +457,8 @@ MxTensor generateMx(Shape shape, MxDataGeneration generation, const MxGeneration
         problem.dataType, Layout(problem.shape, {1, static_cast<ptrdiff_t>(leadingDimension)}),
         std::move(dataStorage));
     std::vector<std::byte> scaleStorage(scaleRawValues.size());
-    std::memcpy(scaleStorage.data(), scaleRawValues.data(), scaleRawValues.size());
+    if (!scaleRawValues.empty())
+        std::memcpy(scaleStorage.data(), scaleRawValues.data(), scaleRawValues.size());
     Tensor scales = Tensor::takeOwnershipOfEncodedBackingStorage(
         problem.scaleType, Layout::contiguousLastDimensionFastest(blocking.naturalScaleShape()),
         std::move(scaleStorage));
