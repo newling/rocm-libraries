@@ -16,8 +16,8 @@
 #include <vector>
 
 // A failed HIP call and the CPU timer go through these two hooks, which an includer
-// may define before including this header. Every expansion of the measurement code
-// in one binary must see the same definitions.
+// may define before including this header. Hook-dependent functions have internal
+// linkage, so translation units can supply different hooks in a static build too.
 //   HIPBLASLT_BENCHMARK_CHECK_HIP(expr): handles a HIP call that did not return
 //     hipSuccess. Used only in functions returning void. By default it returns.
 //   HIPBLASLT_BENCHMARK_TIME_US_SYNC(stream): synchronizes `stream`, then returns the
@@ -163,12 +163,12 @@ namespace hipblaslt_bench
         // buffers keep cycling across samples. Void (not value-returning) so
         // HIPBLASLT_BENCHMARK_CHECK_HIP, which can expand to `return;`, stays valid here.
         template <typename Launch>
-        inline void time_batch(Launch&              launch,
-                               int32_t              batch,
-                               int64_t&             global_index,
-                               bool                 use_gpu_timer,
-                               const event_context& events,
-                               double&              elapsed_us)
+        static inline void time_batch(Launch&              launch,
+                                      int32_t              batch,
+                                      int64_t&             global_index,
+                                      bool                 use_gpu_timer,
+                                      const event_context& events,
+                                      double&              elapsed_us)
         {
             double cpu_start = 0.0;
             if(use_gpu_timer)
@@ -288,14 +288,14 @@ namespace hipblaslt_bench
     // batch of cfg.iters; adaptive mode self-sizes the batch and collects samples until the
     // mean converges, the robust spread plateaus, or a ceiling is hit.
     template <typename Launch>
-    inline void run_measurement(Launch&&                     launch,
-                                const TimingConfig&          cfg,
-                                hipEvent_t                   event_start,
-                                hipEvent_t                   event_stop,
-                                hipStream_t                  stream,
-                                TimingResult&                out,
-                                const std::function<bool()>& should_abort = {},
-                                const CollectiveAgreement&   agreement    = {})
+    static inline void run_measurement(Launch&&                     launch,
+                                       const TimingConfig&          cfg,
+                                       hipEvent_t                   event_start,
+                                       hipEvent_t                   event_stop,
+                                       hipStream_t                  stream,
+                                       TimingResult&                out,
+                                       const std::function<bool()>& should_abort = {},
+                                       const CollectiveAgreement&   agreement    = {})
     {
         const detail::event_context events{event_start, event_stop, stream};
         int64_t                     global_index = 0;

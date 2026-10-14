@@ -180,3 +180,14 @@ TEST(CandidateSearch_pre_checkin, AFailureDuringAColdLaunchEndsTheSearch)
     EXPECT_EQ(result.best, std::numeric_limits<size_t>::max());
     EXPECT_EQ(host.log, (std::vector<std::string>{entry("prepare", 0), entry("cold", 0, 0)}));
 }
+
+int benchmarkLibraryHookCallsForTest();
+int benchmarkClientHookCallsForTest();
+
+// A static library and its client coexist in one binary. Each translation unit
+// must keep its own error policy rather than using a linker-selected inline body.
+TEST(CandidateSearch_pre_checkin, SeparateTranslationUnitsKeepTheirOwnHooks)
+{
+    EXPECT_EQ(benchmarkLibraryHookCallsForTest(), 1);
+    EXPECT_EQ(benchmarkClientHookCallsForTest(), 1);
+}

@@ -65,10 +65,10 @@ namespace hipblaslt_bench
 
     // Opens a timed span: records event_start on the GPU timer, otherwise reads the CPU
     // clock into time_used.
-    inline void pre_gpu_time(bool         use_gpu_timer,
-                             hipEvent_t&  event_gpu_time_start,
-                             double&      gpu_time_used,
-                             hipStream_t& stream)
+    static inline void pre_gpu_time(bool         use_gpu_timer,
+                                    hipEvent_t&  event_gpu_time_start,
+                                    double&      gpu_time_used,
+                                    hipStream_t& stream)
     {
         if(use_gpu_timer)
             HIPBLASLT_BENCHMARK_CHECK_HIP(hipEventRecord(event_gpu_time_start, stream));
@@ -78,11 +78,11 @@ namespace hipblaslt_bench
 
     // Closes the span pre_gpu_time opened, leaving its length in microseconds in
     // gpu_time_used.
-    inline void post_gpu_time(bool         use_gpu_timer,
-                              hipEvent_t&  event_gpu_time_start,
-                              hipEvent_t&  event_gpu_time_end,
-                              double&      gpu_time_used,
-                              hipStream_t& stream)
+    static inline void post_gpu_time(bool         use_gpu_timer,
+                                     hipEvent_t&  event_gpu_time_start,
+                                     hipEvent_t&  event_gpu_time_end,
+                                     double&      gpu_time_used,
+                                     hipStream_t& stream)
     {
         if(use_gpu_timer)
         {
@@ -99,23 +99,40 @@ namespace hipblaslt_bench
         }
     }
 
+    namespace detail
+    {
+        struct FlushCostCache
+        {
+            std::unordered_map<std::string, double> times;
+            std::mutex                              mutex;
+        };
+
+        // Storage does not depend on the includer's hooks. Keep one cache even
+        // though the hook-dependent calibration function has internal linkage.
+        inline FlushCostCache& flush_cost_cache()
+        {
+            static FlushCostCache cache;
+            return cache;
+        }
+    } // namespace detail
+
     // Microseconds one flush launch costs on the device `props` describes, for
     // TimingConfig::flush_us. Measured with the given timer the first time a device is
     // asked about, then reused for the life of the process.
-    inline double flush_cost_us(bool                   use_gpu_timer,
-                                const hipDeviceProp_t& props,
-                                hipEvent_t&            event_gpu_time_start,
-                                hipEvent_t&            event_gpu_time_end,
-                                hipStream_t&           stream)
+    static inline double flush_cost_us(bool                   use_gpu_timer,
+                                       const hipDeviceProp_t& props,
+                                       hipEvent_t&            event_gpu_time_start,
+                                       hipEvent_t&            event_gpu_time_end,
+                                       hipStream_t&           stream)
     {
         const int32_t gpu_block3      = flush_icache_grid(props);
         int           flush_iter      = 100000;
         double        flush_time_used = 0;
 
-        static std::unordered_map<std::string, double> flush_times_cache;
-        static std::mutex                              mtx;
-        std::lock_guard<std::mutex>                    lock(mtx);
-        std::string                                    device_uuid(props.uuid.bytes);
+        auto&                       cache             = detail::flush_cost_cache();
+        auto&                       flush_times_cache = cache.times;
+        std::lock_guard<std::mutex> lock(cache.mutex);
+        std::string                 device_uuid(props.uuid.bytes);
         if(!flush_times_cache.count(device_uuid))
         {
             for(int i = 0; i < flush_iter; i++)
@@ -167,19 +184,19 @@ namespace hipblaslt_bench
               typename Skipped,
               typename Measuring,
               typename Measured>
-    SearchResult search_candidates(size_t                       candidates,
-                                   const SearchConfig&          search,
-                                   const TimingConfig&          timing,
-                                   hipEvent_t&                  event_gpu_time_start,
-                                   hipEvent_t&                  event_gpu_time_end,
-                                   hipStream_t&                 stream,
-                                   Prepare&&                    prepare,
-                                   Cold&&                       cold,
-                                   Launch&&                     launch,
-                                   Skipped&&                    skipped,
-                                   Measuring&&                  measuring,
-                                   Measured&&                   measured,
-                                   const std::function<bool()>& should_abort = {})
+    static SearchResult search_candidates(size_t                       candidates,
+                                          const SearchConfig&          search,
+                                          const TimingConfig&          timing,
+                                          hipEvent_t&                  event_gpu_time_start,
+                                          hipEvent_t&                  event_gpu_time_end,
+                                          hipStream_t&                 stream,
+                                          Prepare&&                    prepare,
+                                          Cold&&                       cold,
+                                          Launch&&                     launch,
+                                          Skipped&&                    skipped,
+                                          Measuring&&                  measuring,
+                                          Measured&&                   measured,
+                                          const std::function<bool()>& should_abort = {})
     {
         SearchResult result;
         double       best_gpu_time  = std::numeric_limits<double>::max();
