@@ -37,11 +37,12 @@ namespace
     // time, that records every callback.
     struct HostSearch
     {
-        std::vector<double>         cold_us;
-        std::vector<double>         launch_us;
-        std::vector<std::string>    log;
-        std::function<bool()>       should_abort;
-        std::function<void(size_t)> on_prepare;
+        std::vector<double>                  cold_us;
+        std::vector<double>                  launch_us;
+        std::vector<std::string>             log;
+        std::function<bool()>                should_abort;
+        std::function<void(size_t)>          on_prepare;
+        std::function<void(size_t, int32_t)> on_cold;
 
         hipblaslt_bench::SearchResult run(const hipblaslt_bench::SearchConfig& search,
                                           const hipblaslt_bench::TimingConfig& timing)
@@ -63,6 +64,8 @@ namespace
                 },
                 [&](size_t sol, int32_t i) {
                     log.push_back(entry("cold", sol, i));
+                    if(on_cold)
+                        on_cold(sol, i);
                     spin_us(cold_us.empty() ? 0.0 : cold_us[sol]);
                 },
                 [&](size_t sol, int64_t i) {
@@ -157,4 +160,23 @@ TEST(CandidateSearch_pre_checkin, AFailureWhilePreparingEndsTheSearch)
     EXPECT_TRUE(result.aborted);
     ASSERT_FALSE(host.log.empty());
     EXPECT_EQ(host.log.back(), entry("prepare", 1));
+}
+
+// Cold launches used to run directly in the caller. A fatal failure there returned
+// from that caller, so moving them into callbacks must still stop the whole search.
+TEST(CandidateSearch_pre_checkin, AFailureDuringAColdLaunchEndsTheSearch)
+{
+    HostSearch host;
+    host.launch_us = {50, 50};
+
+    bool failed       = false;
+    host.should_abort = [&] { return failed; };
+    host.on_cold      = [&](size_t, int32_t) { failed = true; };
+
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls = 3;
+    const auto result = host.run(search, cpu_timing(2));
+    EXPECT_TRUE(result.aborted);
+    EXPECT_EQ(result.best, std::numeric_limits<size_t>::max());
+    EXPECT_EQ(host.log, (std::vector<std::string>{entry("prepare", 0), entry("cold", 0, 0)}));
 }

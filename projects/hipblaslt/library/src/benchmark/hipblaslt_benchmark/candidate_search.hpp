@@ -148,7 +148,7 @@ namespace hipblaslt_bench
         size_t       best = std::numeric_limits<size_t>::max(); // none measured
         TimingResult best_timing;
 
-        // Preparing a candidate failed fatally under gtest, which ends the search.
+        // Preparing a candidate or a cold launch failed fatally under gtest.
         bool aborted = false;
     };
 
@@ -159,7 +159,8 @@ namespace hipblaslt_bench
     //   skipped(sol, warm_us, best_warm_us) sol was dropped by the skip-slow screen
     //   measuring(sol)                     just before sol's timed phase
     //   measured(sol, timing)              just after it
-    // should_abort is polled as run_measurement polls it.
+    // A new should_abort failure in prepare or cold ends the whole search; timed
+    // launches retain run_measurement's polling behavior.
     template <typename Prepare,
               typename Cold,
               typename Launch,
@@ -198,7 +199,14 @@ namespace hipblaslt_bench
             if(search.skip_slow_ratio)
                 pre_gpu_time(timing.use_gpu_timer, event_gpu_time_start, warm_time, stream);
             for(int32_t i = 0; i < search.cold_calls; i++)
+            {
                 cold(sol, i);
+                if(!failed_before && detail::aborted(should_abort))
+                {
+                    result.aborted = true;
+                    return result;
+                }
+            }
             if(search.skip_slow_ratio)
             {
                 post_gpu_time(timing.use_gpu_timer,
