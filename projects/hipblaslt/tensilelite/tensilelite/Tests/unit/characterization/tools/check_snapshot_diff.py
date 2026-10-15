@@ -51,7 +51,9 @@ from pathlib import Path
 # directories, so a real, scoped fix touches a small handful of nodes, not dozens.
 DEFAULT_THRESHOLD = 3
 
-DEFAULT_CHARACTERIZATION_DIR = "Tensile/Tests/unit/characterization"
+DEFAULT_CHARACTERIZATION_DIR = (
+    "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization"
+)
 
 # Matches the ADR template field documented in adr/README.md. Deliberately strict
 # (exact "yes", own line, column 0 like the other metadata fields) so a stray

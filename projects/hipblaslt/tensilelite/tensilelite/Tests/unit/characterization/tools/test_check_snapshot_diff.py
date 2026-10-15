@@ -518,3 +518,16 @@ def test_main_end_to_end_fail(repo: _Repo):
         ]
     )
     assert rc == 1
+
+
+def test_main_default_detects_bulk_change_in_repository_layout(repo: _Repo):
+    """The default must inspect the moved suite without a directory override."""
+    actual_char_dir = "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization"
+    base_sha = repo._git("rev-parse", "HEAD").strip()
+    for i in range(csd.DEFAULT_THRESHOLD + 1):
+        repo.write(f"{actual_char_dir}/Module{i}/__snapshots__/test_case.ambr", "# changed\n")
+    head_sha = repo.commit("bulk update in repository layout")
+
+    assert csd.main(
+        ["--base", base_sha, "--head", head_sha, "--repo-root", str(repo.root)]
+    ) == 1
