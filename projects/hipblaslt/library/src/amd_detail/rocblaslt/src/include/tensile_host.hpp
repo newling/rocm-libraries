@@ -220,6 +220,20 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
                         int                                requestedAlgoCount,
                         size_t                             maxWorkSpaceBytes);
 
+namespace hipblaslt_bench
+{
+    struct GemmTuningConfig;
+    struct GemmTuningCallbacks;
+    struct GemmTuningResult;
+}
+
+void runGemmTuningSession(rocblaslt_handle                                handle,
+                          const std::vector<RocblasltContractionProblem>& blocks,
+                          std::shared_ptr<void>                           gemmData,
+                          const hipblaslt_bench::GemmTuningConfig&        config,
+                          const hipblaslt_bench::GemmTuningCallbacks&     callbacks,
+                          hipblaslt_bench::GemmTuningResult&              result);
+
 // Ordinary single-GEMM candidate policy shared by the public heuristic and tune mode.
 rocblaslt_status getGemmCandidates(RocblasltContractionProblem const& prob,
                                    rocblaslt_handle                   handle,

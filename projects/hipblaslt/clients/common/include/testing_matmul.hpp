@@ -44,6 +44,7 @@
 #include "hipblaslt_vector.hpp"
 #include <hipblaslt_benchmark/candidate_policy.hpp>
 #include <hipblaslt_benchmark/gemm_rotation.hpp>
+#include <hipblaslt_benchmark/gemm_tuning.hpp>
 #include <unordered_map>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
@@ -2049,6 +2050,13 @@ void testing_matmul_with_bias(const Arguments& arg,
         = !do_grouped_gemm && batchMode == HIPBLASLT_BATCH_MODE_STRIDED && !arg.bias_vector
           && !arg.use_e && !arg.scaleAlpha_vector && arg.scaleA == hipblaslt_scaling_format::none
           && arg.scaleB == hipblaslt_scaling_format::none;
+    const char* rocRoller              = getenv("HIPBLASLT_USE_ROCROLLER");
+    const bool  useSharedTuningSession = sharedOrdinaryRotation && !arg.use_ext && !arg.scaleC
+                                        && !arg.scaleD && !arg.amaxD
+                                        && !(rocRoller && *rocRoller == '1');
+    const bool enumerateSharedCandidates = useSharedTuningSession && arg.timing
+                                           && arg.algo_method != 2 && !arg.requires_streamk
+                                           && !getenv("HIPBLASLT_TUNING_FILE");
     bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
     bool mx_use_rocroller = MXUseRocroller();
@@ -4876,6 +4884,30 @@ void testing_matmul_with_bias(const Arguments& arg,
             verifyMixedValidityContract();
         }
     }
+    else if(enumerateSharedCandidates)
+    {
+        const hipblaslt_bench::GemmTuningBlock block{
+            dA[0].as<char>(), dB[0].as<char>(), dC[0].as<char>(), (*dDp)[0].as<char>()};
+        const bool enumerated = hipblaslt_bench::gemm_tuning_candidates(
+            handle,
+            matmul[0][0],
+            matA[0],
+            matB[0],
+            matC[0],
+            matD[0],
+            alpha_in[0],
+            &h_beta[0],
+            block,
+            max_workspace_size,
+            {arg.algo_method == 1, size_t(requestAlgoCount), -1},
+            heuristicResult);
+        EXPECT_HIPBLAS_STATUS(enumerated ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_INTERNAL_ERROR,
+                              HIPBLAS_STATUS_SUCCESS);
+        heuristicTuningIndex.resize(heuristicResult.size(), 0);
+        for(const auto& candidate : heuristicResult)
+            workspace_size = std::max(workspace_size, candidate.workspaceSize);
+        CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
+    }
     else if(arg.algo_method == 1)
     {
         std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo;
@@ -6373,7 +6405,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         };
 
         const bool flushCalibrated
-            = !arg.flush
+            = useSharedTuningSession || !arg.flush
               || hipblaslt_bench::flush_cost_us<ClientBenchmarkHooks>(arg.use_gpu_timer,
                                                                       deviceProps,
                                                                       event_gpu_time_start,
@@ -6746,7 +6778,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         }),
                     timingAbort);
             }
-            else
+            else if(!useSharedTuningSession)
             {
                 // One launch of candidate sol on rotation block i % block_count, cold or timed.
                 auto launchMatmul = [&](size_t sol, int64_t i) {
@@ -6791,6 +6823,68 @@ void testing_matmul_with_bias(const Arguments& arg,
                             EXPECT_HIPBLAS_STATUS(launchMatmul(sol, i), HIPBLAS_STATUS_SUCCESS);
                         }),
                     timingAbort);
+            }
+            else
+            {
+                std::vector<hipblaslt_bench::GemmTuningBlock> buffers;
+                for(int32_t b = 0; b < block_count; ++b)
+                {
+                    buffers.push_back(
+                        {dA[0].as<char>() + b * size_dA[0] * realDataTypeSize(TiA),
+                         dB[0].as<char>() + b * size_dB[0] * realDataTypeSize(TiB),
+                         dC[0].as<char>() + b * size_C[0] * realDataTypeSize(To),
+                         (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To)});
+                }
+                hipblaslt_bench::GemmTuningConfig config;
+                config.timing              = timingCfg;
+                config.search              = searchCfg;
+                config.supplied_candidates = true;
+                for(auto& candidate : heuristicResult)
+                    config.indexes.push_back(hipblaslt_ext::getIndexFromAlgo(candidate.algo));
+                hipblaslt_bench::GemmTuningCallbacks callbacks;
+                callbacks.failed = [&](size_t) {
+                    cotenant.reset();
+                    ClientBenchmarkHooks::check(
+                        hipErrorUnknown, "GEMM tuning candidate", __FILE__, __LINE__);
+                };
+                callbacks.prepared = [&](size_t sol) {
+                    prepareCandidate(sol);
+                    startCotenant();
+                };
+                callbacks.cold = [&](size_t, int32_t i) {
+                    if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
+                        copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                };
+                callbacks.skipped   = skipped;
+                callbacks.measuring = measuring;
+                callbacks.measured  = [&](size_t sol, hipblaslt_bench::TimingResult& timing) {
+                    measured(sol, timing);
+                    return !timingAbort();
+                };
+                callbacks.should_abort = timingAbort;
+                hipblaslt_bench::GemmTuningResult session;
+                hipblaslt_bench::run_gemm_tuning(handle,
+                                                 matmul[0][0],
+                                                 matA[0],
+                                                 matB[0],
+                                                 matC[0],
+                                                 matD[0],
+                                                 alpha_ptr,
+                                                 beta_ptr,
+                                                 buffers,
+                                                 *dWorkspace,
+                                                 workspace_size,
+                                                 stream,
+                                                 config,
+                                                 callbacks,
+                                                 session);
+                search = session.search;
+                if(session.setup_failed || session.enumeration_failed)
+                {
+                    search.aborted = true;
+                    ClientBenchmarkHooks::check(
+                        hipErrorUnknown, "GEMM tuning session setup", __FILE__, __LINE__);
+                }
             }
         }
         else

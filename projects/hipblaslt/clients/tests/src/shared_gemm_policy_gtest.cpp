@@ -6,8 +6,11 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt_benchmark/candidate_policy.hpp>
 #include <hipblaslt_benchmark/gemm_rotation.hpp>
+#include <hipblaslt_benchmark/gemm_tuning.hpp>
 
 #include <array>
+#include <cstring>
+#include <stdexcept>
 #include <vector>
 
 extern "C" size_t hipblaslt_tuning_candidates_for_test(
@@ -199,4 +202,235 @@ TEST(SharedGemmPolicy_pre_checkin, PublicHeuristicAndRuntimeUseSameCandidates)
     }
     if(expected.empty())
         GTEST_SKIP() << "No fp16 NN algorithm available";
+}
+
+TEST(SharedGemmPolicy_pre_checkin, SessionRotatesMeasuresAndPreservesReplay)
+{
+    using namespace hipblaslt_bench;
+    int devices = 0;
+    if(hipGetDeviceCount(&devices) != hipSuccess || devices == 0)
+        GTEST_SKIP() << "No GPU available";
+    constexpr int    dimension      = 128;
+    constexpr size_t elements       = dimension * dimension;
+    constexpr size_t bytes          = elements * sizeof(uint16_t);
+    constexpr size_t workspaceBytes = size_t(32) << 20;
+    struct Resources
+    {
+        hipblasLtHandle_t       handle    = nullptr;
+        hipblasLtMatmulDesc_t   desc      = nullptr;
+        hipblasLtMatrixLayout_t layout    = nullptr;
+        hipStream_t             stream    = nullptr;
+        void*                   tensors   = nullptr;
+        void*                   workspace = nullptr;
+        ~Resources()
+        {
+            if(stream)
+                hipStreamSynchronize(stream);
+            if(workspace)
+                hipFree(workspace);
+            if(tensors)
+                hipFree(tensors);
+            if(layout)
+                hipblasLtMatrixLayoutDestroy(layout);
+            if(desc)
+                hipblasLtMatmulDescDestroy(desc);
+            if(handle)
+                hipblasLtDestroy(handle);
+            if(stream)
+                hipStreamDestroy(stream);
+        }
+    } r;
+    ASSERT_EQ(hipblasLtCreate(&r.handle), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtMatmulDescCreate(&r.desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layout, HIP_R_16F, dimension, dimension, dimension),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipStreamCreate(&r.stream), hipSuccess);
+    ASSERT_EQ(hipMalloc(&r.tensors, bytes * 8), hipSuccess);
+    ASSERT_EQ(hipMalloc(&r.workspace, workspaceBytes), hipSuccess);
+    auto pointer = [&](int tensor) { return static_cast<char*>(r.tensors) + tensor * bytes; };
+    std::vector<GemmTuningBlock> blocks;
+    for(int b = 0; b < 2; ++b)
+    {
+        blocks.push_back(
+            {pointer(4 * b), pointer(4 * b + 1), pointer(4 * b + 2), pointer(4 * b + 3)});
+        for(int tensor = 0; tensor < 3; ++tensor)
+        {
+            // Distinct products expose a session that repeatedly launches only block zero.
+            const uint16_t value = tensor == 2 ? 0x4200 : tensor == 0 && b == 1 ? 0x4000 : 0x3c00;
+            std::vector<uint16_t> input(elements, value);
+            ASSERT_EQ(
+                hipMemcpy(pointer(4 * b + tensor), input.data(), bytes, hipMemcpyHostToDevice),
+                hipSuccess);
+        }
+    }
+    const float alpha = 1, beta = 1;
+    auto        run = [&](const GemmTuningConfig&    config,
+                   const GemmTuningCallbacks& callbacks,
+                   GemmTuningResult&          result) {
+        run_gemm_tuning(r.handle,
+                        r.desc,
+                        r.layout,
+                        r.layout,
+                        r.layout,
+                        r.layout,
+                        &alpha,
+                        &beta,
+                        blocks,
+                        r.workspace,
+                        workspaceBytes,
+                        r.stream,
+                        config,
+                        callbacks,
+                        result);
+    };
+    auto verify = [&] {
+        for(int b = 0; b < 2; ++b)
+        {
+            std::vector<uint16_t> output(elements);
+            ASSERT_EQ(hipMemcpy(output.data(), blocks[b].d, bytes, hipMemcpyDeviceToHost),
+                      hipSuccess);
+            const _Float16 expected = static_cast<_Float16>(dimension * (b + 1) + 3);
+            uint16_t       bits;
+            std::memcpy(&bits, &expected, sizeof(bits));
+            for(auto value : output)
+                ASSERT_EQ(value, bits) << "rotation block " << b;
+        }
+    };
+    for(bool exhaustive : {false, true})
+    {
+        for(bool gpuTimer : {false, true})
+        {
+            GemmTuningConfig config;
+            config.candidates           = {exhaustive, 2, -1};
+            config.search.cold_calls    = 2;
+            config.timing.iters         = 2;
+            config.timing.use_gpu_timer = gpuTimer;
+            std::vector<hipblasLtMatmulHeuristicResult_t> expected;
+            ASSERT_TRUE(gemm_tuning_candidates(r.handle,
+                                               r.desc,
+                                               r.layout,
+                                               r.layout,
+                                               r.layout,
+                                               r.layout,
+                                               &alpha,
+                                               &beta,
+                                               blocks[0],
+                                               workspaceBytes,
+                                               config.candidates,
+                                               expected));
+            if(expected.size() < 2)
+                GTEST_SKIP() << "Two supported fp16 NN algorithms required";
+            GemmTuningCallbacks callbacks;
+            std::vector<size_t> visited;
+            callbacks.prepared = [&](size_t c) { visited.push_back(c); };
+            GemmTuningResult result;
+            run(config, callbacks, result);
+            ASSERT_FALSE(result.setup_failed);
+            ASSERT_FALSE(result.enumeration_failed);
+            ASSERT_FALSE(result.search.aborted);
+            EXPECT_EQ(result.attempted, 2u);
+            EXPECT_EQ(result.measured, 2u);
+            EXPECT_EQ(visited, (std::vector<size_t>{0, 1}));
+            ASSERT_LT(result.search.best, 2u);
+            const size_t best
+                = result.measurements[1].median_us < result.measurements[0].median_us ? 1 : 0;
+            EXPECT_EQ(result.search.best, best);
+            for(size_t i = 0; i < expected.size(); ++i)
+            {
+                EXPECT_EQ(result.indexes[i], hipblaslt_ext::getIndexFromAlgo(expected[i].algo));
+                EXPECT_EQ(result.workspace[i], expected[i].workspaceSize);
+                EXPECT_EQ(result.measurements[i].hot_iters, 2);
+            }
+            verify();
+
+            callbacks.should_stop = [&] { return result.measured == 1; };
+            run(config, callbacks, result);
+            EXPECT_TRUE(result.search.stopped);
+            EXPECT_EQ(result.measured, 1u);
+            EXPECT_EQ(result.search.best, 0u);
+            callbacks.should_stop = {};
+            callbacks.measured    = [](size_t c, TimingResult&) { return c == 1; };
+            run(config, callbacks, result);
+            EXPECT_EQ(result.measured, 2u);
+            EXPECT_EQ(result.search.best, 1u);
+
+            config.supplied_candidates = true;
+            config.indexes             = {-1, hipblaslt_ext::getIndexFromAlgo(expected[0].algo)};
+            std::vector<size_t> failures;
+            callbacks.failed = [&](size_t c) { failures.push_back(c); };
+            run(config, callbacks, result);
+            EXPECT_EQ(failures, (std::vector<size_t>{0}));
+            EXPECT_EQ(result.attempted, 2u);
+            EXPECT_EQ(result.measured, 1u);
+            EXPECT_EQ(result.search.best, 1u);
+            verify();
+
+            config.indexes                 = {hipblaslt_ext::getIndexFromAlgo(expected[0].algo)};
+            config.timing.adaptive         = true;
+            config.timing.warmup_time      = 0.1f;
+            config.timing.sample_time      = 0.1f;
+            config.timing.measure_time     = 0.2f;
+            config.timing.max_measure_time = 1.0f;
+            config.timing.min_iters        = 2;
+            config.timing.max_iters        = 128;
+            callbacks                      = {};
+            run(config, callbacks, result);
+            ASSERT_EQ(result.measured, 1u);
+            EXPECT_EQ(result.search.best, 0u);
+            EXPECT_TRUE(result.search.best_timing.adaptive);
+            EXPECT_GE(result.search.best_timing.hot_iters, 2);
+            verify();
+
+            bool abort             = false;
+            callbacks.cold         = [&](size_t, int32_t) { abort = true; };
+            callbacks.should_abort = [&] { return abort; };
+            run(config, callbacks, result);
+            EXPECT_TRUE(result.search.aborted);
+            EXPECT_EQ(result.measured, 0u);
+            EXPECT_EQ(hipStreamQuery(r.stream), hipSuccess);
+            callbacks = {};
+
+            callbacks.cold
+                = [&](size_t, int32_t) { throw std::runtime_error("consumer callback failed"); };
+            EXPECT_THROW(run(config, callbacks, result), std::runtime_error);
+            EXPECT_EQ(hipStreamQuery(r.stream), hipSuccess);
+            verify();
+
+            // A session must leave the descriptor usable by the public launch path.
+            ASSERT_EQ(hipMemset(blocks[0].d, 0, bytes), hipSuccess);
+            ASSERT_EQ(hipblasLtMatmul(r.handle,
+                                      r.desc,
+                                      &alpha,
+                                      blocks[0].a,
+                                      r.layout,
+                                      blocks[0].b,
+                                      r.layout,
+                                      &beta,
+                                      blocks[0].c,
+                                      r.layout,
+                                      blocks[0].d,
+                                      r.layout,
+                                      &expected[0].algo,
+                                      r.workspace,
+                                      workspaceBytes,
+                                      r.stream),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipStreamSynchronize(r.stream), hipSuccess);
+            verify();
+        }
+    }
+    GemmTuningConfig empty;
+    empty.supplied_candidates = true;
+    GemmTuningResult result;
+    run(empty, {}, result);
+    EXPECT_TRUE(result.enumeration_failed);
+    EXPECT_EQ(result.attempted, 0u);
+    empty.supplied_candidates = false;
+    empty.candidates          = {false, 2, -1};
+    GemmTuningCallbacks canceled;
+    canceled.enumerated = [](const std::vector<int>&) { return false; };
+    run(empty, canceled, result);
+    EXPECT_TRUE(result.enumeration_failed);
+    EXPECT_EQ(result.attempted, 0u);
 }

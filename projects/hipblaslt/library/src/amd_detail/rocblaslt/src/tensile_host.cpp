@@ -89,6 +89,7 @@
 #include <hipblaslt_benchmark/candidate_policy.hpp>
 #include <hipblaslt_benchmark/candidate_search.hpp>
 #include <hipblaslt_benchmark/gemm_rotation.hpp>
+#include <hipblaslt_benchmark/gemm_tuning.hpp>
 
 #define HIPBLASLT_LIB_PATH "/opt/rocm/lib"
 
@@ -4230,7 +4231,6 @@ namespace
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>&
                                                 library,
         std::shared_ptr<TensileLite::Hardware>& hardware,
-        TensileLite::hip::SolutionAdapter*      adapter,
         int                                     baselineIndex,
         TensileLite::TunedEntry&                winnerOut,
         int&                                    winnerIndexOut)
@@ -4340,12 +4340,6 @@ namespace
         if(inPlace)
             scratchProb.C = scratchProb.D;
 
-        auto resetSynchronizer = [&] {
-            return hipMemsetAsync(
-                       bytes + layout.offsetSynchronizer, 0, kSynchronizerBytes, prob.stream)
-                   == hipSuccess;
-        };
-
         // Zero the whole buffer before anything reads it.
         //
         // Scratch comes from a raw hipMalloc, and not every span in it gets
@@ -4413,212 +4407,58 @@ namespace
             }
         }
 
-        std::vector<rocblaslt_matmul_heuristic_result> selected;
-        if(getGemmCandidates(prob,
-                             handle,
-                             gemmData,
-                             TuningPolicy::allKernels(),
-                             TuningPolicy::allKernels() ? 0 : TuningPolicy::candidateCap(),
-                             baselineIndex,
-                             prob.workspaceSize,
-                             selected)
-               != rocblaslt_status_success
-           || tuningFailureInjected(TuningFailureStage::Enumeration))
-            return TuningAttempt::FallbackEnumeration;
-
-        std::vector<std::shared_ptr<TensileLite::ContractionSolution>> candidates;
-        candidates.reserve(selected.size());
-        for(const auto& result : selected)
-            if(auto solution = library->getSolutionByIndex(*hardware, *(int*)result.algo.data))
-                candidates.push_back(std::move(solution));
-
-        if(candidates.empty())
-            return TuningAttempt::FallbackEnumeration;
-
-        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        std::vector<RocblasltContractionProblem> problemBlocks;
+        for(size_t b = 0; b < blocks; ++b)
         {
-            std::ostringstream msg;
-            msg << "tuning-cache: setup candidates=" << candidates.size()
-                << (TuningPolicy::allKernels() ? " (all kernels)" : " (ranked with fallback)")
-                << " baseline=" << baselineIndex << " scratch=" << layout.total
-                << "B blocks=" << blocks << " workspace=" << prob.workspaceSize << "B";
-            log_info(__func__, msg.str());
+            auto block = scratchProb;
+            block.D    = bytes + layout.offsetD + b * layout.strideD;
+            if(layout.bytesE)
+                block.E = bytes + layout.offsetE + b * layout.strideE;
+            if(layout.bytesBias)
+                block.bias = bytes + layout.offsetBias + b * layout.strideBias;
+            if(inPlace)
+                block.C = block.D;
+            if(blocks > 1)
+            {
+                block.A = bytes + layout.offsetA + b * layout.strideA;
+                block.B = bytes + layout.offsetB + b * layout.strideB;
+                if(!inPlace && layout.bytesC)
+                    block.C = bytes + layout.offsetC + b * layout.strideC;
+            }
+            problemBlocks.push_back(block);
         }
-
-        std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-
-        // Release both events on every exit, including exceptions from lazy libraries.
-        struct EventPair
-        {
-            hipEvent_t start = nullptr;
-            hipEvent_t stop  = nullptr;
-
-            ~EventPair()
-            {
-                if(start)
-                    static_cast<void>(hipEventDestroy(start));
-                if(stop)
-                    static_cast<void>(hipEventDestroy(stop));
-            }
-        } events;
-
-        if(hipEventCreate(&events.start) != hipSuccess
-           || hipEventCreate(&events.stop) != hipSuccess)
-            return TuningAttempt::FallbackSetup;
-
-        // hipblaslt-bench's measurement, from the same code: per candidate the cold
-        // launches, then one timed batch of hot launches with the instruction cache
-        // flushed after each and the flush's per-device cost taken back out, the
-        // lowest time winning. Tune mode times on HIP events.
-        hipblaslt_bench::TimingConfig timing;
-        timing.iters         = TuningPolicy::hotIterations();
-        timing.use_gpu_timer = true;
-
-        hipblaslt_bench::SearchConfig search;
-        search.cold_calls = TuningPolicy::coldIterations();
-        search.flush      = TuningPolicy::flushICache();
-
-        hipStream_t stream = prob.stream;
-        if(search.flush)
-        {
-            int             device = 0;
-            hipDeviceProp_t props{};
-            if(hipGetDevice(&device) != hipSuccess
-               || hipGetDeviceProperties(&props, device) != hipSuccess)
-                return TuningAttempt::FallbackSetup;
-
-            search.flush_grid = hipblaslt_bench::flush_icache_grid(props);
-            if(!hipblaslt_bench::flush_cost_us(
-                   timing.use_gpu_timer, props, events.start, events.stop, stream, timing.flush_us))
-            {
-                static_cast<void>(hipGetLastError());
-                return TuningAttempt::FallbackSetup;
-            }
-
+        hipblaslt_bench::GemmTuningConfig config;
+        config.candidates           = {TuningPolicy::allKernels(),
+                             TuningPolicy::allKernels() ? 0u : size_t(TuningPolicy::candidateCap()),
+                                       baselineIndex};
+        config.timing.iters         = TuningPolicy::hotIterations();
+        config.timing.use_gpu_timer = true;
+        config.search.cold_calls    = TuningPolicy::coldIterations();
+        config.search.flush         = TuningPolicy::flushICache();
+        hipblaslt_bench::GemmTuningResult    session;
+        hipblaslt_bench::GemmTuningCallbacks callbacks;
+        callbacks.enumerated = [&](const std::vector<int>& indexes) {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
             {
                 std::ostringstream msg;
-                msg << "tuning-cache: icache flush enabled, " << timing.flush_us
-                    << " us per launch";
+                msg << "tuning-cache: setup candidates=" << indexes.size()
+                    << (config.candidates.exhaustive ? " (all kernels)" : " (ranked with fallback)")
+                    << " baseline=" << baselineIndex << " scratch=" << layout.total
+                    << "B blocks=" << blocks << " workspace=" << prob.workspaceSize << "B";
                 log_info(__func__, msg.str());
             }
-        }
-
-        // The candidate being measured: one kernel set per rotation block. Only
-        // the buffer pointers differ, so the problem description built by
-        // isSolutionSupported is shared; solve() bakes the pointers from inputs
-        // into the invocation, which is why each block needs its own set rather
-        // than one set relaunched.
-        std::vector<std::vector<TensileLite::KernelInvocation>> perBlock;
-        size_t                                                  required     = 0;
-        bool                                                    launchFailed = false;
-
-        std::vector<double> measuredUs(candidates.size(), -1.0);
-        std::vector<size_t> requiredBytes(candidates.size(), 0);
-        size_t              measured  = 0;
-        size_t              attempted = 0;
-
-        auto discardCandidate = [&] {
-            static_cast<void>(hipStreamSynchronize(prob.stream));
-
-            // Clear any sticky async error so it cannot be attributed to the
-            // caller's real launch further down.
-            static_cast<void>(hipGetLastError());
+            return !tuningFailureInjected(TuningFailureStage::Enumeration);
         };
-
-        // Opened as a candidate's timed phase starts and closed by recordMeasurement.
-        // One still open later could not be timed, and the search passed it over
-        // without recording it.
-        bool timedPhaseOpen      = false;
-        auto discardUntimedPhase = [&] {
-            if(timedPhaseOpen)
+        callbacks.calibrated = [&](double cost) {
+            if(config.search.flush && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
             {
-                timedPhaseOpen = false;
-                discardCandidate();
+                std::ostringstream msg;
+                msg << "tuning-cache: icache flush enabled, " << cost << " us per launch";
+                log_info(__func__, msg.str());
             }
         };
-
-        auto prepare = [&](size_t c) -> bool {
-            discardUntimedPhase();
-            attempted++;
-            perBlock.clear();
-            required     = 0;
-            launchFailed = false;
-
-            const auto& solution = candidates[c];
-            try
-            {
-                static_cast<void>(resetSynchronizer());
-
-                rocblaslt_matmul_algo algo{};
-                *(int*)algo.data         = solution->index;
-                algo.max_workspace_bytes = prob.workspaceSize;
-
-                // Inside the guard, not before it. isSolutionSupported resolves
-                // and predicate-checks the candidate, and a lazily materialised
-                // library can throw while doing so. Checking outside meant one
-                // bad candidate aborted the whole search rather than being
-                // skipped, which on the default exhaustive path threw away
-                // every remaining candidate for that shape.
-                if(rocblaslt_status_success
-                       == isSolutionSupported(handle, scratchProb, gemmData, &algo, &required)
-                   && required <= prob.workspaceSize)
-                {
-                    perBlock.reserve(blocks);
-                    for(size_t b = 0; b < blocks; b++)
-                    {
-                        RocblasltContractionProblem blockProb = scratchProb;
-                        blockProb.D = bytes + layout.offsetD + b * layout.strideD;
-                        if(layout.bytesE)
-                            blockProb.E = bytes + layout.offsetE + b * layout.strideE;
-                        if(layout.bytesBias)
-                            blockProb.bias = bytes + layout.offsetBias + b * layout.strideBias;
-                        if(inPlace)
-                            blockProb.C = blockProb.D;
-                        if(blocks > 1)
-                        {
-                            blockProb.A = bytes + layout.offsetA + b * layout.strideA;
-                            blockProb.B = bytes + layout.offsetB + b * layout.strideB;
-                            if(!inPlace && layout.bytesC != 0)
-                                blockProb.C = bytes + layout.offsetC + b * layout.strideC;
-                        }
-
-                        auto inputs = GetTensileInputs(blockProb);
-                        perBlock.push_back(solution->solve(data->problem, inputs, *hardware));
-                    }
-                    return true;
-                }
-            }
-            catch(...)
-            {
-                // solve() can throw. One bad candidate must not fail the call.
-            }
-            discardCandidate();
-            return false;
-        };
-
-        // Launch i of a phase uses block i, as hipblaslt-bench's launches do.
-        auto launchBlock = [&](int64_t i) {
-            if(!launchFailed
-               && adapter->launchKernels(
-                      perBlock[static_cast<size_t>(i) % perBlock.size()], stream, nullptr, nullptr)
-                      != hipSuccess)
-                launchFailed = true;
-        };
-
-        auto recordMeasurement = [&](size_t c, hipblaslt_bench::TimingResult& result) -> bool {
-            timedPhaseOpen = false;
-            if(launchFailed)
-            {
-                discardCandidate();
-                return false;
-            }
-
-            measured++;
-            measuredUs[c]    = result.median_us;
-            requiredBytes[c] = required;
-
-            if(measured == 1 && tuningFailureInjected(TuningFailureStage::MidSearch))
+        callbacks.measured = [&](size_t, hipblaslt_bench::TimingResult&) {
+            if(session.measured == 1 && tuningFailureInjected(TuningFailureStage::MidSearch))
                 throw std::runtime_error("tuning failure injected for a test");
             return true;
         };
@@ -4631,16 +4471,17 @@ namespace
         const double progressEveryUs = 10.0 * 1000.0 * 1000.0;
         double       nextProgressUs  = progressEveryUs;
 
-        auto shouldStop = [&] {
+        callbacks.should_stop = [&] {
             if(outOfBudget()
-               || (measured > 0 && tuningFailureInjected(TuningFailureStage::TruncateAfterFirst)))
+               || (session.measured > 0
+                   && tuningFailureInjected(TuningFailureStage::TruncateAfterFirst)))
                 return true;
 
             if(wantProgress && elapsedUs() >= nextProgressUs)
             {
                 std::ostringstream msg;
-                msg << "tuning-cache: progress attempted=" << attempted << " measured=" << measured
-                    << " total=" << candidates.size()
+                msg << "tuning-cache: progress attempted=" << session.attempted
+                    << " measured=" << session.measured << " total=" << session.indexes.size()
                     << " elapsed=" << static_cast<long long>(elapsedUs() / 1.0e6) << "s";
                 log_info(__func__, msg.str());
 
@@ -4652,31 +4493,18 @@ namespace
             return false;
         };
 
-        // One pass, every candidate measured the same way. There is no cheap
-        // ranking round to drop a candidate before it has been measured
-        // properly, which is what a shortlist did: on a large shape the eventual
-        // winner screened 396th of 1025 and never reached the decision round.
-        const auto found = hipblaslt_bench::search_candidates(
-            candidates.size(),
-            search,
-            timing,
-            events.start,
-            events.stop,
-            stream,
-            hipblaslt_bench::search_callbacks()
-                .prepare(prepare)
-                .cold([&](size_t, int32_t i) { launchBlock(i); })
-                .launch([&](size_t, int64_t i) { launchBlock(i); })
-                .measuring([&](size_t) { timedPhaseOpen = true; })
-                .measured(recordMeasurement)
-                .should_stop(shouldStop));
-        discardUntimedPhase();
+        runGemmTuningSession(handle, problemBlocks, gemmData, config, callbacks, session);
+        if(session.setup_failed)
+            return TuningAttempt::FallbackSetup;
+        if(session.enumeration_failed)
+            return TuningAttempt::FallbackEnumeration;
+        const auto& found = session.search;
 
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
         {
             std::ostringstream msg;
-            msg << "tuning-cache: measured attempted=" << attempted << " measured=" << measured
-                << " total=" << candidates.size()
+            msg << "tuning-cache: measured attempted=" << session.attempted
+                << " measured=" << session.measured << " total=" << session.indexes.size()
                 << " elapsed_ms=" << static_cast<long long>(elapsedUs() / 1000.0);
             log_info(__func__, msg.str());
         }
@@ -4689,36 +4517,241 @@ namespace
             TensileLite::TuningCounters::instance().skipped++;
             return TuningAttempt::SkippedBudget;
         }
-        if(found.best >= candidates.size())
+        if(found.best >= session.indexes.size())
             return TuningAttempt::FallbackNoWinner;
 
         // Clamped because a kernel faster than the flush's own jitter can read at
         // or below zero, and a row records a positive time.
         auto recordedUs = [](double us) { return std::max(1e-3, us); };
 
-        for(size_t c = 0; c < candidates.size(); c++)
-            if(candidates[c]->index == baselineIndex && measuredUs[c] >= 0.0)
-                winnerOut.baselineTimeUs = recordedUs(measuredUs[c]);
+        for(size_t c = 0; c < session.indexes.size(); ++c)
+            if(session.indexes[c] == baselineIndex && session.measurements[c].hot_iters > 0)
+                winnerOut.baselineTimeUs = recordedUs(session.measurements[c].median_us);
 
-        const auto& winner               = candidates[found.best];
-        winnerOut.solutionIndex          = winner->index;
-        winnerOut.requiredWorkspaceBytes = requiredBytes[found.best];
-        winnerOut.winnerTimeUs           = recordedUs(measuredUs[found.best]);
+        const int winner                 = session.indexes[found.best];
+        winnerOut.solutionIndex          = winner;
+        winnerOut.requiredWorkspaceBytes = session.workspace[found.best];
+        winnerOut.winnerTimeUs           = recordedUs(found.best_timing.median_us);
         winnerOut.baselineIndex          = baselineIndex;
-
-        // From the measured object, which candidate resolution above guarantees
-        // is the one getSolutionByIndex returns for this index, so the name
-        // written here is the name replay will compare against via
-        // getKernelNameFromAlgoIndex.
-        winnerOut.kernelName = winner->kernelName;
+        winnerOut.kernelName = library->getSolutionByIndex(*hardware, winner)->kernelName;
 
         // This records an entry even when the winner is the default pick: it
         // says the shape was measured, so tune mode does not benchmark it again
         // on every process start.
-        winnerIndexOut = winner->index;
+        winnerIndexOut = winner;
         return TuningAttempt::Tuned;
     }
 } // namespace
+
+void runGemmTuningSession(rocblaslt_handle                                handle,
+                          const std::vector<RocblasltContractionProblem>& blocks,
+                          std::shared_ptr<void>                           gemmData,
+                          const hipblaslt_bench::GemmTuningConfig&        config,
+                          const hipblaslt_bench::GemmTuningCallbacks&     callbacks,
+                          hipblaslt_bench::GemmTuningResult&              result)
+{
+    using namespace hipblaslt_bench;
+    result = {};
+    if(blocks.empty())
+    {
+        result.setup_failed = true;
+        return;
+    }
+    const auto& prob = blocks.front();
+    struct Drain
+    {
+        hipStream_t stream;
+        ~Drain()
+        {
+            static_cast<void>(hipStreamSynchronize(stream));
+            static_cast<void>(hipGetLastError());
+        }
+    };
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       props;
+    std::shared_ptr<TensileLite::Hardware> hardware;
+    auto adapter = get_library_and_adapter(&library, &props, &hardware, handle->device);
+    if(!library || !hardware || !props || !adapter)
+    {
+        result.setup_failed = true;
+        return;
+    }
+    std::vector<std::vector<TensileLite::KernelInvocation>> invocations;
+    Drain                                                   drain{prob.stream};
+    auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+    struct Restore
+    {
+        TensileDataGemm&                    data;
+        TensileLite::ContractionProblemGemm problem;
+        ~Restore()
+        {
+            data.problem = std::move(problem);
+        }
+    } restore{*data, data->problem};
+
+    if(config.supplied_candidates)
+        result.indexes = config.indexes;
+    else
+    {
+        std::vector<rocblaslt_matmul_heuristic_result> candidates;
+        if(getGemmCandidates(prob,
+                             handle,
+                             gemmData,
+                             config.candidates.exhaustive,
+                             config.candidates.limit,
+                             config.candidates.baseline,
+                             prob.workspaceSize,
+                             candidates)
+           != rocblaslt_status_success)
+            result.enumeration_failed = true;
+        for(const auto& candidate : candidates)
+            result.indexes.push_back(*(const int*)candidate.algo.data);
+    }
+    if(result.indexes.empty())
+    {
+        result.enumeration_failed = true;
+        return;
+    }
+    if(callbacks.enumerated && !callbacks.enumerated(result.indexes))
+        result.enumeration_failed = true;
+    if(result.enumeration_failed)
+        return;
+    result.workspace.resize(result.indexes.size());
+    result.measurements.resize(result.indexes.size());
+
+    struct Events
+    {
+        hipEvent_t start = nullptr, stop = nullptr;
+        ~Events()
+        {
+            if(start)
+                static_cast<void>(hipEventDestroy(start));
+            if(stop)
+                static_cast<void>(hipEventDestroy(stop));
+        }
+    } events;
+    auto timing = config.timing;
+    auto search = config.search;
+    if(hipEventCreate(&events.start) != hipSuccess || hipEventCreate(&events.stop) != hipSuccess
+       || (search.flush
+           && !flush_cost_us(timing.use_gpu_timer,
+                             *props,
+                             events.start,
+                             events.stop,
+                             prob.stream,
+                             timing.flush_us)))
+    {
+        result.setup_failed = true;
+        return;
+    }
+    search.flush_grid = flush_icache_grid(*props);
+    if(callbacks.calibrated)
+        callbacks.calibrated(timing.flush_us);
+    std::optional<size_t> pending_candidate;
+    size_t                required      = 0;
+    bool                  launch_failed = false;
+    auto                  discard       = [&] {
+        static_cast<void>(hipStreamSynchronize(prob.stream));
+        static_cast<void>(hipGetLastError());
+    };
+    auto failed = [&](size_t c) {
+        discard();
+        if(callbacks.failed)
+            callbacks.failed(c);
+        return false;
+    };
+    auto prepare = [&](size_t c) {
+        if(pending_candidate)
+        {
+            failed(*pending_candidate);
+            pending_candidate.reset();
+        }
+        discard();
+        ++result.attempted;
+        invocations.clear();
+        launch_failed  = false;
+        required       = 0;
+        bool supported = false;
+        try
+        {
+            auto solution = library->getSolutionByIndex(*hardware, result.indexes[c]);
+            auto probe    = prob;
+            rocblaslt_matmul_algo algo{};
+            *(int*)algo.data         = result.indexes[c];
+            algo.max_workspace_bytes = prob.workspaceSize;
+            supported                = solution
+                        && isSolutionSupported(handle, probe, gemmData, &algo, &required)
+                               == rocblaslt_status_success
+                        && required <= prob.workspaceSize;
+            if(supported && prob.Synchronizer)
+                supported = hipMemsetAsync(prob.Synchronizer, 0, kSynchronizerBytes, prob.stream)
+                            == hipSuccess;
+            if(supported)
+                for(const auto& block : blocks)
+                    invocations.push_back(
+                        solution->solve(data->problem, GetTensileInputs(block), *hardware));
+        }
+        catch(...)
+        {
+            supported = false;
+        }
+        if(!supported)
+            return failed(c);
+        pending_candidate = c;
+        if(callbacks.prepared)
+            callbacks.prepared(c);
+        return true;
+    };
+    auto launch = [&](int64_t i) {
+        if(!launch_failed
+           && adapter->launchKernels(
+                  invocations[size_t(i) % invocations.size()], prob.stream, nullptr, nullptr)
+                  != hipSuccess)
+            launch_failed = true;
+    };
+    result.search = search_candidates(
+        result.indexes.size(),
+        search,
+        timing,
+        events.start,
+        events.stop,
+        prob.stream,
+        search_callbacks()
+            .prepare(prepare)
+            .cold([&](size_t c, int32_t i) {
+                launch(i);
+                if(!launch_failed && callbacks.cold)
+                    callbacks.cold(c, i);
+            })
+            .launch([&](size_t, int64_t i) { launch(i); })
+            .skipped([&](size_t c, double warm, double best) {
+                pending_candidate.reset();
+                if(callbacks.skipped)
+                    callbacks.skipped(c, warm, best);
+            })
+            .measuring([&](size_t c) {
+                if(callbacks.measuring)
+                    callbacks.measuring(c);
+            })
+            .measured([&](size_t c, TimingResult& measurement) {
+                pending_candidate.reset();
+                if(launch_failed)
+                    return failed(c);
+                ++result.measured;
+                const bool eligible = !callbacks.measured || callbacks.measured(c, measurement);
+                if(eligible)
+                {
+                    result.workspace[c]    = required;
+                    result.measurements[c] = measurement;
+                }
+                return eligible;
+            })
+            .should_stop([&] { return callbacks.should_stop && callbacks.should_stop(); }),
+        callbacks.should_abort);
+    if(pending_candidate)
+        failed(*pending_candidate);
+}
 
 size_t tuningTensorSpanForTest(size_t elementSize,
                                size_t rows,
@@ -5066,7 +5099,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                                        gemmData,
                                                        library,
                                                        hardware,
-                                                       adapter,
                                                        untunedIndex,
                                                        winner,
                                                        tunedIndex);

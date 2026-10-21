@@ -50,6 +50,7 @@
 #include "rocroller_host.hpp"
 #include "tensile_host.hpp"
 #include "utility.hpp"
+#include <hipblaslt_benchmark/gemm_tuning.hpp>
 
 #include <Tensile/Debug.hpp>
 
@@ -3259,6 +3260,107 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_scratch_plan_for_test(void* 
     prob.D            = D;
     return tuningScratchPlanForTest(
         prob, rotatingBytes, capBytes, coldIters, hotIters, values, count);
+}
+
+bool hipblaslt_bench::gemm_tuning_candidates(hipblasLtHandle_t       handle,
+                                             hipblasLtMatmulDesc_t   descriptor,
+                                             hipblasLtMatrixLayout_t a,
+                                             hipblasLtMatrixLayout_t b,
+                                             hipblasLtMatrixLayout_t c,
+                                             hipblasLtMatrixLayout_t d,
+                                             const void*             alpha,
+                                             const void*             beta,
+                                             const GemmTuningBlock&  block,
+                                             size_t                  workspace_bytes,
+                                             const CandidatePolicy&  policy,
+                                             std::vector<hipblasLtMatmulHeuristicResult_t>& results)
+{
+    auto internalHandle = reinterpret_cast<rocblaslt_handle>(handle);
+    auto matmul         = reinterpret_cast<rocblaslt_matmul_desc>(descriptor);
+    auto problem        = construct_rocblaslt_problem(internalHandle,
+                                               matmul,
+                                               reinterpret_cast<rocblaslt_matrix_layout>(a),
+                                               reinterpret_cast<rocblaslt_matrix_layout>(b),
+                                               reinterpret_cast<rocblaslt_matrix_layout>(c),
+                                               reinterpret_cast<rocblaslt_matrix_layout>(d),
+                                               alpha,
+                                               beta,
+                                               workspace_bytes);
+    problem.A           = block.a;
+    problem.B           = block.b;
+    problem.C           = block.c;
+    problem.D           = block.d;
+    std::vector<rocblaslt_matmul_heuristic_result> candidates;
+    const auto                                     status = getGemmCandidates(problem,
+                                          internalHandle,
+                                          matmul->m_data,
+                                          policy.exhaustive,
+                                          policy.limit,
+                                          policy.baseline,
+                                          workspace_bytes,
+                                          candidates);
+    results.clear();
+    for(const auto& candidate : candidates)
+    {
+        hipblasLtMatmulHeuristicResult_t result{};
+        static_assert(sizeof(result.algo) == sizeof(candidate.algo));
+        std::memcpy(&result.algo, &candidate.algo, sizeof(result.algo));
+        result.workspaceSize = candidate.workspaceSize;
+        result.state         = HIPBLAS_STATUS_SUCCESS;
+        results.push_back(result);
+    }
+    return status == rocblaslt_status_success;
+}
+
+void hipblaslt_bench::run_gemm_tuning(hipblasLtHandle_t                   handle,
+                                      hipblasLtMatmulDesc_t               descriptor,
+                                      hipblasLtMatrixLayout_t             a,
+                                      hipblasLtMatrixLayout_t             b,
+                                      hipblasLtMatrixLayout_t             c,
+                                      hipblasLtMatrixLayout_t             d,
+                                      const void*                         alpha,
+                                      const void*                         beta,
+                                      const std::vector<GemmTuningBlock>& buffers,
+                                      void*                               workspace,
+                                      size_t                              workspace_bytes,
+                                      hipStream_t                         stream,
+                                      const GemmTuningConfig&             config,
+                                      const GemmTuningCallbacks&          callbacks,
+                                      GemmTuningResult&                   result)
+{
+    if(buffers.empty())
+    {
+        result              = {};
+        result.setup_failed = true;
+        return;
+    }
+    std::vector<RocblasltContractionProblem> blocks;
+    for(size_t i = 0; i < buffers.size(); ++i)
+    {
+        auto matmul     = reinterpret_cast<rocblaslt_matmul_desc>(descriptor);
+        auto block      = construct_rocblaslt_problem(reinterpret_cast<rocblaslt_handle>(handle),
+                                                 matmul,
+                                                 reinterpret_cast<rocblaslt_matrix_layout>(a),
+                                                 reinterpret_cast<rocblaslt_matrix_layout>(b),
+                                                 reinterpret_cast<rocblaslt_matrix_layout>(c),
+                                                 reinterpret_cast<rocblaslt_matrix_layout>(d),
+                                                 alpha,
+                                                 beta,
+                                                 workspace_bytes);
+        block.workspace = workspace;
+        block.stream    = stream;
+        block.A         = buffers[i].a;
+        block.B         = buffers[i].b;
+        block.C         = buffers[i].c;
+        block.D         = buffers[i].d;
+        blocks.push_back(block);
+    }
+    runGemmTuningSession(reinterpret_cast<rocblaslt_handle>(handle),
+                         blocks,
+                         reinterpret_cast<rocblaslt_matmul_desc>(descriptor)->m_data,
+                         config,
+                         callbacks,
+                         result);
 }
 
 // Return the ordinary runtime candidate list without allocating or measuring scratch.
