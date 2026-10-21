@@ -226,8 +226,10 @@ same way on those shapes.
 
 By default every kernel that can run the problem is measured, not just the ones the selection
 heuristic ranks highest, because the fastest kernel is not always inside that ranked prefix. Setting
-``HIPBLASLT_TUNING_ALL_KERNELS`` to 0 restricts the search to the top ``HIPBLASLT_TUNING_MAX_CANDIDATES``
-ranked kernels instead, which is faster but can miss the best one.
+``HIPBLASLT_TUNING_ALL_KERNELS`` to 0 limits the search to ``HIPBLASLT_TUNING_MAX_CANDIDATES``
+supported kernels, including the baseline. The runtime and the C benchmark heuristic use the same
+candidate builder: ranked results come first, and a short ranked list is filled from the full
+solution list after support and workspace checks. A limited search can still miss the fastest kernel.
 
 Tuning one shape this thoroughly takes time. An exhaustive search over several hundred candidates
 takes minutes, and it is paid once per shape in the first process that runs with ``tune``.
@@ -250,7 +252,10 @@ The time ``hipblaslt-bench`` prints for a kernel is its own benchmark, separate 
 measurement, so the two can disagree between kernels that are within noise of each other. Both run
 the same measurement code, but on different buffers: the tuner rotates copies of your tensors in
 memory it owns, leaves the scale vectors and a forward bias unrotated, and rotates ``C`` even when
-``beta`` is zero. The tuner always times with HIP events; ``hipblaslt-bench`` times with HIP events
+``beta`` is zero. Ordinary unscaled single-GEMMs in the benchmark use the same tensor spans,
+C/D alias handling, alignment, and rotation block planner. Benchmark bias/scale and grouped paths
+retain their own buffer policy; runtime scratch also has a capacity limit and isolates writable
+workspace. The tuner always times with HIP events; ``hipblaslt-bench`` times with HIP events
 only with ``--use_gpu_timer`` and otherwise uses a synchronized CPU timer. Treat
 ``hipblaslt-bench``'s benchmark as the reference when a shape matters enough to check by hand.
 

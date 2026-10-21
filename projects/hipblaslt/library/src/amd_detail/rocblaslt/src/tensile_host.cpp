@@ -86,7 +86,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipblaslt_benchmark/candidate_policy.hpp>
 #include <hipblaslt_benchmark/candidate_search.hpp>
+#include <hipblaslt_benchmark/gemm_rotation.hpp>
 
 #define HIPBLASLT_LIB_PATH "/opt/rocm/lib"
 
@@ -3652,7 +3654,7 @@ namespace
         {
             return envInt("HIPBLASLT_TUNING_ALL_KERNELS", 1) != 0;
         }
-        /** Ranked-prefix size. Ignored when allKernels() is on. */
+        /** Supported candidate limit, including the baseline. Ignored in exhaustive mode. */
         static int candidateCap()
         {
             return std::max(1, envInt("HIPBLASLT_TUNING_MAX_CANDIDATES", 128));
@@ -3855,64 +3857,7 @@ namespace
         size_t              m_cap = size_t(1) << 30;
     };
 
-    /**
-     * Byte span each output tensor covers, computed from the strides actually in
-     * the problem rather than assumed to be dense.
-     *
-     * Returns 0 when the span cannot be established, which makes the caller skip
-     * tuning. Guessing here would mean handing a kernel a buffer smaller than it
-     * writes, so every uncertain case declines instead.
-     *
-     * `expanded` reports that a stride was rounded up to keep the result an
-     * upper bound, which happens for broadcast layouts such as a zero batch
-     * stride. Over-allocating scratch to write into is harmless, but the same
-     * span used as a read length against the caller's buffer runs off the end of
-     * an allocation that only ever held one batch, so rotation asks for this
-     * flag on the tensors it copies from.
-     */
-    size_t tensorSpanBytes(size_t elementSize,
-                           size_t rows,
-                           size_t cols,
-                           size_t colStride,
-                           size_t batchCount,
-                           size_t batchStride,
-                           bool*  expanded = nullptr)
-    {
-        if(expanded)
-            *expanded = false;
-
-        if(elementSize == 0 || rows == 0 || cols == 0)
-            return 0;
-
-        const size_t batches = std::max<size_t>(batchCount, 1);
-
-        // A column stride below the row count would overlap columns; treat as
-        // dense rather than under-allocating.
-        const size_t effectiveColStride = std::max(colStride, rows);
-        if(expanded && effectiveColStride != colStride)
-            *expanded = true;
-
-        // Every guard precedes the multiplication it protects. Checking after
-        // the fact reads an already-wrapped value and lets a too-small buffer
-        // through.
-        if(cols > 1 && effectiveColStride > (SIZE_MAX - rows) / (cols - 1))
-            return 0;
-
-        const size_t perBatch = effectiveColStride * (cols - 1) + rows;
-        const size_t effectiveBatchStride
-            = (batches > 1) ? std::max(batchStride, perBatch) : perBatch;
-        if(expanded && batches > 1 && effectiveBatchStride != batchStride)
-            *expanded = true;
-
-        if(batches > 1 && effectiveBatchStride > (SIZE_MAX - perBatch) / (batches - 1))
-            return 0;
-
-        const size_t elements = effectiveBatchStride * (batches - 1) + perBatch;
-        if(elements > (SIZE_MAX / elementSize))
-            return 0;
-
-        return elements * elementSize;
-    }
+    using hipblaslt_bench::tensor_span_bytes;
 
     size_t elementSizeOf(hipDataType type)
     {
@@ -3946,11 +3891,6 @@ namespace
         // caller's data and the rest are broadcast from it. blockCount is always
         // at least 1, so the unrotated case is just the degenerate one.
         //
-        // C is rotated whenever it is a distinct buffer, not only when beta is
-        // non-zero: at beta zero the kernel never reads it so the copies are
-        // merely unused, and testing beta here would mean decoding the scalar
-        // through its storage type for no benefit beyond a few blocks of space.
-        // When C aliases D it is covered by D's rotation instead.
         size_t blockCount      = 1;
         size_t offsetA         = 0;
         size_t bytesA          = 0;
@@ -4023,12 +3963,12 @@ namespace
            || prob.batch_offset_d != 0)
             return layout;
 
-        layout.bytesD = tensorSpanBytes(elementSizeOf(prob.d_type),
-                                        prob.m,
-                                        prob.n,
-                                        prob.col_stride_d,
-                                        prob.batch_count,
-                                        prob.batch_stride_d);
+        layout.bytesD = tensor_span_bytes(elementSizeOf(prob.d_type),
+                                          prob.m,
+                                          prob.n,
+                                          prob.col_stride_d,
+                                          prob.batch_count,
+                                          prob.batch_stride_d);
         if(layout.bytesD == 0)
             return layout;
 
@@ -4040,13 +3980,13 @@ namespace
         if(prob.C != nullptr && prob.C == prob.D)
         {
             bool expandedInPlaceC = false;
-            layout.bytesInPlaceC  = tensorSpanBytes(elementSizeOf(prob.c_type),
-                                                   prob.m,
-                                                   prob.n,
-                                                   prob.col_stride_c,
-                                                   prob.batch_count,
-                                                   prob.batch_stride_c,
-                                                   &expandedInPlaceC);
+            layout.bytesInPlaceC  = tensor_span_bytes(elementSizeOf(prob.c_type),
+                                                     prob.m,
+                                                     prob.n,
+                                                     prob.col_stride_c,
+                                                     prob.batch_count,
+                                                     prob.batch_stride_c,
+                                                     &expandedInPlaceC);
             if(layout.bytesInPlaceC == 0 || expandedInPlaceC)
                 return layout;
 
@@ -4055,12 +3995,12 @@ namespace
 
         if(is_e_enabled(prob.epilogue))
         {
-            layout.bytesE = tensorSpanBytes(elementSizeOf(prob.aux_type),
-                                            prob.m,
-                                            prob.n,
-                                            prob.col_stride_e,
-                                            prob.batch_count,
-                                            prob.batch_stride_e);
+            layout.bytesE = tensor_span_bytes(elementSizeOf(prob.aux_type),
+                                              prob.m,
+                                              prob.n,
+                                              prob.col_stride_e,
+                                              prob.batch_count,
+                                              prob.batch_stride_e);
             if(layout.bytesE == 0)
                 return layout;
         }
@@ -4074,12 +4014,12 @@ namespace
             // batch count ignores the stride, so a bias_stride larger than the
             // vector length under-allocates and the kernel writes past the end.
             const size_t biasElements = std::max(prob.m, prob.n);
-            layout.bytesBias          = tensorSpanBytes(elementSizeOf(prob.bias_type),
-                                               biasElements,
-                                               1,
-                                               biasElements,
-                                               prob.batch_count,
-                                               static_cast<size_t>(prob.bias_stride));
+            layout.bytesBias          = tensor_span_bytes(elementSizeOf(prob.bias_type),
+                                                 biasElements,
+                                                 1,
+                                                 biasElements,
+                                                 prob.batch_count,
+                                                 static_cast<size_t>(prob.bias_stride));
             if(layout.bytesBias == 0)
                 return layout;
         }
@@ -4098,40 +4038,40 @@ namespace
 
         bool expandedA = false, expandedB = false, expandedC = false;
 
-        layout.bytesA = tensorSpanBytes(elementSizeOf(prob.a_type),
-                                        rowsA,
-                                        colsA,
-                                        prob.col_stride_a,
-                                        prob.batch_count,
-                                        prob.batch_stride_a,
-                                        &expandedA);
-        layout.bytesB = tensorSpanBytes(elementSizeOf(prob.b_type),
-                                        rowsB,
-                                        colsB,
-                                        prob.col_stride_b,
-                                        prob.batch_count,
-                                        prob.batch_stride_b,
-                                        &expandedB);
+        layout.bytesA = tensor_span_bytes(elementSizeOf(prob.a_type),
+                                          rowsA,
+                                          colsA,
+                                          prob.col_stride_a,
+                                          prob.batch_count,
+                                          prob.batch_stride_a,
+                                          &expandedA);
+        layout.bytesB = tensor_span_bytes(elementSizeOf(prob.b_type),
+                                          rowsB,
+                                          colsB,
+                                          prob.col_stride_b,
+                                          prob.batch_count,
+                                          prob.batch_stride_b,
+                                          &expandedB);
 
         // Only when C is its own buffer. An in-place problem reaches C through
         // D, which rotates already.
         if(prob.C != nullptr && prob.C != prob.D && prob.batch_C == nullptr)
         {
-            layout.bytesC = tensorSpanBytes(elementSizeOf(prob.c_type),
-                                            prob.m,
-                                            prob.n,
-                                            prob.col_stride_c,
-                                            prob.batch_count,
-                                            prob.batch_stride_c,
-                                            &expandedC);
+            layout.bytesC = tensor_span_bytes(elementSizeOf(prob.c_type),
+                                              prob.m,
+                                              prob.n,
+                                              prob.col_stride_c,
+                                              prob.batch_count,
+                                              prob.batch_stride_c,
+                                              &expandedC);
         }
 
-        layout.strideD         = alignUp(layout.bytesD);
-        layout.strideA         = alignUp(layout.bytesA);
-        layout.strideB         = alignUp(layout.bytesB);
-        layout.strideC         = alignUp(layout.bytesC);
-        layout.strideE         = alignUp(layout.bytesE);
-        layout.strideBias      = alignUp(layout.bytesBias);
+        layout.strideD    = hipblaslt_bench::rotation_stride(layout.bytesD);
+        layout.strideA    = hipblaslt_bench::rotation_stride(layout.bytesA);
+        layout.strideB    = hipblaslt_bench::rotation_stride(layout.bytesB);
+        layout.strideC    = hipblaslt_bench::rotation_stride(layout.bytesC);
+        layout.strideE    = hipblaslt_bench::rotation_stride(layout.bytesE);
+        layout.strideBias = hipblaslt_bench::rotation_stride(layout.bytesBias);
 
         // Rotation needs a readable source for A and B, and spans it can size.
         // C is optional: a problem with no separate C still rotates the rest.
@@ -4148,41 +4088,24 @@ namespace
               && prob.batch_A == nullptr && prob.batch_B == nullptr && !expandedA && !expandedB
               && !(expandedC && layout.bytesC != 0) && !prob.swizzleA && !prob.swizzleB;
 
-        // The tensors a candidate reads or writes, so no iteration finds any of
-        // them already resident. The scale vectors are deliberately left out:
-        // they are O(m) or O(n) against O(mk), O(kn) and O(mn) for the tensors,
-        // so their cache footprint is negligible, and sizing them safely means
-        // handling every block-scaling variant.
-        //
-        // The workspace is not rotated either: every block shares one, as
-        // hipblaslt-bench's blocks do. It is sized to the caller's whole limit,
-        // often far larger than the tensors, so a copy per block would leave a
-        // small problem only a few blocks and measure its inputs cache-hot.
-        size_t perBlock = 0;
-        for(size_t stride : {layout.strideA,
-                             layout.strideB,
-                             layout.strideC,
-                             layout.strideD,
-                             layout.strideE,
-                             layout.strideBias})
-            perBlock = addSat(perBlock, stride);
-
-        // hipblaslt-bench's sizing: enough blocks to cover the rotating budget,
-        // but no more than the launches that will cycle through them. Each
-        // block costs a solve() per candidate, so the iteration count is also
-        // what keeps a tiny problem from asking for hundreds of thousands.
-        size_t blocks = 1;
-        if(rotatable && perBlock != 0 && perBlock != SIZE_MAX)
-        {
-            const auto plan = hipblaslt_bench::compute_rotating_buffer_plan(
-                false,
-                0,
-                coldIters,
-                hotIters,
-                static_cast<int64_t>(std::min<size_t>(rotatingBytes, INT64_MAX)),
-                static_cast<int64_t>(std::min<size_t>(perBlock, INT64_MAX)));
-            blocks = static_cast<size_t>(plan.block_count);
-        }
+        const auto   spans    = hipblaslt_bench::gemm_rotation_spans({layout.bytesA,
+                                                                      layout.bytesB,
+                                                                      layout.bytesC,
+                                                                      layout.bytesD,
+                                                                      layout.bytesE,
+                                                                      layout.bytesBias},
+                                                                prob.C == prob.D,
+                                                                is_grad_enabled(prob.epilogue));
+        const size_t perBlock = hipblaslt_bench::gemm_rotation_bytes(spans);
+        const auto   rotation = hipblaslt_bench::plan_gemm_rotation(
+            spans,
+            rotatable,
+            false,
+            0,
+            coldIters,
+            hotIters,
+            static_cast<int64_t>(std::min<size_t>(rotatingBytes, INT64_MAX)));
+        size_t blocks = static_cast<size_t>(rotation.block_count);
 
         // Offsets are a pure function of the block count, so sizing is just
         // "lay it out, and if it does not fit, lay out fewer blocks".
@@ -4490,63 +4413,23 @@ namespace
             }
         }
 
-        // Candidate indexes. All-kernel enumeration reuses the public
-        // getAllSolutions, which already dedups repeated indexes and drops
-        // custom kernels that cannot run pointer-array batch.
-        std::vector<int> candidateIndexes;
-        if(TuningPolicy::allKernels())
-        {
-            std::vector<rocblaslt_matmul_heuristic_result> all;
-            if(getAllSolutions(gemmData,
-                               handle,
-                               rocblaslt::RocGemmType::ROCBLASLT_GEMM,
-                               all,
-                               prob.workspaceSize)
-               != rocblaslt_status_success)
-                return TuningAttempt::FallbackEnumeration;
-
-            candidateIndexes.reserve(all.size());
-            for(const auto& result : all)
-                candidateIndexes.push_back(*(int*)result.algo.data);
-
-            // getAllSolutions returns them in the order of a set of pointers,
-            // which differs from one process to the next; sorted, every process
-            // measures them in the same order.
-            std::sort(candidateIndexes.begin(), candidateIndexes.end());
-        }
-        else
-        {
-            auto prefix = getBestRawSolutions(
-                prob, handle, gemmData, TuningPolicy::candidateCap(), prob.workspaceSize);
-            candidateIndexes.reserve(prefix.size());
-            for(const auto& solution : prefix)
-                candidateIndexes.push_back(solution->index);
-        }
-
-        if(tuningFailureInjected(TuningFailureStage::Enumeration))
+        std::vector<rocblaslt_matmul_heuristic_result> selected;
+        if(getGemmCandidates(prob,
+                             handle,
+                             gemmData,
+                             TuningPolicy::allKernels(),
+                             TuningPolicy::allKernels() ? 0 : TuningPolicy::candidateCap(),
+                             baselineIndex,
+                             prob.workspaceSize,
+                             selected)
+               != rocblaslt_status_success
+           || tuningFailureInjected(TuningFailureStage::Enumeration))
             return TuningAttempt::FallbackEnumeration;
 
-        // Moved to the front with the rest left in order, so it is measured
-        // first whichever way the candidates were enumerated.
-        if(baselineIndex >= 0)
-        {
-            auto at = std::find(candidateIndexes.begin(), candidateIndexes.end(), baselineIndex);
-            if(at != candidateIndexes.end())
-                std::rotate(candidateIndexes.begin(), at, at + 1);
-            else
-                candidateIndexes.insert(candidateIndexes.begin(), baselineIndex);
-        }
-
-        // Resolve through the same path replay uses. Enumeration and
-        // getSolutionByIndex are different lookups and can disagree for one
-        // index depending on which placeholder libraries have been
-        // materialised; benchmarking the enumerated object and replaying the
-        // resolved one would measure a kernel the cache never runs. Resolving
-        // here makes the two identical by construction.
         std::vector<std::shared_ptr<TensileLite::ContractionSolution>> candidates;
-        candidates.reserve(candidateIndexes.size());
-        for(int index : candidateIndexes)
-            if(auto solution = library->getSolutionByIndex(*hardware, index))
+        candidates.reserve(selected.size());
+        for(const auto& result : selected)
+            if(auto solution = library->getSolutionByIndex(*hardware, *(int*)result.algo.data))
                 candidates.push_back(std::move(solution));
 
         if(candidates.empty())
@@ -4556,7 +4439,7 @@ namespace
         {
             std::ostringstream msg;
             msg << "tuning-cache: setup candidates=" << candidates.size()
-                << (TuningPolicy::allKernels() ? " (all kernels)" : " (ranked prefix)")
+                << (TuningPolicy::allKernels() ? " (all kernels)" : " (ranked with fallback)")
                 << " baseline=" << baselineIndex << " scratch=" << layout.total
                 << "B blocks=" << blocks << " workspace=" << prob.workspaceSize << "B";
             log_info(__func__, msg.str());
@@ -4564,11 +4447,7 @@ namespace
 
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
 
-        // Owned, because the exits below are not all returns. isSolutionSupported
-        // is called outside the per-candidate try block and can throw, and that
-        // exception unwinds all the way to the tuning fallback in the caller. A
-        // pair of raw handles destroyed only on the success path leaked two
-        // events per such failure until event creation itself started failing.
+        // Release both events on every exit, including exceptions from lazy libraries.
         struct EventPair
         {
             hipEvent_t start = nullptr;
@@ -4849,7 +4728,7 @@ size_t tuningTensorSpanForTest(size_t elementSize,
                                size_t batchStride,
                                bool*  expanded)
 {
-    return tensorSpanBytes(elementSize, rows, cols, colStride, batchCount, batchStride, expanded);
+    return tensor_span_bytes(elementSize, rows, cols, colStride, batchCount, batchStride, expanded);
 }
 
 size_t tuningScratchPlanForTest(const RocblasltContractionProblem& prob,
@@ -6851,6 +6730,82 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
 #endif
     auto tensile_prob = ConstructTensileProblem(prob);
     return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes);
+}
+
+rocblaslt_status getGemmCandidates(RocblasltContractionProblem const& prob,
+                                   rocblaslt_handle                   handle,
+                                   std::shared_ptr<void>              gemmData,
+                                   bool                               exhaustive,
+                                   size_t                             limit,
+                                   int                                baselineIndex,
+                                   size_t                             maxWorkspaceBytes,
+                                   std::vector<rocblaslt_matmul_heuristic_result>& results)
+{
+    if((!exhaustive && limit == 0) || limit > INT_MAX)
+        return rocblaslt_status_invalid_value;
+    results.clear();
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       deviceProp;
+    std::shared_ptr<TensileLite::Hardware> hardware;
+    static_cast<void>(get_library_and_adapter(&library, &deviceProp, &hardware, handle->device));
+    if(!library || !hardware)
+        return rocblaslt_status_invalid_pointer;
+
+    rocblaslt_status status  = rocblaslt_status_success;
+    auto             indexes = [](const auto& values) {
+        std::vector<int> ids;
+        ids.reserve(values.size());
+        for(const auto& value : values)
+            ids.push_back(*(const int*)value.algo.data);
+        return ids;
+    };
+    auto ranked = [&] {
+        std::vector<rocblaslt_matmul_heuristic_result> values(limit);
+        int                                            count = 0;
+        status                                               = getBestSolutions(prob,
+                                  handle,
+                                  gemmData,
+                                  static_cast<int>(limit),
+                                  values.data(),
+                                  &count,
+                                  maxWorkspaceBytes);
+        values.resize(count);
+        return indexes(values);
+    };
+    auto all = [&] {
+        auto                                           copy = prob;
+        std::vector<rocblaslt_matmul_heuristic_result> values;
+        status = getAllSolutions(copy, handle, values, maxWorkspaceBytes);
+        return indexes(values);
+    };
+    auto accept = [&](int index) {
+        try
+        {
+            // Replay must resolve the same kernel that was measured, even when
+            // enumeration materialises a different placeholder library.
+            if(!useRocRoller(handle, prob) && !library->getSolutionByIndex(*hardware, index))
+                return false;
+            rocblaslt_matmul_heuristic_result result{};
+            *(int*)result.algo.data         = index;
+            result.algo.max_workspace_bytes = maxWorkspaceBytes;
+            if(isSolutionSupportedNoMutation(
+                   handle, prob, gemmData, &result.algo, &result.workspaceSize)
+                   != rocblaslt_status_success
+               || result.workspaceSize > maxWorkspaceBytes)
+                return false;
+            result.state = rocblaslt_status_success;
+            results.push_back(result);
+            return true;
+        }
+        catch(...)
+        {
+            return false;
+        }
+    };
+    hipblaslt_bench::select_candidate_indexes(
+        {exhaustive, limit, baselineIndex}, ranked, all, accept);
+    return results.empty() ? status : rocblaslt_status_success;
 }
 
 rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&       probs,

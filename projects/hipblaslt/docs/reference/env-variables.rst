@@ -129,12 +129,12 @@ go depends on logging:
         | Required for ``cache`` and ``tune`` modes
 
     * - | ``HIPBLASLT_TUNING_ALL_KERNELS``
-        | Selects exhaustive or ranked-prefix candidate enumeration.
+        | Selects exhaustive or ranked candidate enumeration.
       - | 1: Enumerate every candidate (default)
-        | 0: Use a ranked prefix
+        | 0: Use ranked candidates, filling short results from all supported solutions
 
     * - | ``HIPBLASLT_TUNING_MAX_CANDIDATES``
-        | Limits the ranked prefix when exhaustive enumeration is disabled.
+        | Limits supported candidates, including the baseline, when exhaustive enumeration is disabled.
       - | Positive integer (default: 128)
 
     * - | ``HIPBLASLT_TUNING_COLD_ITERS``

@@ -18,6 +18,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt_benchmark/gemm_rotation.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -1979,6 +1980,28 @@ namespace
         EXPECT_EQ(plan.bytesB, (136u * 31 + 128) * 2);
         EXPECT_EQ(plan.bytesC, (72u * 31 + 64) * 2);
         EXPECT_EQ(plan.bytesD, (96u * 31 + 64) * 2);
+    }
+
+    TEST_F(TuningScratchPlan_pre_checkin, RuntimeMatchesSharedDenseRotationPlan)
+    {
+        PlanCase c;
+        c.m = c.n = c.k = 1024;
+        c.lda = c.ldb = c.ldc = c.ldd = 1024;
+        c.rotatingBytes               = size_t(512) << 20;
+        for(bool inPlace : {false, true})
+        {
+            c.inPlace = inPlace;
+            Plan plan;
+            ASSERT_TRUE(planFor(c, &plan));
+            ASSERT_TRUE(plan.usable);
+            constexpr size_t tensor = 1024 * 1024 * 2;
+            const auto       spans  = hipblaslt_bench::gemm_rotation_spans(
+                {tensor, tensor, tensor, tensor, 0, 0}, inPlace, false);
+            const auto shared = hipblaslt_bench::plan_gemm_rotation(
+                spans, true, false, 0, c.coldIters, c.hotIters, c.rotatingBytes);
+            EXPECT_EQ(plan.blocks, shared.block_count);
+            EXPECT_EQ(plan.bytesC, spans.c);
+        }
     }
 
     // In place, C is read through D's block, so that block covers whichever

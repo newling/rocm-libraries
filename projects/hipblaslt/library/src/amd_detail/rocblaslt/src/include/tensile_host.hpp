@@ -220,6 +220,16 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
                         int                                requestedAlgoCount,
                         size_t                             maxWorkSpaceBytes);
 
+// Ordinary single-GEMM candidate policy shared by the public heuristic and tune mode.
+rocblaslt_status getGemmCandidates(RocblasltContractionProblem const& prob,
+                                   rocblaslt_handle                   handle,
+                                   std::shared_ptr<void>              gemmData,
+                                   bool                               exhaustive,
+                                   size_t                             limit,
+                                   int                                baselineIndex,
+                                   size_t                             maxWorkspaceBytes,
+                                   std::vector<rocblaslt_matmul_heuristic_result>& results);
+
 /*******************************************************************************
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *
  * rocblaslt_matmul_heuristic_result                                           *

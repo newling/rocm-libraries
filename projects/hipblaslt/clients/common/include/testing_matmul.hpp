@@ -42,6 +42,9 @@
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#include <hipblaslt_benchmark/candidate_policy.hpp>
+#include <hipblaslt_benchmark/gemm_rotation.hpp>
+#include <unordered_map>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
@@ -2040,6 +2043,12 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     std::vector<void*> alpha_in(gemm_count);
 
+    hipblaslt_bench::GemmRotationSpans ordinaryRotationSpans;
+    bool                               ordinaryRotatable = false;
+    const bool                         sharedOrdinaryRotation
+        = !do_grouped_gemm && batchMode == HIPBLASLT_BATCH_MODE_STRIDED && !arg.bias_vector
+          && !arg.use_e && !arg.scaleAlpha_vector && arg.scaleA == hipblaslt_scaling_format::none
+          && arg.scaleB == hipblaslt_scaling_format::none;
     bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
     bool mx_use_rocroller = MXUseRocroller();
@@ -2244,6 +2253,33 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             size_bias[i] = 0;
         }
+        if(sharedOrdinaryRotation)
+        {
+            bool expandedA = false, expandedB = false, expandedC = false;
+            auto span = [&](size_t elementBytes,
+                            size_t rows,
+                            size_t cols,
+                            size_t ld,
+                            size_t batchStride,
+                            bool*  expanded = nullptr) {
+                return hipblaslt_bench::tensor_span_bytes(
+                    elementBytes, rows, cols, ld, num_batches[i], batchStride, expanded);
+            };
+            const auto spans = hipblaslt_bench::gemm_rotation_spans(
+                {span(realDataTypeSize(TiA), A_row[i], A_col[i], lda[i], stride_a[i], &expandedA),
+                 span(realDataTypeSize(TiB), B_row[i], B_col[i], ldb[i], stride_b[i], &expandedB),
+                 span(realDataTypeSize(To), M[i], N[i], ldc[i], stride_c[i], &expandedC),
+                 span(realDataTypeSize(To), M[i], N[i], ldd[i], stride_d[i]),
+                 0,
+                 0},
+                arg.c_equal_d,
+                false);
+            totalRotatingSizeNeeded = hipblaslt_bench::gemm_rotation_bytes(spans);
+            ordinaryRotationSpans   = spans;
+            ordinaryRotatable       = !do_swizzle_a && !do_swizzle_b && !expandedA && !expandedB
+                                && !expandedC && spans.a != 0 && spans.b != 0;
+            continue;
+        }
         auto    biasSize = size_bias[i] * realDataTypeSize(Tbias);
         int64_t sizeC    = get_computeInterface(h_beta[i], Tc) == 0 ? 0 : size_C[i] * sizeof(To);
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
@@ -2392,8 +2428,20 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
 
     // Calculating block count
-    auto plan = hipblaslt_bench::compute_rotating_buffer_plan(
-        arg.adaptive, arg.max_iters, arg.cold_iters, arg.iters, rotating, totalRotatingSizeNeeded);
+    auto    plan        = sharedOrdinaryRotation
+                              ? hipblaslt_bench::plan_gemm_rotation(ordinaryRotationSpans,
+                                                          ordinaryRotatable,
+                                                          arg.adaptive,
+                                                          arg.max_iters,
+                                                          arg.cold_iters,
+                                                          arg.iters,
+                                                          rotating)
+                              : hipblaslt_bench::compute_rotating_buffer_plan(arg.adaptive,
+                                                                    arg.max_iters,
+                                                                    arg.cold_iters,
+                                                                    arg.iters,
+                                                                    rotating,
+                                                                    totalRotatingSizeNeeded);
     int32_t block_count = plan.block_count;
     if(rotating > 0)
     {
@@ -4914,41 +4962,44 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else
             {
-                for(int j = 0; j < returnedAlgoCount; j++)
+                std::unordered_map<int, hipblasLtMatmulHeuristicResult_t> byIndex;
+                std::vector<int>                                          indexes;
+                for(auto& result : tmpAlgo)
                 {
-                    int addRequest = 0;
-                    for(size_t t = 0; t < 1; t++) // C API not supported yet
-                    {
-                        size_t tmpWorkspaceSize             = 0;
-                        tmpAlgo[j].algo.max_workspace_bytes = max_workspace_size;
-                        if(hipblaslt_ext::matmulIsAlgoSupported(handle,
-                                                                matmul[0][0],
-                                                                alpha_in[0],
-                                                                matA[0],
-                                                                matB[0],
-                                                                &h_beta[0],
-                                                                matC[0],
-                                                                matD[0],
-                                                                tmpAlgo[j].algo,
-                                                                tmpWorkspaceSize)
-                           == HIPBLAS_STATUS_SUCCESS)
-                        {
-                            if(tmpWorkspaceSize <= max_workspace_size)
-                            {
-                                addRequest = 1;
-                                heuristicResult.push_back(tmpAlgo[j]);
-                                heuristicTuningIndex.push_back(t);
-                                workspace_size = std::max(workspace_size, tmpWorkspaceSize);
-                            }
-                        }
-                    }
-                    CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
-                    requestCount += addRequest;
-                    if(requestCount >= requestAlgoCount)
-                    {
-                        break;
-                    }
+                    const int index = hipblaslt_ext::getIndexFromAlgo(result.algo);
+                    indexes.push_back(index);
+                    byIndex.emplace(index, result);
                 }
+                auto all    = [&] { return indexes; };
+                auto accept = [&](int index) {
+                    auto   result                   = byIndex.at(index);
+                    size_t required                 = 0;
+                    result.algo.max_workspace_bytes = max_workspace_size;
+                    if(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                            matmul[0][0],
+                                                            alpha_in[0],
+                                                            matA[0],
+                                                            matB[0],
+                                                            &h_beta[0],
+                                                            matC[0],
+                                                            matD[0],
+                                                            result.algo,
+                                                            required)
+                           != HIPBLAS_STATUS_SUCCESS
+                       || required > max_workspace_size)
+                        return false;
+                    result.workspaceSize = required;
+                    heuristicResult.push_back(result);
+                    heuristicTuningIndex.push_back(0);
+                    workspace_size = std::max(workspace_size, required);
+                    return true;
+                };
+                hipblaslt_bench::select_candidate_indexes(
+                    {true, static_cast<size_t>(requestAlgoCount), -1},
+                    [] { return std::vector<int>{}; },
+                    all,
+                    accept);
+                CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
             }
         }
         else
