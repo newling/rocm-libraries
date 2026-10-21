@@ -3273,7 +3273,10 @@ bool hipblaslt_bench::gemm_tuning_candidates(hipblasLtHandle_t       handle,
                                              const GemmTuningBlock&  block,
                                              size_t                  workspace_bytes,
                                              const CandidatePolicy&  policy,
-                                             std::vector<hipblasLtMatmulHeuristicResult_t>& results)
+                                             std::vector<hipblasLtMatmulHeuristicResult_t>& results,
+                                             const std::vector<GemmTuningParameters>& variants,
+                                             std::vector<size_t>*    parameter_indexes,
+                                             const std::vector<int>* supplied_indexes)
 {
     auto internalHandle = reinterpret_cast<rocblaslt_handle>(handle);
     auto matmul         = reinterpret_cast<rocblaslt_matmul_desc>(descriptor);
@@ -3286,6 +3289,8 @@ bool hipblaslt_bench::gemm_tuning_candidates(hipblasLtHandle_t       handle,
                                                alpha,
                                                beta,
                                                workspace_bytes);
+    if(problem.scaleAlphaVec)
+        problem.alpha = problem.alpha_owned.data();
     problem.A           = block.a;
     problem.B           = block.b;
     problem.C           = block.c;
@@ -3298,7 +3303,10 @@ bool hipblaslt_bench::gemm_tuning_candidates(hipblasLtHandle_t       handle,
                                           policy.limit,
                                           policy.baseline,
                                           workspace_bytes,
-                                          candidates);
+                                          candidates,
+                                          variants,
+                                          parameter_indexes,
+                                          supplied_indexes);
     results.clear();
     for(const auto& candidate : candidates)
     {
@@ -3335,16 +3343,18 @@ void hipblaslt_bench::run_gemm_tuning(hipblasLtHandle_t                   handle
         return;
     }
     std::vector<RocblasltContractionProblem> blocks;
+    blocks.reserve(buffers.size());
     for(size_t i = 0; i < buffers.size(); ++i)
     {
-        auto matmul     = reinterpret_cast<rocblaslt_matmul_desc>(descriptor);
+        auto matmul = reinterpret_cast<rocblaslt_matmul_desc>(
+            buffers[i].descriptor ? buffers[i].descriptor : descriptor);
         auto block      = construct_rocblaslt_problem(reinterpret_cast<rocblaslt_handle>(handle),
                                                  matmul,
                                                  reinterpret_cast<rocblaslt_matrix_layout>(a),
                                                  reinterpret_cast<rocblaslt_matrix_layout>(b),
                                                  reinterpret_cast<rocblaslt_matrix_layout>(c),
                                                  reinterpret_cast<rocblaslt_matrix_layout>(d),
-                                                 alpha,
+                                                 buffers[i].alpha ? buffers[i].alpha : alpha,
                                                  beta,
                                                  workspace_bytes);
         block.workspace = workspace;
@@ -3354,6 +3364,8 @@ void hipblaslt_bench::run_gemm_tuning(hipblasLtHandle_t                   handle
         block.C         = buffers[i].c;
         block.D         = buffers[i].d;
         blocks.push_back(block);
+        if(block.scaleAlphaVec)
+            blocks.back().alpha = blocks.back().alpha_owned.data();
     }
     runGemmTuningSession(reinterpret_cast<rocblaslt_handle>(handle),
                          blocks,

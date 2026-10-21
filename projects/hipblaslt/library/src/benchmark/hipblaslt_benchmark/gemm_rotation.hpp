@@ -63,6 +63,19 @@ namespace hipblaslt_bench
         size_t a = 0, b = 0, c = 0, d = 0, e = 0, bias = 0;
     };
 
+    struct GemmRotationTensor
+    {
+        size_t element_bytes = 0, rows = 0, cols = 0, ld = 0, batches = 1, batch_stride = 0;
+        bool   swizzled = false;
+    };
+
+    struct GemmRotationLayout
+    {
+        GemmRotationSpans spans;
+        bool              usable    = false;
+        bool              rotatable = false;
+    };
+
     inline size_t rotation_stride(size_t bytes)
     {
         return bytes > SIZE_MAX - 255 ? SIZE_MAX : (bytes + 255) / 256 * 256;
@@ -82,6 +95,36 @@ namespace hipblaslt_bench
         if(!gradient_bias)
             spans.bias = 0;
         return spans;
+    }
+
+    inline GemmRotationLayout gemm_rotation_layout(const GemmRotationTensor& a,
+                                                   const GemmRotationTensor& b,
+                                                   const GemmRotationTensor& c,
+                                                   const GemmRotationTensor& d,
+                                                   const GemmRotationTensor& e,
+                                                   const GemmRotationTensor& bias,
+                                                   bool                      c_equals_d,
+                                                   bool                      gradient)
+    {
+        auto span = [](const GemmRotationTensor& t, bool* expanded = nullptr) {
+            return tensor_span_bytes(
+                t.element_bytes, t.rows, t.cols, t.ld, t.batches, t.batch_stride, expanded);
+        };
+        bool expandedA = false, expandedB = false, expandedC = false, expandedE = false;
+        GemmRotationSpans spans{span(a, &expandedA),
+                                span(b, &expandedB),
+                                span(c, &expandedC),
+                                span(d),
+                                span(e, &expandedE),
+                                span(bias)};
+        const bool        usable = spans.d != 0 && (!e.element_bytes || spans.e != 0)
+                            && (!gradient || !bias.element_bytes || spans.bias != 0)
+                            && (!c_equals_d || (spans.c != 0 && !expandedC))
+                            && !(gradient && expandedE);
+        const bool rotatable = spans.a != 0 && spans.b != 0 && !expandedA && !expandedB
+                               && !expandedC && !(gradient && expandedE) && !a.swizzled
+                               && !b.swizzled;
+        return {gemm_rotation_spans(spans, c_equals_d, gradient), usable, rotatable};
     }
 
     inline size_t gemm_rotation_bytes(const GemmRotationSpans& spans)

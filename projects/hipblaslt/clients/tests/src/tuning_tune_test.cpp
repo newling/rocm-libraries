@@ -2047,8 +2047,7 @@ namespace
         }
     }
 
-    // A gradient epilogue writes the bias, as long as the longer side of D,
-    // once per batch at the bias batch stride.
+    // BGRADB writes one bias value per column of D, at the bias batch stride.
     TEST_F(TuningScratchPlan_pre_checkin, GradientBiasCoversEveryBatchAtItsStride)
     {
         PlanCase grad;
@@ -2059,7 +2058,7 @@ namespace
         Plan plan;
         ASSERT_TRUE(planFor(grad, &plan));
         ASSERT_TRUE(plan.usable);
-        EXPECT_EQ(plan.bytesBias, (80u + 64) * sizeof(float));
+        EXPECT_EQ(plan.bytesBias, (80u + 32) * sizeof(float));
     }
 
     // A cap below the full rotation trims blocks rather than declining. A cap

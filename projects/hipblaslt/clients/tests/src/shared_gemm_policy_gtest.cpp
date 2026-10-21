@@ -59,6 +59,34 @@ TEST(SharedGemmPolicy_pre_checkin, DistinctAndAliasedCRotation)
     EXPECT_EQ(hipblaslt_bench::tensor_span_bytes(2, 64, 32, 72, 1, 0), (72u * 31 + 64) * 2);
 }
 
+TEST(SharedGemmPolicy_pre_checkin, EpilogueRotationAndInputEligibility)
+{
+    using namespace hipblaslt_bench;
+    const GemmRotationTensor input{2, 64, 32, 72, 2, 4096};
+    const GemmRotationTensor output{2, 64, 32, 80, 2, 4096};
+    const GemmRotationTensor bias{4, 32, 1, 32, 2, 80};
+    const auto               forward
+        = gemm_rotation_layout(input, input, output, output, output, bias, false, false);
+    ASSERT_TRUE(forward.usable);
+    EXPECT_TRUE(forward.rotatable);
+    EXPECT_EQ(forward.spans.c, forward.spans.d);
+    EXPECT_EQ(forward.spans.e, forward.spans.d);
+    EXPECT_EQ(forward.spans.bias, 0u);
+    const auto gradient
+        = gemm_rotation_layout(input, input, output, output, output, bias, false, true);
+    EXPECT_EQ(gradient.spans.bias, (80u + 32) * 4);
+    EXPECT_GT(gemm_rotation_bytes(gradient.spans), gemm_rotation_bytes(forward.spans));
+    auto broadcast         = input;
+    broadcast.batch_stride = 0;
+    EXPECT_FALSE(
+        gemm_rotation_layout(broadcast, input, output, output, {}, {}, false, false).rotatable);
+    EXPECT_FALSE(
+        gemm_rotation_layout(input, input, output, output, broadcast, bias, false, true).usable);
+    EXPECT_TRUE(gemm_tuning_eligible(false, 1));
+    EXPECT_TRUE(gemm_tuning_eligible(true, 0));
+    EXPECT_FALSE(gemm_tuning_eligible(true, 1));
+}
+
 TEST(SharedGemmPolicy_pre_checkin, PublicHeuristicAndRuntimeUseSameCandidates)
 {
     int devices = 0;
@@ -420,6 +448,56 @@ TEST(SharedGemmPolicy_pre_checkin, SessionRotatesMeasuresAndPreservesReplay)
             verify();
         }
     }
+    GemmTuningConfig variants;
+    variants.candidates        = {false, 2, -1};
+    variants.variants          = {{0, 0}, {1, 0}, {2, 1}};
+    variants.search.cold_calls = 2;
+    variants.timing.iters      = 2;
+    GemmTuningResult variantResult;
+    run(variants, {}, variantResult);
+    ASSERT_FALSE(variantResult.enumeration_failed);
+    ASSERT_FALSE(variantResult.setup_failed);
+    EXPECT_EQ(variantResult.measured, variantResult.indexes.size());
+    verify();
+    std::vector<hipblasLtMatmulHeuristicResult_t> variantCandidates;
+    std::vector<size_t>                           variantIndexes;
+    ASSERT_TRUE(gemm_tuning_candidates(r.handle,
+                                       r.desc,
+                                       r.layout,
+                                       r.layout,
+                                       r.layout,
+                                       r.layout,
+                                       &alpha,
+                                       &beta,
+                                       blocks[0],
+                                       workspaceBytes,
+                                       variants.candidates,
+                                       variantCandidates,
+                                       variants.variants,
+                                       &variantIndexes));
+    ASSERT_EQ(variantCandidates.size(), variantResult.indexes.size());
+    for(size_t i = 0; i < variantCandidates.size(); ++i)
+    {
+        EXPECT_EQ(variantResult.indexes[i],
+                  hipblaslt_ext::getIndexFromAlgo(variantCandidates[i].algo));
+        EXPECT_EQ(variantResult.parameters[i].split_k,
+                  variants.variants[variantIndexes[i]].split_k);
+        EXPECT_EQ(variantResult.parameters[i].wgm, variants.variants[variantIndexes[i]].wgm);
+        EXPECT_EQ(variantResult.workspace[i], variantCandidates[i].workspaceSize);
+    }
+    auto savedC = blocks[0].c;
+    blocks[0].c = blocks[0].d;
+    run(variants, {}, variantResult);
+    EXPECT_TRUE(variantResult.ineligible);
+    EXPECT_EQ(variantResult.attempted, 0u);
+    blocks[0].c = savedC;
+    GemmTuningConfig malformed;
+    malformed.supplied_candidates = true;
+    malformed.indexes             = {0, 1};
+    malformed.parameters          = {{0, 0}};
+    run(malformed, {}, variantResult);
+    EXPECT_TRUE(variantResult.setup_failed);
+
     GemmTuningConfig empty;
     empty.supplied_candidates = true;
     GemmTuningResult result;
@@ -433,4 +511,222 @@ TEST(SharedGemmPolicy_pre_checkin, SessionRotatesMeasuresAndPreservesReplay)
     run(empty, canceled, result);
     EXPECT_TRUE(result.enumeration_failed);
     EXPECT_EQ(result.attempted, 0u);
+}
+
+TEST(SharedGemmPolicy_pre_checkin, SessionUsesEveryBlocksEpilogueAndScalePointers)
+{
+    using namespace hipblaslt_bench;
+    int devices = 0;
+    if(hipGetDeviceCount(&devices) != hipSuccess || devices == 0)
+        GTEST_SKIP() << "No GPU available";
+    constexpr size_t dimension      = 128;
+    constexpr size_t elements       = dimension * dimension;
+    constexpr size_t bytes          = elements * sizeof(uint16_t);
+    constexpr size_t workspaceBytes = size_t(32) << 20;
+    struct Resources
+    {
+        hipblasLtHandle_t                    handle = nullptr;
+        hipblasLtMatrixLayout_t              layout = nullptr;
+        std::array<hipblasLtMatmulDesc_t, 2> descriptors{};
+        hipStream_t                          stream    = nullptr;
+        void*                                tensors   = nullptr;
+        void*                                vectors   = nullptr;
+        void*                                workspace = nullptr;
+        ~Resources()
+        {
+            if(stream)
+                static_cast<void>(hipStreamSynchronize(stream));
+            for(auto descriptor : descriptors)
+                if(descriptor)
+                    hipblasLtMatmulDescDestroy(descriptor);
+            if(layout)
+                hipblasLtMatrixLayoutDestroy(layout);
+            if(handle)
+                hipblasLtDestroy(handle);
+            for(void* allocation : {tensors, vectors, workspace})
+                if(allocation)
+                    static_cast<void>(hipFree(allocation));
+            if(stream)
+                static_cast<void>(hipStreamDestroy(stream));
+        }
+    } r;
+    ASSERT_EQ(hipblasLtCreate(&r.handle), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.layout, HIP_R_16F, dimension, dimension, dimension),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipStreamCreate(&r.stream), hipSuccess);
+    ASSERT_EQ(hipMalloc(&r.tensors, bytes * 10), hipSuccess);
+    ASSERT_EQ(hipMalloc(&r.vectors, dimension * sizeof(float) * 4 + 4 * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&r.workspace, workspaceBytes), hipSuccess);
+    auto tensor = [&](int i) { return static_cast<char*>(r.tensors) + i * bytes; };
+    auto vector = [&](int i) { return static_cast<float*>(r.vectors) + i * dimension; };
+    auto scales = vector(4);
+    const std::array<float, 4> scaleValues{0.5f, 1, 1, 1};
+    ASSERT_EQ(hipMemcpy(scales, scaleValues.data(), sizeof(scaleValues), hipMemcpyHostToDevice),
+              hipSuccess);
+    std::vector<GemmTuningBlock> blocks;
+    for(int b = 0; b < 2; ++b)
+    {
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&r.descriptors[b], HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                  HIPBLAS_STATUS_SUCCESS);
+        auto op = HIPBLAS_OP_T;
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                      r.descriptors[b], HIPBLASLT_MATMUL_DESC_TRANSA, &op, sizeof(op)),
+                  HIPBLAS_STATUS_SUCCESS);
+        blocks.push_back({tensor(5 * b),
+                          tensor(5 * b + 1),
+                          tensor(5 * b + 2),
+                          tensor(5 * b + 3),
+                          r.descriptors[b],
+                          vector(2 * b + 1)});
+        for(int i = 0; i < 3; ++i)
+        {
+            std::vector<uint16_t> values(elements, i == 2 ? 0x4200 : 0x2c00); // C=3, A=B=1/16
+            ASSERT_EQ(hipMemcpy(tensor(5 * b + i), values.data(), bytes, hipMemcpyHostToDevice),
+                      hipSuccess);
+        }
+        for(int i = 0; i < 2; ++i)
+        {
+            std::vector<float> values(dimension, i == 0 ? float(b + 1) / 4 : float(2 * (b + 1)));
+            ASSERT_EQ(hipMemcpy(vector(2 * b + i),
+                                values.data(),
+                                dimension * sizeof(float),
+                                hipMemcpyHostToDevice),
+                      hipSuccess);
+        }
+    }
+    const float alpha = 1, beta = 1;
+    auto        set = [&](int b, hipblasLtMatmulDescAttributes_t attr, const auto& value) {
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(r.descriptors[b], attr, &value, sizeof(value)),
+                  HIPBLAS_STATUS_SUCCESS);
+    };
+    for(bool auxiliary : {false, true})
+    {
+        for(int b = 0; b < 2; ++b)
+        {
+            set(b,
+                HIPBLASLT_MATMUL_DESC_EPILOGUE,
+                auxiliary ? HIPBLASLT_EPILOGUE_GELU_AUX_BIAS : HIPBLASLT_EPILOGUE_BIAS);
+            set(b, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, HIP_R_32F);
+            void* bias = vector(2 * b);
+            set(b, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
+            for(int i = 0; i < 4; ++i)
+            {
+                void* pointer = auxiliary ? nullptr : scales + i;
+                const std::array<hipblasLtMatmulDescAttributes_t, 4> attributes{
+                    HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER,
+                    HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER,
+                    HIPBLASLT_MATMUL_DESC_C_SCALE_POINTER,
+                    HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER};
+                set(b, attributes[i], pointer);
+            }
+            set(b,
+                HIPBLASLT_MATMUL_DESC_POINTER_MODE,
+                auxiliary ? HIPBLASLT_POINTER_MODE_HOST
+                          : HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST);
+            blocks[b].alpha = auxiliary ? &alpha : vector(2 * b + 1);
+            void* e         = auxiliary ? tensor(5 * b + 4) : nullptr;
+            set(b, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER, e);
+            const int64_t ld = dimension;
+            set(b, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, ld);
+            set(b, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE, HIP_R_16F);
+        }
+        GemmTuningConfig config;
+        config.candidates        = {false, 1, -1};
+        config.search.cold_calls = 2;
+        config.timing.iters      = 2;
+        std::vector<hipblasLtMatmulHeuristicResult_t> candidates;
+        ASSERT_TRUE(gemm_tuning_candidates(r.handle,
+                                           r.descriptors[0],
+                                           r.layout,
+                                           r.layout,
+                                           r.layout,
+                                           r.layout,
+                                           blocks[0].alpha,
+                                           &beta,
+                                           blocks[0],
+                                           workspaceBytes,
+                                           config.candidates,
+                                           candidates));
+        if(candidates.empty())
+            GTEST_SKIP() << "No fp16 TN algorithm for "
+                         << (auxiliary ? "GELU auxiliary" : "scaling and bias");
+        std::array<std::vector<uint16_t>, 2> expectedD, expectedE;
+        for(int b = 0; b < 2; ++b)
+        {
+            ASSERT_EQ(hipblasLtMatmul(r.handle,
+                                      r.descriptors[b],
+                                      blocks[b].alpha,
+                                      blocks[b].a,
+                                      r.layout,
+                                      blocks[b].b,
+                                      r.layout,
+                                      &beta,
+                                      blocks[b].c,
+                                      r.layout,
+                                      blocks[b].d,
+                                      r.layout,
+                                      &candidates[0].algo,
+                                      r.workspace,
+                                      workspaceBytes,
+                                      r.stream),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipStreamSynchronize(r.stream), hipSuccess);
+            expectedD[b].resize(elements);
+            ASSERT_EQ(hipMemcpy(expectedD[b].data(), blocks[b].d, bytes, hipMemcpyDeviceToHost),
+                      hipSuccess);
+            if(auxiliary)
+            {
+                expectedE[b].resize(elements);
+                ASSERT_EQ(
+                    hipMemcpy(expectedE[b].data(), tensor(5 * b + 4), bytes, hipMemcpyDeviceToHost),
+                    hipSuccess);
+            }
+        }
+        EXPECT_NE(expectedD[0], expectedD[1]);
+        ASSERT_EQ(hipMemset(blocks[0].d, 0, bytes), hipSuccess);
+        ASSERT_EQ(hipMemset(blocks[1].d, 0, bytes), hipSuccess);
+        if(auxiliary)
+            for(int b = 0; b < 2; ++b)
+                ASSERT_EQ(hipMemset(tensor(5 * b + 4), 0, bytes), hipSuccess);
+        GemmTuningResult result;
+        run_gemm_tuning(r.handle,
+                        r.descriptors[0],
+                        r.layout,
+                        r.layout,
+                        r.layout,
+                        r.layout,
+                        blocks[0].alpha,
+                        &beta,
+                        blocks,
+                        r.workspace,
+                        workspaceBytes,
+                        r.stream,
+                        config,
+                        {},
+                        result);
+        ASSERT_FALSE(result.setup_failed);
+        ASSERT_FALSE(result.enumeration_failed);
+        ASSERT_EQ(result.measured, 1u);
+        for(int b = 0; b < 2; ++b)
+        {
+            std::vector<uint16_t> actual(elements);
+            ASSERT_EQ(hipMemcpy(actual.data(), blocks[b].d, bytes, hipMemcpyDeviceToHost),
+                      hipSuccess);
+            EXPECT_EQ(actual, expectedD[b]) << "rotation block " << b;
+            if(auxiliary)
+            {
+                ASSERT_EQ(hipMemcpy(actual.data(), tensor(5 * b + 4), bytes, hipMemcpyDeviceToHost),
+                          hipSuccess);
+                EXPECT_EQ(actual, expectedE[b]) << "auxiliary block " << b;
+            }
+            else
+            {
+                const _Float16 expected = b == 0 ? 3.75f : 4.5f;
+                uint16_t       bits;
+                std::memcpy(&bits, &expected, sizeof(bits));
+                for(auto value : actual)
+                    ASSERT_EQ(value, bits);
+            }
+        }
+    }
 }

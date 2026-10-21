@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "hipblaslt_benchmark/gemm_tuning.hpp"
 #include "program_options.hpp"
 
 #include "hipblaslt_bench_options.hpp"
@@ -480,11 +481,11 @@ try
          "Report ULP (unit in the last place) error vs CPU; reports max and average. Implies --verify.")
 
         ("iters,i",
-         value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
+         value<int32_t>(&arg.iters)->default_value(tuningEnv ? hipblaslt_bench::GemmTuningDefaults::hot_iters : 10),
          "Iterations to run inside timing loop")
 
         ("cold_iters,j",
-         value<int32_t>(&arg.cold_iters)->default_value(tuningEnv? 1000 : 2),
+         value<int32_t>(&arg.cold_iters)->default_value(tuningEnv ? hipblaslt_bench::GemmTuningDefaults::cold_iters : 2),
          "Cold Iterations to run before entering the timing loop")
 
         ("adaptive",
@@ -668,11 +669,11 @@ try
          "Print solution, kernel name and solution index.")
 
         ("rotating",
-         value<int32_t>(&arg.rotating)->default_value(tuningEnv ? 512 : 0),
+         value<int32_t>(&arg.rotating)->default_value(tuningEnv ? hipblaslt_bench::GemmTuningDefaults::rotating_megabytes : 0),
          "Use rotating memory blocks for each iteration, size in MB.")
 
         ("use_gpu_timer",
-         value<bool>(&arg.use_gpu_timer)->default_value(false),
+         value<bool>(&arg.use_gpu_timer)->default_value(tuningEnv ? hipblaslt_bench::GemmTuningDefaults::gpu_timer : false),
          "Use hipEventElapsedTime to profile elapsed time.")
 
         ("skip_slow_solution_ratio",
@@ -690,7 +691,7 @@ try
          "[Tuning parameter] Set workgroup mapping for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)")
 
         ("flush",
-        value<bool>(&arg.flush)->default_value(tuningEnv ? true : false),
+        value<bool>(&arg.flush)->default_value(tuningEnv ? hipblaslt_bench::GemmTuningDefaults::flush : false),
         "Flush icache, only works for gemm.")
 
         ("dump_matrix",

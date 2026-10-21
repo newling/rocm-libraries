@@ -225,6 +225,7 @@ namespace hipblaslt_bench
     struct GemmTuningConfig;
     struct GemmTuningCallbacks;
     struct GemmTuningResult;
+    struct GemmTuningParameters;
 }
 
 void runGemmTuningSession(rocblaslt_handle                                handle,
@@ -235,14 +236,18 @@ void runGemmTuningSession(rocblaslt_handle                                handle
                           hipblaslt_bench::GemmTuningResult&              result);
 
 // Ordinary single-GEMM candidate policy shared by the public heuristic and tune mode.
-rocblaslt_status getGemmCandidates(RocblasltContractionProblem const& prob,
-                                   rocblaslt_handle                   handle,
-                                   std::shared_ptr<void>              gemmData,
-                                   bool                               exhaustive,
-                                   size_t                             limit,
-                                   int                                baselineIndex,
-                                   size_t                             maxWorkspaceBytes,
-                                   std::vector<rocblaslt_matmul_heuristic_result>& results);
+rocblaslt_status
+    getGemmCandidates(RocblasltContractionProblem const&                        prob,
+                      rocblaslt_handle                                          handle,
+                      std::shared_ptr<void>                                     gemmData,
+                      bool                                                      exhaustive,
+                      size_t                                                    limit,
+                      int                                                       baselineIndex,
+                      size_t                                                    maxWorkspaceBytes,
+                      std::vector<rocblaslt_matmul_heuristic_result>&           results,
+                      const std::vector<hipblaslt_bench::GemmTuningParameters>& variants = {},
+                      std::vector<size_t>*    parameterIndexes                           = nullptr,
+                      const std::vector<int>* suppliedIndexes                            = nullptr);
 
 /*******************************************************************************
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *

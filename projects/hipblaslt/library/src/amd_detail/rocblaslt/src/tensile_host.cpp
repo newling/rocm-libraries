@@ -3680,7 +3680,9 @@ namespace
          */
         static bool flushICache()
         {
-            return envInt("HIPBLASLT_TUNING_FLUSH_ICACHE", 1) != 0;
+            return envInt("HIPBLASLT_TUNING_FLUSH_ICACHE",
+                          hipblaslt_bench::GemmTuningDefaults::flush)
+                   != 0;
         }
         /**
          * Untimed launches before measuring, then launches in the timed batch.
@@ -3688,16 +3690,19 @@ namespace
          * The same fixed counts hipblaslt-bench uses when tuning, so a candidate
          * is measured over exactly the work bench would measure it over. Counts
          * rather than durations on purpose: matching bench's numbers is what
-         * makes the two comparable, and the tuner still finishes sooner because
-         * its launches cost about an eighth of what bench's do.
+         * makes the two comparable.
          */
         static int coldIterations()
         {
-            return std::max(0, envInt("HIPBLASLT_TUNING_COLD_ITERS", 1000));
+            return std::max(0,
+                            envInt("HIPBLASLT_TUNING_COLD_ITERS",
+                                   hipblaslt_bench::GemmTuningDefaults::cold_iters));
         }
         static int hotIterations()
         {
-            return std::max(1, envInt("HIPBLASLT_TUNING_HOT_ITERS", 1000));
+            return std::max(1,
+                            envInt("HIPBLASLT_TUNING_HOT_ITERS",
+                                   hipblaslt_bench::GemmTuningDefaults::hot_iters));
         }
         /**
          * Wall-clock ceiling for one shape, or zero for no ceiling.
@@ -3738,7 +3743,9 @@ namespace
          */
         static int rotatingMegabytes()
         {
-            return std::max(0, envInt("HIPBLASLT_TUNING_ROTATING_MB", 512));
+            return std::max(0,
+                            envInt("HIPBLASLT_TUNING_ROTATING_MB",
+                                   hipblaslt_bench::GemmTuningDefaults::rotating_megabytes));
         }
         static size_t rotatingBytes()
         {
@@ -3964,143 +3971,73 @@ namespace
            || prob.batch_offset_d != 0)
             return layout;
 
-        layout.bytesD = tensor_span_bytes(elementSizeOf(prob.d_type),
-                                          prob.m,
-                                          prob.n,
-                                          prob.col_stride_d,
-                                          prob.batch_count,
-                                          prob.batch_stride_d);
-        if(layout.bytesD == 0)
+        using hipblaslt_bench::GemmRotationTensor;
+        auto tensor = [&](hipDataType type,
+                          size_t      rows,
+                          size_t      cols,
+                          size_t      ld,
+                          size_t      stride,
+                          bool        swizzled = false) {
+            return GemmRotationTensor{
+                elementSizeOf(type), rows, cols, ld, size_t(prob.batch_count), stride, swizzled};
+        };
+        const auto c
+            = prob.C && !prob.batch_C
+                  ? tensor(prob.c_type, prob.m, prob.n, prob.col_stride_c, prob.batch_stride_c)
+                  : GemmRotationTensor{};
+        const auto e
+            = is_e_enabled(prob.epilogue)
+                  ? tensor(prob.aux_type, prob.m, prob.n, prob.col_stride_e, prob.batch_stride_e)
+                  : GemmRotationTensor{};
+        const size_t biasLength  = prob.epilogue == ROCBLASLT_EPILOGUE_BGRADB ? prob.n : prob.m;
+        const auto   bias        = is_grad_enabled(prob.epilogue) && prob.bias
+                                       ? tensor(prob.bias_type, biasLength, 1, biasLength, prob.bias_stride)
+                                       : GemmRotationTensor{};
+        const auto   description = hipblaslt_bench::gemm_rotation_layout(
+            prob.A && !prob.batch_A ? tensor(prob.a_type,
+                                             prob.trans_a == HIPBLAS_OP_N ? prob.m : prob.k,
+                                             prob.trans_a == HIPBLAS_OP_N ? prob.k : prob.m,
+                                             prob.col_stride_a,
+                                             prob.batch_stride_a,
+                                             prob.swizzleA)
+                                    : GemmRotationTensor{},
+            prob.B && !prob.batch_B ? tensor(prob.b_type,
+                                             prob.trans_b == HIPBLAS_OP_N ? prob.k : prob.n,
+                                             prob.trans_b == HIPBLAS_OP_N ? prob.n : prob.k,
+                                             prob.col_stride_b,
+                                             prob.batch_stride_b,
+                                             prob.swizzleB)
+                                    : GemmRotationTensor{},
+            c,
+            tensor(prob.d_type, prob.m, prob.n, prob.col_stride_d, prob.batch_stride_d),
+            e,
+            bias,
+            prob.C == prob.D,
+            is_grad_enabled(prob.epilogue));
+        if(!description.usable)
             return layout;
-
-        // An in-place problem reads C through the D block, so that block has to
-        // cover whichever tensor reaches further. C and D share a type but not
-        // necessarily a leading dimension or batch stride, and sizing from D
-        // alone lets a wider C read off the end of its block into whatever the
-        // layout placed next.
-        if(prob.C != nullptr && prob.C == prob.D)
-        {
-            bool expandedInPlaceC = false;
-            layout.bytesInPlaceC  = tensor_span_bytes(elementSizeOf(prob.c_type),
-                                                     prob.m,
-                                                     prob.n,
-                                                     prob.col_stride_c,
-                                                     prob.batch_count,
-                                                     prob.batch_stride_c,
-                                                     &expandedInPlaceC);
-            if(layout.bytesInPlaceC == 0 || expandedInPlaceC)
-                return layout;
-
-            layout.bytesD = std::max(layout.bytesD, layout.bytesInPlaceC);
-        }
-
-        if(is_e_enabled(prob.epilogue))
-        {
-            layout.bytesE = tensor_span_bytes(elementSizeOf(prob.aux_type),
-                                              prob.m,
-                                              prob.n,
-                                              prob.col_stride_e,
-                                              prob.batch_count,
-                                              prob.batch_stride_e);
-            if(layout.bytesE == 0)
-                return layout;
-        }
-
-        // A gradient epilogue writes the bias buffer instead of reading it. The
-        // length is a full D row or column depending on the source tensor, so
-        // take the larger and stay conservative.
-        if(is_grad_enabled(prob.epilogue) && prob.bias != nullptr)
-        {
-            // Through the same span helper as D and E. Multiplying length by
-            // batch count ignores the stride, so a bias_stride larger than the
-            // vector length under-allocates and the kernel writes past the end.
-            const size_t biasElements = std::max(prob.m, prob.n);
-            layout.bytesBias          = tensor_span_bytes(elementSizeOf(prob.bias_type),
-                                                 biasElements,
-                                                 1,
-                                                 biasElements,
-                                                 prob.batch_count,
-                                                 static_cast<size_t>(prob.bias_stride));
-            if(layout.bytesBias == 0)
-                return layout;
-        }
-
-        if(prob.amaxD != nullptr)
-            layout.bytesAmaxD = 256;
-
+        const auto& spans = description.spans;
+        layout.bytesA     = spans.a;
+        layout.bytesB     = spans.b;
+        layout.bytesC     = spans.c;
+        layout.bytesD     = spans.d;
+        layout.bytesE     = spans.e;
+        layout.bytesBias  = spans.bias;
+        if(prob.C == prob.D)
+            layout.bytesInPlaceC = tensor_span_bytes(
+                c.element_bytes, c.rows, c.cols, c.ld, c.batches, c.batch_stride);
+        layout.bytesAmaxD     = prob.amaxD ? 256 : 0;
         layout.bytesWorkspace = prob.workspaceSize;
-
-        // op(A) is m by k and op(B) is k by n, so the stored extents depend on
-        // the transposes; col_stride is the leading dimension.
-        const size_t rowsA = (prob.trans_a == HIPBLAS_OP_N) ? prob.m : prob.k;
-        const size_t colsA = (prob.trans_a == HIPBLAS_OP_N) ? prob.k : prob.m;
-        const size_t rowsB = (prob.trans_b == HIPBLAS_OP_N) ? prob.k : prob.n;
-        const size_t colsB = (prob.trans_b == HIPBLAS_OP_N) ? prob.n : prob.k;
-
-        bool expandedA = false, expandedB = false, expandedC = false;
-
-        layout.bytesA = tensor_span_bytes(elementSizeOf(prob.a_type),
-                                          rowsA,
-                                          colsA,
-                                          prob.col_stride_a,
-                                          prob.batch_count,
-                                          prob.batch_stride_a,
-                                          &expandedA);
-        layout.bytesB = tensor_span_bytes(elementSizeOf(prob.b_type),
-                                          rowsB,
-                                          colsB,
-                                          prob.col_stride_b,
-                                          prob.batch_count,
-                                          prob.batch_stride_b,
-                                          &expandedB);
-
-        // Only when C is its own buffer. An in-place problem reaches C through
-        // D, which rotates already.
-        if(prob.C != nullptr && prob.C != prob.D && prob.batch_C == nullptr)
-        {
-            layout.bytesC = tensor_span_bytes(elementSizeOf(prob.c_type),
-                                              prob.m,
-                                              prob.n,
-                                              prob.col_stride_c,
-                                              prob.batch_count,
-                                              prob.batch_stride_c,
-                                              &expandedC);
-        }
-
-        layout.strideD    = hipblaslt_bench::rotation_stride(layout.bytesD);
-        layout.strideA    = hipblaslt_bench::rotation_stride(layout.bytesA);
-        layout.strideB    = hipblaslt_bench::rotation_stride(layout.bytesB);
-        layout.strideC    = hipblaslt_bench::rotation_stride(layout.bytesC);
-        layout.strideE    = hipblaslt_bench::rotation_stride(layout.bytesE);
-        layout.strideBias = hipblaslt_bench::rotation_stride(layout.bytesBias);
-
-        // Rotation needs a readable source for A and B, and spans it can size.
-        // C is optional: a problem with no separate C still rotates the rest.
-        //
-        // A span that had to be expanded is an upper bound, not the size of the
-        // caller's allocation, so copying it would read past the end of a
-        // broadcast input. Swizzled A and B are declined for the mirror-image
-        // reason: their physical layout is a re-tiled, padded form whose size is
-        // not the logical span at all, so both the copy length and the per-block
-        // stride would be wrong. Neither case is worth guessing at, and
-        // declining only costs a cache-hot measurement.
-        const bool rotatable
-            = layout.bytesA != 0 && layout.bytesB != 0 && prob.A != nullptr && prob.B != nullptr
-              && prob.batch_A == nullptr && prob.batch_B == nullptr && !expandedA && !expandedB
-              && !(expandedC && layout.bytesC != 0) && !prob.swizzleA && !prob.swizzleB;
-
-        const auto   spans    = hipblaslt_bench::gemm_rotation_spans({layout.bytesA,
-                                                                      layout.bytesB,
-                                                                      layout.bytesC,
-                                                                      layout.bytesD,
-                                                                      layout.bytesE,
-                                                                      layout.bytesBias},
-                                                                prob.C == prob.D,
-                                                                is_grad_enabled(prob.epilogue));
+        layout.strideA        = hipblaslt_bench::rotation_stride(spans.a);
+        layout.strideB        = hipblaslt_bench::rotation_stride(spans.b);
+        layout.strideC        = hipblaslt_bench::rotation_stride(spans.c);
+        layout.strideD        = hipblaslt_bench::rotation_stride(spans.d);
+        layout.strideE        = hipblaslt_bench::rotation_stride(spans.e);
+        layout.strideBias     = hipblaslt_bench::rotation_stride(spans.bias);
         const size_t perBlock = hipblaslt_bench::gemm_rotation_bytes(spans);
         const auto   rotation = hipblaslt_bench::plan_gemm_rotation(
             spans,
-            rotatable,
+            description.rotatable,
             false,
             0,
             coldIters,
@@ -4253,28 +4190,17 @@ namespace
         auto outOfBudget = [&] { return budgetUs > 0.0 && elapsedUs() > budgetUs; };
 
         const bool inPlace = (prob.C == prob.D);
-        if(inPlace)
+        double     alpha = 0.0, beta = 0.0;
+        assignAlphaBeta(roc2TensileType(prob.compute_type, false),
+                        hipDataType_to_tensile_type(prob.a_type),
+                        prob.alpha,
+                        prob.beta,
+                        &alpha,
+                        &beta);
+        if(!hipblaslt_bench::gemm_tuning_eligible(inPlace, beta))
         {
-            double alpha = 0.0, beta = 0.0;
-            assignAlphaBeta(roc2TensileType(prob.compute_type, false),
-                            hipDataType_to_tensile_type(prob.a_type),
-                            prob.alpha,
-                            prob.beta,
-                            &alpha,
-                            &beta);
-            if(beta != 0.0)
-            {
-                // With C and D aliased, every launch overwrites the input for
-                // the next launch. The cold and the timed launches each cycle
-                // through the same rotation blocks, so a nonzero beta compounds
-                // C repeatedly and quickly measures Inf/NaN rather than the
-                // caller's problem. Resetting C
-                // inside the one event span would time the copies, so decline
-                // this case until the timing loop can provide an untimed reset
-                // before every reuse.
-                TensileLite::TuningCounters::instance().skipped++;
-                return TuningAttempt::SkippedInPlaceBeta;
-            }
+            TensileLite::TuningCounters::instance().skipped++;
+            return TuningAttempt::SkippedInPlaceBeta;
         }
 
         const ScratchLayout layout = planScratch(prob,
@@ -4407,6 +4333,18 @@ namespace
             }
         }
 
+        if(is_grad_enabled(prob.epilogue) && layout.bytesE)
+        {
+            for(size_t b = 0; b < blocks; ++b)
+                if(hipMemcpyAsync(bytes + layout.offsetE + b * layout.strideE,
+                                  prob.E,
+                                  layout.bytesE,
+                                  hipMemcpyDeviceToDevice,
+                                  prob.stream)
+                   != hipSuccess)
+                    return TuningAttempt::FallbackSetup;
+        }
+
         std::vector<RocblasltContractionProblem> problemBlocks;
         for(size_t b = 0; b < blocks; ++b)
         {
@@ -4432,7 +4370,7 @@ namespace
                              TuningPolicy::allKernels() ? 0u : size_t(TuningPolicy::candidateCap()),
                                        baselineIndex};
         config.timing.iters         = TuningPolicy::hotIterations();
-        config.timing.use_gpu_timer = true;
+        config.timing.use_gpu_timer = hipblaslt_bench::GemmTuningDefaults::gpu_timer;
         config.search.cold_calls    = TuningPolicy::coldIterations();
         config.search.flush         = TuningPolicy::flushICache();
         hipblaslt_bench::GemmTuningResult    session;
@@ -4543,6 +4481,14 @@ namespace
     }
 } // namespace
 
+static rocblaslt_status
+    checkGemmTuningCandidate(rocblaslt_handle                             handle,
+                             const RocblasltContractionProblem&           problem,
+                             TensileLite::ContractionProblemGemm&         tensileProblem,
+                             rocblaslt_matmul_algo&                       algo,
+                             const hipblaslt_bench::GemmTuningParameters& parameters,
+                             size_t&                                      workspace);
+
 void runGemmTuningSession(rocblaslt_handle                                handle,
                           const std::vector<RocblasltContractionProblem>& blocks,
                           std::shared_ptr<void>                           gemmData,
@@ -4558,6 +4504,27 @@ void runGemmTuningSession(rocblaslt_handle                                handle
         return;
     }
     const auto& prob = blocks.front();
+    for(const auto& block : blocks)
+    {
+        double alpha = 0, beta = 0;
+        assignAlphaBeta(roc2TensileType(block.compute_type, false),
+                        hipDataType_to_tensile_type(block.a_type),
+                        block.alpha,
+                        block.beta,
+                        &alpha,
+                        &beta);
+        if(!gemm_tuning_eligible(block.C == block.D, beta))
+        {
+            result.ineligible = true;
+            return;
+        }
+    }
+    if(config.supplied_candidates && !config.parameters.empty()
+       && config.parameters.size() != config.indexes.size())
+    {
+        result.setup_failed = true;
+        return;
+    }
     struct Drain
     {
         hipStream_t stream;
@@ -4579,22 +4546,16 @@ void runGemmTuningSession(rocblaslt_handle                                handle
     }
     std::vector<std::vector<TensileLite::KernelInvocation>> invocations;
     Drain                                                   drain{prob.stream};
-    auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-    struct Restore
-    {
-        TensileDataGemm&                    data;
-        TensileLite::ContractionProblemGemm problem;
-        ~Restore()
-        {
-            data.problem = std::move(problem);
-        }
-    } restore{*data, data->problem};
-
     if(config.supplied_candidates)
+    {
         result.indexes = config.indexes;
+        result.parameters = config.parameters;
+        result.parameters.resize(result.indexes.size());
+    }
     else
     {
         std::vector<rocblaslt_matmul_heuristic_result> candidates;
+        std::vector<size_t>                            parameterIndexes;
         if(getGemmCandidates(prob,
                              handle,
                              gemmData,
@@ -4602,11 +4563,18 @@ void runGemmTuningSession(rocblaslt_handle                                handle
                              config.candidates.limit,
                              config.candidates.baseline,
                              prob.workspaceSize,
-                             candidates)
+                             candidates,
+                             config.variants,
+                             &parameterIndexes)
            != rocblaslt_status_success)
             result.enumeration_failed = true;
-        for(const auto& candidate : candidates)
-            result.indexes.push_back(*(const int*)candidate.algo.data);
+        for(size_t i = 0; i < candidates.size(); ++i)
+        {
+            result.indexes.push_back(*(const int*)candidates[i].algo.data);
+            result.parameters.push_back(config.variants.empty()
+                                            ? GemmTuningParameters{}
+                                            : config.variants[parameterIndexes[i]]);
+        }
     }
     if(result.indexes.empty())
     {
@@ -4680,17 +4648,22 @@ void runGemmTuningSession(rocblaslt_handle                                handle
             rocblaslt_matmul_algo algo{};
             *(int*)algo.data         = result.indexes[c];
             algo.max_workspace_bytes = prob.workspaceSize;
-            supported                = solution
-                        && isSolutionSupported(handle, probe, gemmData, &algo, &required)
+            auto        tensileProblem = ConstructTensileProblem(probe);
+            const auto& parameters     = result.parameters[c];
+            supported                  = solution
+                        && checkGemmTuningCandidate(
+                               handle, probe, tensileProblem, algo, parameters, required)
                                == rocblaslt_status_success
                         && required <= prob.workspaceSize;
+            if(supported)
+                tensileProblem.setParams().setWGMXCC(solution->isFallbackForHW(*hardware) ? 1 : 0);
             if(supported && prob.Synchronizer)
                 supported = hipMemsetAsync(prob.Synchronizer, 0, kSynchronizerBytes, prob.stream)
                             == hipSuccess;
             if(supported)
                 for(const auto& block : blocks)
                     invocations.push_back(
-                        solution->solve(data->problem, GetTensileInputs(block), *hardware));
+                        solution->solve(tensileProblem, GetTensileInputs(block), *hardware));
         }
         catch(...)
         {
@@ -6764,16 +6737,22 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
     return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes);
 }
 
-rocblaslt_status getGemmCandidates(RocblasltContractionProblem const& prob,
-                                   rocblaslt_handle                   handle,
-                                   std::shared_ptr<void>              gemmData,
-                                   bool                               exhaustive,
-                                   size_t                             limit,
-                                   int                                baselineIndex,
-                                   size_t                             maxWorkspaceBytes,
-                                   std::vector<rocblaslt_matmul_heuristic_result>& results)
+rocblaslt_status
+    getGemmCandidates(RocblasltContractionProblem const&                        prob,
+                      rocblaslt_handle                                          handle,
+                      std::shared_ptr<void>                                     gemmData,
+                      bool                                                      exhaustive,
+                      size_t                                                    limit,
+                      int                                                       baselineIndex,
+                      size_t                                                    maxWorkspaceBytes,
+                      std::vector<rocblaslt_matmul_heuristic_result>&           results,
+                      const std::vector<hipblaslt_bench::GemmTuningParameters>& variants,
+                      std::vector<size_t>*                                      parameterIndexes,
+                      const std::vector<int>*                                   suppliedIndexes)
 {
-    if((!exhaustive && limit == 0) || limit > INT_MAX)
+    if(parameterIndexes)
+        parameterIndexes->clear();
+    if((!suppliedIndexes && !exhaustive && limit == 0) || limit > INT_MAX)
         return rocblaslt_status_invalid_value;
     results.clear();
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
@@ -6806,37 +6785,57 @@ rocblaslt_status getGemmCandidates(RocblasltContractionProblem const& prob,
         return indexes(values);
     };
     auto all = [&] {
+        if(suppliedIndexes)
+            return *suppliedIndexes;
         auto                                           copy = prob;
         std::vector<rocblaslt_matmul_heuristic_result> values;
         status = getAllSolutions(copy, handle, values, maxWorkspaceBytes);
         return indexes(values);
     };
     auto accept = [&](int index) {
-        try
+        bool accepted = false;
+        for(size_t v = 0; v < std::max<size_t>(1, variants.size()); ++v)
         {
-            // Replay must resolve the same kernel that was measured, even when
-            // enumeration materialises a different placeholder library.
-            if(!useRocRoller(handle, prob) && !library->getSolutionByIndex(*hardware, index))
-                return false;
-            rocblaslt_matmul_heuristic_result result{};
-            *(int*)result.algo.data         = index;
-            result.algo.max_workspace_bytes = maxWorkspaceBytes;
-            if(isSolutionSupportedNoMutation(
-                   handle, prob, gemmData, &result.algo, &result.workspaceSize)
-                   != rocblaslt_status_success
-               || result.workspaceSize > maxWorkspaceBytes)
-                return false;
-            result.state = rocblaslt_status_success;
-            results.push_back(result);
-            return true;
+            try
+            {
+                // Replay must resolve the same kernel that was measured.
+                if(!useRocRoller(handle, prob) && !library->getSolutionByIndex(*hardware, index))
+                    continue;
+                rocblaslt_matmul_heuristic_result result{};
+                *(int*)result.algo.data         = index;
+                result.algo.max_workspace_bytes = maxWorkspaceBytes;
+                rocblaslt_status supported;
+                if(useRocRoller(handle, prob))
+                    supported = isSolutionSupportedNoMutation(
+                        handle, prob, gemmData, &result.algo, &result.workspaceSize);
+                else
+                {
+                    auto tensileProblem = ConstructTensileProblem(prob);
+                    supported           = checkGemmTuningCandidate(
+                        handle,
+                        prob,
+                        tensileProblem,
+                        result.algo,
+                        variants.empty() ? hipblaslt_bench::GemmTuningParameters{} : variants[v],
+                        result.workspaceSize);
+                }
+                if(supported != rocblaslt_status_success
+                   || result.workspaceSize > maxWorkspaceBytes)
+                    continue;
+                result.state = rocblaslt_status_success;
+                results.push_back(result);
+                if(parameterIndexes)
+                    parameterIndexes->push_back(v);
+                accepted = true;
+            }
+            catch(...)
+            {
+            }
         }
-        catch(...)
-        {
-            return false;
-        }
+        return accepted;
     };
     hipblaslt_bench::select_candidate_indexes(
-        {exhaustive, limit, baselineIndex}, ranked, all, accept);
+        {exhaustive || suppliedIndexes != nullptr, limit, baselineIndex}, ranked, all, accept);
     return results.empty() ? status : rocblaslt_status_success;
 }
 
@@ -7190,6 +7189,26 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         *workspaceSizeInBytes = problemWs;
     }
     return rocblaslt_status_success;
+}
+
+static rocblaslt_status
+    checkGemmTuningCandidate(rocblaslt_handle                             handle,
+                             const RocblasltContractionProblem&           problem,
+                             TensileLite::ContractionProblemGemm&         tensileProblem,
+                             rocblaslt_matmul_algo&                       algo,
+                             const hipblaslt_bench::GemmTuningParameters& parameters,
+                             size_t&                                      workspace)
+{
+    auto                   probe = problem;
+    rocblaslt::RocTuningV2 tuning;
+    tuning.gsu = parameters.split_k;
+    tuning.wgm = parameters.wgm;
+    return isSolutionSupported(handle,
+                               tensileProblem,
+                               probe,
+                               &algo,
+                               parameters.split_k || parameters.wgm ? &tuning : nullptr,
+                               &workspace);
 }
 
 rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,

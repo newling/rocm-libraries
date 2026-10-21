@@ -2044,22 +2044,34 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     std::vector<void*> alpha_in(gemm_count);
 
-    hipblaslt_bench::GemmRotationSpans ordinaryRotationSpans;
-    bool                               ordinaryRotatable = false;
-    const bool                         sharedOrdinaryRotation
-        = !do_grouped_gemm && batchMode == HIPBLASLT_BATCH_MODE_STRIDED && !arg.bias_vector
-          && !arg.use_e && !arg.scaleAlpha_vector && arg.scaleA == hipblaslt_scaling_format::none
-          && arg.scaleB == hipblaslt_scaling_format::none;
-    const char* rocRoller              = getenv("HIPBLASLT_USE_ROCROLLER");
-    const bool  useSharedTuningSession = sharedOrdinaryRotation && !arg.use_ext && !arg.scaleC
-                                        && !arg.scaleD && !arg.amaxD
-                                        && !(rocRoller && *rocRoller == '1');
-    const bool enumerateSharedCandidates = useSharedTuningSession && arg.timing
-                                           && arg.algo_method != 2 && !arg.requires_streamk
-                                           && !getenv("HIPBLASLT_TUNING_FILE");
+    hipblaslt_bench::GemmRotationSpans sharedRotationSpans;
+    bool                               sharedRotatable          = false;
+    size_t                             sharedBiasStrideElements = 0;
+    const bool  singleStridedGemm = !do_grouped_gemm && batchMode == HIPBLASLT_BATCH_MODE_STRIDED;
+    const char* rocRoller         = getenv("HIPBLASLT_USE_ROCROLLER");
     bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
     bool mx_use_rocroller = MXUseRocroller();
+    const bool  useSharedTuningSession
+        = singleStridedGemm && arg.timing && !(rocRoller && *rocRoller == '1')
+          && !(mx_use_rocroller && (isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB)));
+    const bool sharedRotation
+        = useSharedTuningSession
+          || (singleStridedGemm && !arg.bias_vector && !arg.use_e && !arg.scaleAlpha_vector
+              && arg.scaleA == hipblaslt_scaling_format::none
+              && arg.scaleB == hipblaslt_scaling_format::none);
+    const bool enumerateSharedCandidates = useSharedTuningSession;
+    if(useSharedTuningSession && arg.timing
+       && !hipblaslt_bench::gemm_tuning_eligible(arg.c_equal_d, arg.beta))
+    {
+#ifdef GOOGLE_TEST
+        GTEST_SKIP() << "Repeated in-place tuning with nonzero beta overwrites its input";
+#else
+        hipblaslt_cerr << "Repeated in-place tuning with nonzero beta overwrites its input"
+                       << std::endl;
+#endif
+        return;
+    }
 
     // Need to split into two for loop to calculate the rotating buffer
     int64_t totalRotatingSizeNeeded = 0;
@@ -2261,31 +2273,54 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             size_bias[i] = 0;
         }
-        if(sharedOrdinaryRotation)
+        if(sharedRotation)
         {
-            bool expandedA = false, expandedB = false, expandedC = false;
-            auto span = [&](size_t elementBytes,
-                            size_t rows,
-                            size_t cols,
-                            size_t ld,
-                            size_t batchStride,
-                            bool*  expanded = nullptr) {
-                return hipblaslt_bench::tensor_span_bytes(
-                    elementBytes, rows, cols, ld, num_batches[i], batchStride, expanded);
+            using hipblaslt_bench::GemmRotationTensor;
+            auto tensor = [&](hipDataType type,
+                              size_t      rows,
+                              size_t      cols,
+                              size_t      ld,
+                              size_t      stride,
+                              bool        swizzled = false) {
+                return GemmRotationTensor{realDataTypeSize(type),
+                                          rows,
+                                          cols,
+                                          ld,
+                                          size_t(num_batches[i]),
+                                          stride,
+                                          swizzled};
             };
-            const auto spans = hipblaslt_bench::gemm_rotation_spans(
-                {span(realDataTypeSize(TiA), A_row[i], A_col[i], lda[i], stride_a[i], &expandedA),
-                 span(realDataTypeSize(TiB), B_row[i], B_col[i], ldb[i], stride_b[i], &expandedB),
-                 span(realDataTypeSize(To), M[i], N[i], ldc[i], stride_c[i], &expandedC),
-                 span(realDataTypeSize(To), M[i], N[i], ldd[i], stride_d[i]),
-                 0,
-                 0},
+            const size_t biasLength  = arg.bias_source == hipblaslt_bias_source::b ? N[i] : M[i];
+            const auto   description = hipblaslt_bench::gemm_rotation_layout(
+                tensor(TiA, A_row[i], A_col[i], lda[i], stride_a[i], do_swizzle_a),
+                tensor(TiB, B_row[i], B_col[i], ldb[i], stride_b[i], do_swizzle_b),
+                tensor(To, M[i], N[i], ldc[i], stride_c[i]),
+                tensor(To, M[i], N[i], ldd[i], stride_d[i]),
+                arg.use_e ? tensor(Taux, M[i], N[i], lde[i], stride_e[i]) : GemmRotationTensor{},
+                arg.bias_vector && arg.gradient
+                      ? tensor(Tbias, biasLength, 1, biasLength, arg.bias_stride)
+                      : GemmRotationTensor{},
                 arg.c_equal_d,
-                false);
-            totalRotatingSizeNeeded = hipblaslt_bench::gemm_rotation_bytes(spans);
-            ordinaryRotationSpans   = spans;
-            ordinaryRotatable       = !do_swizzle_a && !do_swizzle_b && !expandedA && !expandedB
-                                && !expandedC && spans.a != 0 && spans.b != 0;
+                arg.gradient);
+            sharedRotationSpans     = description.spans;
+            totalRotatingSizeNeeded = hipblaslt_bench::gemm_rotation_bytes(description.spans);
+            sharedRotatable         = description.usable && description.rotatable;
+            if(useSharedTuningSession && arg.timing && sharedRotatable)
+            {
+                auto elements = [](size_t bytes, hipDataType type) {
+                    return hipblaslt_bench::rotation_stride(bytes) / realDataTypeSize(type);
+                };
+                size_A[i] = size_dA[i] = elements(description.spans.a, TiA);
+                size_B[i] = size_dB[i] = elements(description.spans.b, TiB);
+                size_C[i] = elements(arg.c_equal_d ? description.spans.d : description.spans.c, To);
+                size_D[i] = elements(description.spans.d, To);
+                size_D_copy[i]
+                    = (arg.unit_check || arg.norm_check || arg.allclose_check) ? size_D[i] : 0;
+                if(arg.use_e)
+                    size_E[i] = elements(description.spans.e, Taux);
+                if(arg.bias_vector && arg.gradient)
+                    sharedBiasStrideElements = elements(description.spans.bias, Tbias);
+            }
             continue;
         }
         auto    biasSize = size_bias[i] * realDataTypeSize(Tbias);
@@ -2436,9 +2471,9 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
 
     // Calculating block count
-    auto    plan        = sharedOrdinaryRotation
-                              ? hipblaslt_bench::plan_gemm_rotation(ordinaryRotationSpans,
-                                                          ordinaryRotatable,
+    auto    plan        = sharedRotation
+                              ? hipblaslt_bench::plan_gemm_rotation(sharedRotationSpans,
+                                                          sharedRotatable,
                                                           arg.adaptive,
                                                           arg.max_iters,
                                                           arg.cold_iters,
@@ -2851,9 +2886,14 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(size_bias[i] * block_count != 0)
             {
-                CHECK_PLACEMENT(allocate(dBias, Tbias, size_bias[i] * block_count, "bias"),
-                                placement_unsupported,
-                                placement_why);
+                CHECK_PLACEMENT(
+                    allocate(dBias,
+                             Tbias,
+                             (sharedBiasStrideElements ? sharedBiasStrideElements : size_bias[i])
+                                 * block_count,
+                             "bias"),
+                    placement_unsupported,
+                    placement_why);
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
 
@@ -4195,7 +4235,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     const void* bias_addr
                         = (const void*)(dBias[i].as<char>()
-                                        + b * size_bias[i] * realDataTypeSize(Tbias));
+                                        + (useSharedTuningSession && !arg.gradient ? 0 : b)
+                                              * (sharedBiasStrideElements ? sharedBiasStrideElements
+                                                                          : size_bias[i])
+                                              * realDataTypeSize(Tbias));
                     EXPECT_HIPBLAS_STATUS(
                         hipblasLtMatmulDescSetAttribute(matmul[b][i],
                                                         HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
@@ -4217,7 +4260,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleA != hipblaslt_scaling_format::none)
             {
                 hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
-                void* scaleA_addr = (void*)(dScaleA[i].as<char>() + b * size_scaleAVec[i]);
+                void*                           scaleA_addr = (void*)(dScaleA[i].as<char>()
+                                            + (useSharedTuningSession ? 0 : b) * size_scaleAVec[i]);
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[b][i], attr, &scaleA_addr, sizeof(void*)));
             }
@@ -4225,7 +4269,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleB != hipblaslt_scaling_format::none)
             {
                 hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
-                void* scaleB_addr = (void*)(dScaleB[i].as<char>() + b * size_scaleBVec[i]);
+                void*                           scaleB_addr = (void*)(dScaleB[i].as<char>()
+                                            + (useSharedTuningSession ? 0 : b) * size_scaleBVec[i]);
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[b][i], attr, &scaleB_addr, sizeof(void*)));
             }
@@ -4511,7 +4556,64 @@ void testing_matmul_with_bias(const Arguments& arg,
         tuningVec.push_back(hipblaslt_ext::GemmTuning());
     }
 
-    if(arg.algo_method == 2)
+    if(enumerateSharedCandidates)
+    {
+        const hipblaslt_bench::GemmTuningBlock block{
+            dA[0].as<char>(), dB[0].as<char>(), dC[0].as<char>(), (*dDp)[0].as<char>()};
+        std::vector<hipblaslt_bench::GemmTuningParameters> variants;
+        for(const auto& tuning : tuningVec)
+            variants.push_back({tuning.getSplitK(), tuning.getWgm()});
+        std::vector<size_t> variantIndexes;
+        std::vector<int>    explicitIndexes{arg.solution_index};
+        const bool          indexSearch   = arg.algo_method == 2;
+        const bool          explicitIndex = indexSearch && arg.solution_index != -1;
+        int                 baseline      = -1;
+        if(getenv("HIPBLASLT_TUNING_FILE") && !indexSearch)
+        {
+            hipblasLtMatmulHeuristicResult_t preferred{};
+            int                              count = 0;
+            if(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                               matmul[0][0],
+                                               matA[0],
+                                               matB[0],
+                                               matC[0],
+                                               matD[0],
+                                               pref,
+                                               1,
+                                               &preferred,
+                                               &count)
+                   == HIPBLAS_STATUS_SUCCESS
+               && count == 1)
+                baseline = hipblaslt_ext::getIndexFromAlgo(preferred.algo);
+        }
+        const bool enumerated = hipblaslt_bench::gemm_tuning_candidates(
+            handle,
+            matmul[0][0],
+            matA[0],
+            matB[0],
+            matC[0],
+            matD[0],
+            alpha_in[0],
+            &h_beta[0],
+            block,
+            max_workspace_size,
+            {arg.algo_method == 1 || indexSearch || arg.requested_solution_num < 0,
+             indexSearch                      ? 1u
+             : arg.requested_solution_num < 0 ? 0u
+                                              : size_t(requestAlgoCount),
+             baseline},
+            heuristicResult,
+            variants,
+            &variantIndexes,
+            explicitIndex ? &explicitIndexes : nullptr);
+        EXPECT_HIPBLAS_STATUS(enumerated ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_INTERNAL_ERROR,
+                              HIPBLAS_STATUS_SUCCESS);
+        heuristicTuningIndex.assign(variantIndexes.begin(), variantIndexes.end());
+        for(const auto& candidate : heuristicResult)
+            workspace_size = std::max(workspace_size, candidate.workspaceSize);
+        CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
+    }
+    else if(arg.algo_method == 2)
     {
         heuristicResult.clear();
         heuristicTuningIndex.clear();
@@ -4883,30 +4985,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             verifyMixedValidityContract();
         }
-    }
-    else if(enumerateSharedCandidates)
-    {
-        const hipblaslt_bench::GemmTuningBlock block{
-            dA[0].as<char>(), dB[0].as<char>(), dC[0].as<char>(), (*dDp)[0].as<char>()};
-        const bool enumerated = hipblaslt_bench::gemm_tuning_candidates(
-            handle,
-            matmul[0][0],
-            matA[0],
-            matB[0],
-            matC[0],
-            matD[0],
-            alpha_in[0],
-            &h_beta[0],
-            block,
-            max_workspace_size,
-            {arg.algo_method == 1, size_t(requestAlgoCount), -1},
-            heuristicResult);
-        EXPECT_HIPBLAS_STATUS(enumerated ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_INTERNAL_ERROR,
-                              HIPBLAS_STATUS_SUCCESS);
-        heuristicTuningIndex.resize(heuristicResult.size(), 0);
-        for(const auto& candidate : heuristicResult)
-            workspace_size = std::max(workspace_size, candidate.workspaceSize);
-        CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
     }
     else if(arg.algo_method == 1)
     {
@@ -5303,11 +5381,14 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
+    if(useSharedTuningSession)
+        workspace_size = max_workspace_size;
+
     // A placed workspace replaces the normal one, which placement runs never use: placement
     // requires fast_check, and fast_check refuses timing runs.
     const bool placeWorkspace = !strcmp(arg.placement, "workspace");
     dWorkspace                = std::make_unique<device_vector<unsigned char>>(
-        placeWorkspace ? 0 : workspace_size * block_count, 1, HMM);
+        placeWorkspace ? 0 : workspace_size * (useSharedTuningSession ? 1 : block_count), 1, HMM);
     CHECK_DEVICE_ALLOCATION(dWorkspace->memcheck());
 
     // The workspace the checked solutions use. A placed workspace moves for each solution, so
@@ -6613,7 +6694,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 // from best_k_name below.
                 if(arg.print_kernel_info || tuningEnv)
                 {
-                    if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                    if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+                       && !useSharedTuningSession)
                     {
                         if(!do_grouped_gemm)
                         {
@@ -6688,7 +6770,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         else if(!do_grouped_gemm)
         {
             searchCfg.flush = arg.flush;
-            if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+               && !useSharedTuningSession)
             {
                 search = hipblaslt_bench::search_candidates<ClientBenchmarkHooks>(
                     heuristicResult.size(),
@@ -6829,18 +6912,24 @@ void testing_matmul_with_bias(const Arguments& arg,
                 std::vector<hipblaslt_bench::GemmTuningBlock> buffers;
                 for(int32_t b = 0; b < block_count; ++b)
                 {
-                    buffers.push_back(
-                        {dA[0].as<char>() + b * size_dA[0] * realDataTypeSize(TiA),
-                         dB[0].as<char>() + b * size_dB[0] * realDataTypeSize(TiB),
-                         dC[0].as<char>() + b * size_C[0] * realDataTypeSize(To),
-                         (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To)});
+                    buffers.push_back({dA[0].as<char>() + b * size_dA[0] * realDataTypeSize(TiA),
+                                       dB[0].as<char>() + b * size_dB[0] * realDataTypeSize(TiB),
+                                       dC[0].as<char>() + b * size_C[0] * realDataTypeSize(To),
+                                       (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To),
+                                       matmul[b][0],
+                                       alpha_ptr});
                 }
                 hipblaslt_bench::GemmTuningConfig config;
                 config.timing              = timingCfg;
                 config.search              = searchCfg;
                 config.supplied_candidates = true;
-                for(auto& candidate : heuristicResult)
-                    config.indexes.push_back(hipblaslt_ext::getIndexFromAlgo(candidate.algo));
+                for(size_t sol = 0; sol < heuristicResult.size(); ++sol)
+                {
+                    config.indexes.push_back(
+                        hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo));
+                    const auto& tuning = tuningVec[heuristicTuningIndex[sol]];
+                    config.parameters.push_back({tuning.getSplitK(), tuning.getWgm()});
+                }
                 hipblaslt_bench::GemmTuningCallbacks callbacks;
                 callbacks.failed = [&](size_t) {
                     cotenant.reset();
