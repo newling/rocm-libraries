@@ -1148,6 +1148,21 @@ def test_read_custom_kernel_config_duplicate_entry_takes_the_whole_block_path(tm
     assert ck_mod._customConfigYaml(contents) is None
     assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 2}
 
+@pytest.mark.parametrize("lastKey", [
+    '"custom.config"',
+    "'custom.config'",
+    '"custom\\u002econfig"',
+    "? custom.config\n",
+    "custom.config ",
+])
+def test_read_custom_kernel_config_duplicate_key_spellings(tmp_path, lastKey):
+    _write_metadata(
+        tmp_path / "k.s",
+        "custom.config: {A: 1}\n" + lastKey + ": {A: 2}\n",
+    )
+    assert ck_mod._customConfigYaml(ck_mod.getCustomKernelContents("k", str(tmp_path))) is None
+    assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 2}
+
 def test_read_custom_kernel_config_key_text_inside_a_quoted_scalar_takes_the_whole_block_path(tmp_path):
     # The first column-0 "custom.config:" line is part of a multi-line quoted
     # scalar, not a key.

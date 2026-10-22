@@ -207,7 +207,7 @@ def getCustomKernelSource(name, rocmVersion, directory=None):
         if "amdhsa_user_sgpr_kernarg_preload" not in line
     )
 
-_CUSTOM_CONFIG_KEY = re.compile(r"custom\.config:(\s|$)")
+_CUSTOM_CONFIG_KEY = re.compile(r"custom\.config[ \t]*:(\s|$)")
 
 def _embeddedYamlLines(contents):
     """Lines between '---' and the first '...' of the .amdgpu_metadata block."""
@@ -233,12 +233,17 @@ def _customConfigYaml(contents):
     of an earlier key, so the first match is not safe to slice on its own; the
     whole block decides instead.
 
+    Quoted, explicit, tagged, anchored, or aliased keys also require a whole
+    block parse because they can spell another custom.config key.
+
     The text ends with a newline so that a block scalar ending the entry keeps
     its final newline, as it does in a whole-block parse.
     """
     section = None
     inEntry = False
     for line in _embeddedYamlLines(contents):
+        if line and line[0] in "'\"?!&*":
+            return None
         if _CUSTOM_CONFIG_KEY.match(line):
             if section is not None:
                 return None
