@@ -236,19 +236,32 @@ def _customConfigYaml(contents):
     Quoted, explicit, tagged, anchored, or aliased keys also require a whole
     block parse because they can spell another custom.config key.
 
+    A nonempty prefix must parse as a mapping on its own; otherwise the match
+    can be text inside an unfinished quoted scalar or flow collection.
+
     The text ends with a newline so that a block scalar ending the entry keeps
     its final newline, as it does in a whole-block parse.
     """
     section = None
     inEntry = False
+    prefix = []
     for line in _embeddedYamlLines(contents):
         if line and line[0] in "'\"?!&*":
             return None
         if _CUSTOM_CONFIG_KEY.match(line):
             if section is not None:
                 return None
+            if any(part.strip() and not part.lstrip().startswith("#") for part in prefix):
+                try:
+                    preceding = yaml.load("\n".join(prefix) + "\n", Loader=SafeLoader)
+                except yaml.YAMLError:
+                    return None
+                if not isinstance(preceding, dict):
+                    return None
             section = [line]
             inEntry = True
+        elif section is None:
+            prefix.append(line)
         elif inEntry:
             if line and line[0] not in " \t#":
                 inEntry = False

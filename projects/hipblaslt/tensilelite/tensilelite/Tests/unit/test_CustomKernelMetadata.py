@@ -1174,6 +1174,18 @@ def test_read_custom_kernel_config_key_text_inside_a_quoted_scalar_takes_the_who
         """)
     assert readCustomKernelConfig("k", str(tmp_path)) == {"A": 1}
 
+@pytest.mark.parametrize("yamlText", [
+    'note: "text\ncustom.config: {A: 1}\nend"\n',
+    'note: \'text\ncustom.config: {A: 1}\nend\'\n',
+    'note:\n  nested: "text\ncustom.config: {A: 1}\nend"\n',
+    "[\ncustom.config: {A: 1}\n]\n",
+])
+def test_read_custom_kernel_config_rejects_key_text_outside_a_top_level_mapping(tmp_path, yamlText):
+    _write_metadata(tmp_path / "k.s", yamlText)
+    assert ck_mod._customConfigYaml(ck_mod.getCustomKernelContents("k", str(tmp_path))) is None
+    with pytest.raises(RuntimeError, match="has no custom.config"):
+        readCustomKernelConfig("k", str(tmp_path))
+
 @pytest.mark.parametrize("indicator", ["|", ">", "|+"])
 @pytest.mark.parametrize("configIsLast", [False, True])
 def test_read_custom_kernel_config_keeps_the_final_newline_of_a_block_scalar(
