@@ -817,7 +817,7 @@ the set of architectures the library supports or builds for.
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
 | Linux, gfx103X / gfx120X | Partial | Nightly | |
-| Linux, gfx1250 / gfx1250-strict | Client test suite | On demand, by manual dispatch of the `HW gfx1250` lane | Not gating. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) for how cases are enabled there |
+| Linux, gfx1250-strict | Client test suite and TensileLite common tests | Eligible PRs, nightly on develop, and manual dispatch | The [gfx1250 workflow](../../.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml) checks non-draft PRs with an accepted organization label and relevant file changes. It verifies strict mode before testing. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) |
 
 ### Scoping test cases to architectures
 
@@ -826,7 +826,7 @@ A client test case can be limited to some architectures in its YAML:
 - **`gpu_arch` and `gpu_arch_exclude`** are regular expressions searched against the device name with
   its `gfx` prefix removed and its feature suffix kept, for example `1250:sramecc+:xnack-` or
   `1250-strict:sramecc+:xnack-`. A case runs when `gpu_arch` matches (or is empty) and
-  `gpu_arch_exclude` doesn't. Each holds at most 31 characters; test data generation fails on a
+  `gpu_arch_exclude` doesn't. Each holds at most 31 UTF-8 bytes; test data generation fails on a
   longer pattern rather than storing it unterminated.
 - **`known_bug_platforms`** in [`known_bugs.yaml`](clients/tests/data/known_bugs.yaml) is an exact,
   case-insensitive list of names without the feature suffix, so `gfx1250` and `gfx1250-strict` are
@@ -834,8 +834,8 @@ A client test case can be limited to some architectures in its YAML:
 
 For gfx1250:
 
-- **A case that applies to gfx1250 runs on gfx1250 and gfx1250-strict.** Any pattern containing
-  `1250` matches both names.
+- **A case that applies to gfx1250 runs on gfx1250 and gfx1250-strict.** Appending the unanchored
+  alternative `|1250` to an architecture pattern matches both names, including feature suffixes.
 - **A failure seen only in strict mode** is quarantined with `known_bug_platforms: "gfx1250-strict"`
   and a tracker, like any other known bug. Use `gpu_arch_exclude: 'strict'` only for a case that can
   never apply in strict mode, with a comment saying why.
