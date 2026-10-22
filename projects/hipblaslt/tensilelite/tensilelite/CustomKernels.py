@@ -32,8 +32,7 @@ import yaml
 
 import os
 
-# rocRoller kernels embed their full kernel graph in .amdgpu_metadata, which the
-# pure-Python SafeLoader takes over a second per kernel to parse.
+# Prefer libyaml for reading embedded metadata; Python-only PyYAML remains supported.
 try:
     from yaml import CSafeLoader as SafeLoader
 except ImportError:
@@ -207,8 +206,6 @@ def getCustomKernelSource(name, rocmVersion, directory=None):
         if "amdhsa_user_sgpr_kernarg_preload" not in line
     )
 
-_CUSTOM_CONFIG_KEY = re.compile(r"custom\.config:(\s|$)")
-
 def _embeddedYamlLines(contents):
     """Lines between '---' and the first '...' of the .amdgpu_metadata block."""
     inYaml = False
@@ -221,76 +218,25 @@ def _embeddedYamlLines(contents):
         if inYaml:
             yield line
 
-def _customConfigYaml(contents):
-    """Text of the top-level custom.config entry, or None if it is not found.
-
-    The entry runs until the next line that starts in column 0 with something
-    other than a comment.
-
-    The scan continues to the end of the block, and a second column-0
-    "custom.config:" line makes the result None. PyYAML keeps the last of two
-    duplicate keys, and the same line can sit inside a multi-line quoted scalar
-    of an earlier key, so the first match is not safe to slice on its own; the
-    whole block decides instead.
-
-    The text ends with a newline so that a block scalar ending the entry keeps
-    its final newline, as it does in a whole-block parse.
-    """
-    section = None
-    inEntry = False
-    for line in _embeddedYamlLines(contents):
-        if _CUSTOM_CONFIG_KEY.match(line):
-            if section is not None:
-                return None
-            section = [line]
-            inEntry = True
-        elif inEntry:
-            if line and line[0] not in " \t#":
-                inEntry = False
-            else:
-                section.append(line)
-    return None if section is None else "\n".join(section) + "\n"
-
-def _readEmbeddedYaml(name, directory=None, customConfigOnly=False):
-    """Parse the YAML payload between '---' and '...' inside .amdgpu_metadata.
-
-    The .s files emitted under this branch contain exactly one such block;
-    we stop at the first '...' and return whatever the safe loader returns
-    (typically a mapping with 'custom.config' and 'amdhsa.kernels' keys).
-
-    customConfigOnly parses just the custom.config entry, a few KB inside a
-    block that can be 1 MB (rocRoller's serialized kernel graph). The rest of
-    the block is not parsed, so errors in it go unnoticed. The whole block is
-    parsed when custom.config is not found in its usual form, appears more than
-    once, or the slice does not parse.
-    """
+def _readEmbeddedYaml(name, directory=None):
+    """Parse the complete YAML payload between '---' and the first '...'."""
     contents = getCustomKernelContents(name, directory)
-    if customConfigOnly:
-        text = _customConfigYaml(contents)
-        if text is not None:
-            try:
-                return yaml.load(text, Loader=SafeLoader)
-            except yaml.YAMLError:
-                # The slice can cut valid YAML: a flow collection closed in
-                # column 0, or an alias to an anchor defined outside the entry.
-                # The whole block parses those, and reports a real error in
-                # custom.config.
-                pass
     try:
-        # The final newline keeps the last block scalar's own newline, which
-        # the slice above keeps as well.
+        # Keep the final newline of a block scalar at the end of the document.
         return yaml.load("\n".join(_embeddedYamlLines(contents)) + "\n", Loader=SafeLoader)
     except yaml.YAMLError as e:
         raise RuntimeError(f"Failed to parse YAML for custom kernel '{name}': {e}") from e
 
-def readCustomKernelConfig(name, directory=None):
-    parsed = _readEmbeddedYaml(name, directory, customConfigOnly=True)
+def _customConfigFrom(name, parsed):
     if not isinstance(parsed, dict) or "custom.config" not in parsed:
         raise RuntimeError(f"Custom kernel '{name}' has no custom.config in its .amdgpu_metadata")
     config = parsed["custom.config"]
     if not isinstance(config, dict):
         raise RuntimeError(f"Custom kernel '{name}' custom.config must be a YAML mapping")
     return config
+
+def readCustomKernelConfig(name, directory=None):
+    return _customConfigFrom(name, _readEmbeddedYaml(name, directory))
 
 def _metadataArgToCustomArg(metaArg, kernelName=None):
     """Convert a single amdgpu_metadata .args entry to a CustomKernel arg dict.
@@ -543,7 +489,8 @@ def getCustomKernelConfig(
     Raises:
         RuntimeError: If the custom kernel configuration is missing required fields or if there is an error reading the configuration.
     """
-    kernelConfig = readCustomKernelConfig(kernelName, directory)
+    fullYaml = _readEmbeddedYaml(kernelName, directory)
+    kernelConfig = _customConfigFrom(kernelName, fullYaml)
     if "InternalSupportParams" not in kernelConfig:
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'InternalSupportParams'")
 
@@ -591,10 +538,6 @@ def getCustomKernelConfig(
     kernelConfig["KernelLanguage"] = "Assembly"
 
     if "CustomKernel" not in kernelConfig:
-        # Only a kernel without an explicit CustomKernel block needs
-        # amdhsa.kernels; the rocRoller kernels embed about 1 MB of it, so it is
-        # parsed here and not for every kernel.
-        fullYaml = _readEmbeddedYaml(kernelName, directory)
         kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
 
     kernelConfig["CustomKernel"]["name"] = kernelName

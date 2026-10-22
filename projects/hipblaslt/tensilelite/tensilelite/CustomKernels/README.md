@@ -12,6 +12,9 @@ makes kernels self-describing: the same file can be loaded through a logic
 file, a benchmark `CustomKernels:` list, or a CI gate without consulting any
 external manifest.
 
+For rocRoller export settings and retained metadata, see the
+[custom-kernel metadata guide](../../docs/custom-kernel-metadata.md).
+
 ## Subdirectories
 
 | Directory     | Origin                                            |
