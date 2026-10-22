@@ -4,7 +4,10 @@
 
 import ctypes
 import os
+from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -34,6 +37,56 @@ class CharArrayBytesTests(unittest.TestCase):
     def test_longer_value_is_rejected(self):
         with self.assertRaises(SystemExit):
             gentest.char_array_bytes("gpu_arch_exclude", "x" * 40, self.FIELD)
+
+
+class GeneratorTests(unittest.TestCase):
+    def generate(self, value):
+        tests_dir = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "test.yaml"
+            output = Path(directory) / "test.data"
+            source.write_text(
+                "include: hipblaslt_common.yaml\n"
+                "Tests:\n"
+                "- function:\n"
+                "    matmul: *single_precision\n"
+                "  name: char_array_boundary\n"
+                f"  gpu_arch: '{value}'\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(tests_dir / "hipblaslt_gentest.py"),
+                    "-I",
+                    str(tests_dir / "data"),
+                    str(source),
+                    "-o",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result, output.read_bytes()
+
+    def test_generator_accepts_terminated_strings(self):
+        for value in ("", "x" * 31, "é" * 15 + "x"):
+            with self.subTest(value=value):
+                result, data = self.generate(value)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(data.startswith(b"hipBLASLt\0"))
+                if value:
+                    self.assertIn(value.encode("utf-8") + b"\0", data)
+
+    def test_generator_rejects_unterminated_strings(self):
+        for value in ("x" * 32, "é" * 16):
+            with self.subTest(value=value):
+                result, _ = self.generate(value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("gpu_arch", result.stderr)
+                self.assertIn("at most 31", result.stderr)
 
 
 if __name__ == "__main__":

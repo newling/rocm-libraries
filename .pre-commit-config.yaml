@@ -131,6 +131,14 @@ repos:
 
   - repo: local
     hooks:
+      - id: hipblaslt-gentest-tests
+        name: hipBLASLt test-data generator tests
+        entry: python -B -m unittest discover -s projects/hipblaslt/clients/tests -p test_hipblaslt_gentest.py
+        language: python
+        additional_dependencies: ["PyYAML==6.0.3"]
+        files: ^projects/hipblaslt/clients/tests/((test_)?hipblaslt_gentest\.py|data/hipblaslt_common\.yaml)$
+        pass_filenames: false
+
       - id: flatc-hipdnn
         name: flatc (hipDNN)
         entry: python projects/hipdnn/scripts/run_flatc.py
