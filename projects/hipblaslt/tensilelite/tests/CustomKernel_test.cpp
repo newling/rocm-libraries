@@ -208,13 +208,8 @@ TEST(CustomKernelTest, ScalarsFillTheDeclaredThirtyTwoBitSlot)
 
 namespace
 {
-    // A GEMM with MX block scales attached the way tensile_host.cpp does on gfx950,
-    // i.e. with setMXScaleA/B's default padScaleTensorFreeDim = true.
-    //
-    // packedScales mirrors the caller: hipBLASLt hands an external custom kernel the
-    // user's own compactly packed scale buffer (true), while the TensileLite benchmark
-    // client allocates the scale buffer from this padded descriptor and hands that very
-    // buffer over (false).
+    // hipBLASLt passes compact scales; the TensileLite client uses the padded
+    // descriptor. Keep both caller layouts available to the argument probes.
     ContractionProblemGemm mxScaleProblem(size_t M,
                                           size_t N,
                                           size_t K,
@@ -281,14 +276,8 @@ namespace
     }
 }
 
-// setMXScaleA/B pad the scale tensor for the Tensile-generated gfx950 subtile
-// kernels, which recompute the pitch from K anyway and ignore the value they are
-// handed. An external custom kernel (rocRoller, aiter, triton) does not: it takes
-// this slot verbatim as the leading dimension of the caller's scale buffer, and a
-// caller that packs that buffer compactly (hipBLASLt -- it says so with
-// setCustomKernelMXScalesArePacked) must be given the packed pitch. Handing it the
-// padded pitch mis-addresses every scale row past the first whenever
-// ceil(K/mxBlock) % 8 != 0.
+// A compact buffer needs the unpadded pitch when ceil(K/mxBlock) is not a
+// multiple of 8; using the descriptor pitch would misaddress later rows.
 TEST(CustomKernelTest, ScaleStrideIsCompactNotPadded)
 {
     // TN: K is the fast (bound) dim of both A and B, so the padded K-block count
@@ -364,14 +353,8 @@ TEST(CustomKernelTest, ScaleStrideRoundsUpPartialBlocks)
     }
 }
 
-// The packed pitch is for callers whose scale buffer really is packed. The
-// TensileLite benchmark client is not one of them: DataInitialization allocates the
-// MX scale tensor straight from the padded descriptor and restrides the canonical
-// scales into it, zeroing the tail, then hands that same buffer to the custom
-// kernel. Giving it the packed pitch made every odd scale row land in the zeroed
-// padding -- an E8M0 0x00 is 2^-127 -- so tensilelite/Tests/custom/custom_rr_*.yaml
-// came back with ~3/4 of the output tensor wrong. Default (unpacked) callers must
-// get the descriptor's own stride back.
+// The TensileLite client allocates and fills the descriptor's padded layout.
+// Compact strides would make some rows read padding instead of their scales.
 TEST(CustomKernelTest, ScaleStrideFollowsDescriptorWhenCallerDoesNotPack)
 {
     struct
@@ -403,11 +386,8 @@ TEST(CustomKernelTest, ScaleStrideFollowsDescriptorWhenCallerDoesNotPack)
     EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, nn), 8);
 }
 
-// The fix derives the stride from boundIndices() rather than assuming K sits at
-// index 0, so it has to stay correct when the bound dim is the slow one. NN puts
-// K slow in A (stride is the unpadded free dim M) and fast in B (stride is the
-// unpadded K-block count), exercising both orientations in one problem. M=60 and
-// K=128 are both unaligned, so compact and padded differ on each side.
+// NN places K on different stored axes in A and B. Unaligned M and K make
+// compact and padded pitches differ for both operands.
 TEST(CustomKernelTest, ScaleStrideIsCompactForEitherBoundDimension)
 {
     auto problem = mxScaleProblem(60, 60, 128, /*transA*/ false, /*transB*/ false);
