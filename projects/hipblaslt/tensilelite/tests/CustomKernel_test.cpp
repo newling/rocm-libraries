@@ -251,11 +251,22 @@ namespace
     }
 
     // The int64 this problem emits into a probe kernel's single scale-stride slot.
-    int64_t emittedScaleStride(CustomArgSemantic semantic, ContractionProblemGemm const& problem)
+    int64_t emittedScaleStride(CustomArgSemantic             semantic,
+                               ContractionProblemGemm const& problem,
+                               int                           argsVersion       = 0,
+                               bool                          useInitialStrides = false)
     {
         ContractionSolution solution;
         configureProbeKernel(solution, {CustomArgType::int64, semantic});
-        solution.sizeMapping.globalSplitU = 1;
+        solution.sizeMapping.globalSplitU                      = 1;
+        solution.internalArgsSupport.persistentLoopArgsVersion = argsVersion;
+        solution.problemType.useInitialStridesAB               = useInitialStrides;
+        if(argsVersion == 1)
+        {
+            solution.internalArgsSupport.version        = 3;
+            solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+            solution.customKernel.generated             = true;
+        }
 
         auto              device = probeDevice();
         ContractionInputs inputs;
@@ -308,13 +319,49 @@ TEST(CustomKernelTest, ScaleStrideIsCompactNotPadded)
     }
 }
 
-// The batch stride is the same rule as the row stride. A packed caller gets
-// the product of the unpadded scale sizes; K=128 and M=64 give 4 * 64.
+// Both argument versions must preserve the caller's batch layout, including
+// padding in the free dimension as well as the K-block dimension.
 TEST(CustomKernelTest, ScaleBatchStrideFollowsTheCallerBuffer)
 {
-    auto problem = mxScaleProblem(64, 64, 128, /*transA*/ true, /*transB*/ false);
-    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA1, problem), 4 * 64);
-    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB1, problem), 4 * 64);
+    auto packedProblem = mxScaleProblem(60, 60, 128, true, false);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA1, packedProblem), 4 * 60);
+    EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB1, packedProblem), 4 * 60);
+    for(bool packed : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "packed=" << packed);
+        auto          problem  = mxScaleProblem(60, 60, 128, true, false, 32, packed);
+        const int64_t expected = packed ? 4 * 60 : 8 * 64;
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA1, problem, 1), expected);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB1, problem, 1), expected);
+    }
+}
+
+TEST(CustomKernelTest, ScaleStridesIncludeTheInitialStrideForDataParallelArgs)
+{
+    for(bool packed : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "packed=" << packed);
+        auto problem = mxScaleProblem(60, 60, 128, true, false, 32, packed);
+        // With initial strides enabled, slots 0 and 1 describe tensor dimensions 0 and 1.
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem, 1, true), 1);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem, 1, true), 1);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA1, problem, 1, true),
+                  packed ? 4 : 8);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB1, problem, 1, true),
+                  packed ? 4 : 8);
+    }
+}
+
+TEST(CustomKernelTest, ScaleStrideRoundsUpPartialBlocks)
+{
+    for(int block : {16, 32})
+    {
+        SCOPED_TRACE(::testing::Message() << "block=" << block);
+        auto          problem  = mxScaleProblem(60, 60, 129, true, false, block);
+        const int64_t expected = block == 16 ? 9 : 5;
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleA0, problem), expected);
+        EXPECT_EQ(emittedScaleStride(CustomArgSemantic::StrideScaleB0, problem), expected);
+    }
 }
 
 // The packed pitch is for callers whose scale buffer really is packed. The
