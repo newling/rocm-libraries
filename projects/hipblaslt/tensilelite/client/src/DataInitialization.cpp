@@ -3605,7 +3605,8 @@ namespace TensileLite
                 stream);
             for(auto t : {ContractionProblemGemm::TENSOR::D,
                           ContractionProblemGemm::TENSOR::E,
-                          ContractionProblemGemm::TENSOR::BIAS})
+                          ContractionProblemGemm::TENSOR::BIAS,
+                          ContractionProblemGemm::TENSOR::A2A_RECV})
                 newInputs.maxElements[t] = problem.tensors()[t].totalAllocatedElements();
             return newInputs;
         }
