@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import importlib
+import importlib.metadata
 import subprocess
 import sys
 
@@ -95,10 +96,26 @@ def test_sys_argv_is_restored_when_a_wrapped_handler_raises(monkeypatch):
 
 
 def test_version_uses_the_package_version(monkeypatch, capsys):
-    monkeypatch.setattr(tensilelite, "__version__", "1.2.3+rocm4.5.6")
+    def distribution_version(name):
+        assert name == "tensilelite"
+        return "1.2.3+rocm4.5.6"
+
+    monkeypatch.setattr(importlib.metadata, "version", distribution_version)
+    monkeypatch.setattr(tensilelite, "__version__", "1.2.3")
 
     assert cli.main(["--version"]) == 0
     assert capsys.readouterr().out == "1.2.3+rocm4.5.6\n"
+
+
+def test_version_without_distribution_metadata(monkeypatch, capsys):
+    def missing_distribution(name):
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", missing_distribution)
+    monkeypatch.setattr(tensilelite, "__version__", "1.2.3")
+
+    assert cli.main(["--version"]) == 0
+    assert capsys.readouterr().out == "1.2.3\n"
 
 
 def test_version_rejects_additional_arguments():

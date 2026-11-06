@@ -4,6 +4,7 @@
 """Regression checks for TensileLite's distributable package metadata."""
 
 import configparser
+import os
 import re
 import subprocess
 import sys
@@ -47,6 +48,8 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
         entry_points = archive.read(
             next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))
         ).decode("utf-8")
+        installed = tmp_path / "installed"
+        archive.extractall(installed)
 
     component_version = re.search(
         r'^__version__ = "([^"]+)"$',
@@ -55,6 +58,16 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     ).group(1)
     assert f"Version: {component_version}+rocm7.2.4" in metadata
     assert "Requires-Dist: rocisa" not in metadata
+
+    result = subprocess.run(
+        [sys.executable, "-S", "-m", "tensilelite", "--version"],
+        cwd=tmp_path,
+        env=dict(os.environ, PYTHONPATH=str(installed)),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == f"{component_version}+rocm7.2.4"
 
     parsed_entry_points = configparser.ConfigParser()
     parsed_entry_points.optionxform = str

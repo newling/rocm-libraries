@@ -101,9 +101,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args[0] == "--version":
         if len(args) != 1:
             parser.error("--version does not accept additional arguments")
-        from . import __version__
+        from importlib.metadata import PackageNotFoundError, version
 
-        print(__version__)
+        try:
+            package_version = version("tensilelite")
+        except PackageNotFoundError:
+            # Source and CMake installs can lack Python distribution metadata.
+            from . import __version__ as package_version
+
+        print(package_version)
         return 0
     command = args.pop(0)
     if command not in _COMMAND_HELP:
