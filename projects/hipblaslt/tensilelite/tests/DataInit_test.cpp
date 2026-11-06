@@ -21,10 +21,12 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <hip/hip_runtime.h>

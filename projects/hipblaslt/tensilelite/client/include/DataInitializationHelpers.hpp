@@ -17,12 +17,14 @@
 
 #include <algorithm>
 #include <cmath>                                  // std::ldexp
+#include <cstddef>
 #include <cstdint>
 #include <cstring>                                // std::memset
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <fstream>
+#include <vector>
 
 namespace TensileLite
 {
