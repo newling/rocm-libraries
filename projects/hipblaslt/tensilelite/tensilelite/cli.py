@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Sequence
+from functools import partial
 import sys
 
 _COMMAND_HELP = {
@@ -38,7 +39,7 @@ def _handler(command: str) -> Callable[[Sequence[str] | None], int | None]:
     if command == "benchmark-cluster":
         from .benchmark_cluster import main
 
-        return lambda argv: _invoke_sys_argv_main(main, command, argv)
+        return partial(_invoke_sys_argv_main, main, command)
     if command == "create-library":
         from .create_library.run import main
 
@@ -54,15 +55,15 @@ def _handler(command: str) -> Callable[[Sequence[str] | None], int | None]:
     if command == "logic-to-yaml":
         from .lib_logic_to_yaml import main
 
-        return lambda argv: _invoke_sys_argv_main(main, command, argv)
+        return partial(_invoke_sys_argv_main, main, command)
     if command == "merge-library":
         from .merge_library import main
 
-        return lambda argv: _invoke_sys_argv_main(main, command, argv)
+        return partial(_invoke_sys_argv_main, main, command)
     if command == "retune-library":
         from .retune_library import main
 
-        return lambda argv: _invoke_sys_argv_main(main, command, argv)
+        return partial(_invoke_sys_argv_main, main, command)
     if command == "run":
         from .tensilelite import main
 
@@ -70,7 +71,7 @@ def _handler(command: str) -> Callable[[Sequence[str] | None], int | None]:
     if command == "update-library":
         from .update_library import main
 
-        return lambda argv: _invoke_sys_argv_main(main, command, argv)
+        return partial(_invoke_sys_argv_main, main, command)
     raise AssertionError(f"unhandled command: {command}")
 
 
