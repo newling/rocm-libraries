@@ -181,11 +181,9 @@ namespace TensileLite
                                ClientProblemFactory const& problemFactory);
             ~DataInitialization();
 
-            // True when the CPU reference must be recomputed for this solution
-            // because DataInitialization may refresh MX inputs for it
-            // (solution-dependent HostPreSwizzle, gfx950). When false (e.g.
-            // gfx1250, gfx942, non-MX) the per-problem reference is still valid
-            // and can be reused across all solutions.
+            // Conservatively recompute the CPU reference for gfx950 HostPreSwizzle
+            // solutions, including when preSolution reuses unchanged MX inputs.
+            // Other solutions can reuse the per-problem reference.
             bool referenceNeedsPerSolutionRecompute(ContractionProblemGemm const& problem,
                                                     ContractionSolution const*    solution) const
             {
@@ -920,9 +918,8 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX inputs for solution-dependent HostPreSwizzle. The
-                // swizzled scale layout only depends on the solution's MFMA K,
-                // so consecutive solutions sharing it reuse the uploaded data.
+                // MFMA K determines whether the solution needs an extra MX input
+                // refresh here. prepareGPUInputs still performs per-run buffer copies.
                 if(m_currentSolution != nullptr && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty()
                    && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem, m_currentSolution)
