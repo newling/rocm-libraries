@@ -486,3 +486,14 @@ TEST(ReferenceFastPath, Int8FloatEpilogueFollowsSlowPathOrder)
         EXPECT_EQ(dFast[0], dSlow[0]);
     }
 }
+
+TEST(ReferenceFastPath, Int8InPlaceCDPreservesBetaInput)
+{
+    auto problem = makeInt8Problem(rocisa::DataType::Int32, rocisa::DataType::Int32, 1, 1, 1);
+    int8_t a = 2, b = 3;
+    int32_t cd = 5;
+    ContractionInputs inputs(&a, &b, &cd, &cd, int32_t(1), int32_t(1));
+    ASSERT_TRUE(isFastPathEligible(problem));
+    SolveGemmCPU(problem, inputs, -1, true);
+    EXPECT_EQ(cd, 11);
+}
