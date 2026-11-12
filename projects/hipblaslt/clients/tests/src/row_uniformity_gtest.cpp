@@ -1672,8 +1672,13 @@ namespace
         ASSERT_EQ(hipMalloc(&storage, 256), hipSuccess);
         ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
 
-        hipblaslt_ext::GemmProblemType problemType(
-            HIPBLAS_OP_T, HIPBLAS_OP_N, c.type, c.type, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
+        hipblaslt_ext::GemmProblemType problemType(HIPBLAS_OP_T,
+                                                   HIPBLAS_OP_N,
+                                                   c.type,
+                                                   c.type,
+                                                   HIP_R_16BF,
+                                                   HIP_R_16BF,
+                                                   HIPBLAS_COMPUTE_32F);
         problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
         if(c.tiledB)
             problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
@@ -1690,8 +1695,14 @@ namespace
         inputs.setScaleA(storage);
         inputs.setScaleB(storage);
 
-        hipblaslt_ext::Gemm gemm(
-            handle, HIPBLAS_OP_T, HIPBLAS_OP_N, c.type, c.type, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
+        hipblaslt_ext::Gemm           gemm(handle,
+                                 HIPBLAS_OP_T,
+                                 HIPBLAS_OP_N,
+                                 c.type,
+                                 c.type,
+                                 HIP_R_16BF,
+                                 HIP_R_16BF,
+                                 HIPBLAS_COMPUTE_32F);
         hipblaslt_ext::GemmPreference preference;
         preference.setMaxWorkspaceBytes(kWorkspaceBytes);
         std::vector<hipblasLtMatmulHeuristicResult_t> picks;
@@ -1715,8 +1726,9 @@ namespace
         if(c.hasKernel)
         {
             ASSERT_FALSE(picks.empty());
-            EXPECT_EQ(hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
-                      0u);
+            EXPECT_EQ(
+                hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
+                0u);
         }
         else
         {
@@ -1866,8 +1878,9 @@ namespace
                 ADD_FAILURE() << "No solution for the registered problem";
                 return {};
             }
-            EXPECT_EQ(hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
-                      0u);
+            EXPECT_EQ(
+                hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
+                0u);
             return picks[0].algo;
         }
 
@@ -1883,10 +1896,13 @@ namespace
             hipblasLtMatrixLayout_t  lb     = nullptr;
             hipblasLtMatrixLayout_t  ld     = nullptr;
             hipblasStatus_t          status = HIPBLAS_STATUS_INTERNAL_ERROR;
-            if(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F) == HIPBLAS_STATUS_SUCCESS
-               && hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA))
+            if(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                   == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA))
                       == HIPBLAS_STATUS_SUCCESS
-               && hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB))
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB))
                       == HIPBLAS_STATUS_SUCCESS
                && hipblasLtMatmulDescSetAttribute(
                       desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &mode, sizeof(mode))
