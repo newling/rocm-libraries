@@ -271,9 +271,11 @@ TEST(ReferenceMXFastPath, PartialLastMXBlockSumsOnlyElementsBelowK)
                 inputs.mxsb = mxsb.data();
                 SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
 
-                EXPECT_EQ(maxAbsDiff(expected, d), 0.0f)
-                    << "K=" << tc.K << " mxBlockA=" << tc.mxBlockA << " mxBlockB=" << tc.mxBlockB
-                    << " transA=" << transA << " transB=" << transB;
+                SCOPED_TRACE(testing::Message()
+                             << "K=" << tc.K << " mxBlockA=" << tc.mxBlockA
+                             << " mxBlockB=" << tc.mxBlockB << " transA=" << transA
+                             << " transB=" << transB);
+                EXPECT_EQ(expected, d);
             }
         }
     }
