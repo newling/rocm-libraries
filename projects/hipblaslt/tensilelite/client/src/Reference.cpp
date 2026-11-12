@@ -1503,8 +1503,8 @@ namespace TensileLite
         // registers and the K-loop sums (including the MX block scaling) are in it;
         // each finished sum is converted to AccumT once, before the epilogue.
         // Default matches AccumT, making that conversion a no-op. An integer MacT
-        // (int32_t, Int8 inputs) makes the K loop exact, and the epilogue then follows
-        // the slow path's operation order (see slowPathEpilogueOrder below).
+        // (int32_t, Int8 inputs) is exact while every partial sum fits in int32_t.
+        // The epilogue follows the slow path's operation order (slowPathEpilogueOrder).
         template <typename AccumT = float, typename OperandMathOpT = AccumT, typename MacT = AccumT>
         void solveCPUFast(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs)
@@ -1519,8 +1519,10 @@ namespace TensileLite
             // Int8 inputs (integer MacT): the epilogue applies alpha, the ScaleAB
             // scales, scaleAlphaVec, beta * C, bias, activation and the output cast in
             // the slow path's order and types (ReferenceSolution<...>::SolveCPU), so D
-            // matches the slow path exactly, including round-half-to-even ties of the
-            // Int8 output cast. The other types keep the folded order below.
+            // preserves its rounding after the K sum, including round-half-to-even ties
+            // of the Int8 output cast. Float slow-path K sums can lose precision above
+            // 2^24; the integer fast-path sum can differ there. Other types keep the
+            // folded order below.
             constexpr bool slowPathEpilogueOrder = std::is_integral_v<MacT>;
 
             // MX block scaling is floating-point only; isFastPathEligible rejects MX
