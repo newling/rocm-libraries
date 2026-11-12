@@ -1651,8 +1651,8 @@ namespace TensileLite
             }
         }
 
-        // The bias gradient (useGradient with useBias) on the fast path: the slow path's
-        // ReductionCPU, in the epilogue type AccumT, of D (the workspace ws: the
+        // The bias gradient (useGradient with useBias) uses ReductionCPU on both paths,
+        // in the epilogue type AccumT, on D (the workspace ws: the
         // epilogue values before gate residual, at D's offsets) or of A or B as stored.
         template <typename AccumT>
         void reduceBiasGradient(ContractionProblemGemm const& problem,
