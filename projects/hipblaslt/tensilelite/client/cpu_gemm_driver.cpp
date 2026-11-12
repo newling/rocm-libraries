@@ -1046,11 +1046,12 @@ int runGemm(size_t         m,
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    if(tryFastPath && !TensileLite::Client::isFastPathEligible(contraction))
+    std::string rejectionReason;
+    if(tryFastPath && !TensileLite::Client::isFastPathEligible(contraction, &rejectionReason))
     {
         throw std::runtime_error(
             "--tryFastPath was requested but the problem is not eligible "
-            "for the fast CPU GEMM path.");
+            "for the fast CPU GEMM path: " + rejectionReason + ".");
     }
 
     // Execute the 'device under test'.
