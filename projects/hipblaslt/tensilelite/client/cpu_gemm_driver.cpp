@@ -1582,7 +1582,12 @@ int main(int argc, char* argv[])
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Runtime Error: " << e.what() << std::endl;
+        std::cerr << "Runtime Error: " << e.what()
+                  << " (typeA=" << typeAStr << ", typeB=" << typeBStr
+                  << ", computeInputA=" << computeInputAStr
+                  << ", computeInputB=" << computeInputBStr
+                  << ", typeCD=" << typeCDStr << ", typeAlpha=" << typeAlphaStr << ")"
+                  << std::endl;
         return 1;
     }
 
