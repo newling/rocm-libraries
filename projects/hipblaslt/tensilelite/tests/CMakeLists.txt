@@ -734,7 +734,7 @@ endif()
 # The slow path accumulates the float-alpha types (I8_*_S) in float per K
 # element, which is exact only while |sum| < 2^24. Keep K small enough:
 # F16_SIZES has K = 151, so |sum| <= 151 * 128^2 ~= 2.5M.
-# (The fast path accumulates in int32_t, exact at any K; its results above 2^24
+# (The fast path accumulates in int32_t, exact while partial sums fit; results above 2^24
 # are covered by the ReferenceFastPath gtests.)
 #
 # Each entry: NAME;typeCD;typeAlpha;alpha;beta;alpha for ScaleAB. Alphas keep D
