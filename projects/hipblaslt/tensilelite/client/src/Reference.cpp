@@ -2253,7 +2253,6 @@ namespace TensileLite
                                          actArgs);
                 }
 
-                omp_set_num_threads(MAX_OMP_THREADS);
                 if constexpr(notCmplxAmaxD)
                 {
                     if(problem.outputAmaxD())
