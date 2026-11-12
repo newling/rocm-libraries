@@ -2833,22 +2833,22 @@ namespace
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
         tensileProblem.setMXScaleFormat(hostMXScaleFormat(prob));
 
-	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
-   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
-	    rocblaslt::setHostMXScaleA(tensileProblem,
-	                               rocisa::DataType::E8,
-	                               32,
-	                               padMXScaleTensorFreeDim,
-	                               hostMXScalesArePacked(prob.scaleAType));
-	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
-   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
-	    rocblaslt::setHostMXScaleB(tensileProblem,
-	                               rocisa::DataType::E8,
-	                               32,
-	                               padMXScaleTensorFreeDim,
-	                               hostMXScalesArePacked(prob.scaleBType));
+        if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
+           prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+           prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+            rocblaslt::setHostMXScaleA(tensileProblem,
+                                      rocisa::DataType::E8,
+                                      32,
+                                      padMXScaleTensorFreeDim,
+                                      hostMXScalesArePacked(prob.scaleAType));
+        if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
+           prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT or
+           prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+            rocblaslt::setHostMXScaleB(tensileProblem,
+                                      rocisa::DataType::E8,
+                                      32,
+                                      padMXScaleTensorFreeDim,
+                                      hostMXScalesArePacked(prob.scaleBType));
     }
 
     rocisa::DataType computeTypeToRocisaDataType(rocblaslt_compute_type compute_type)
