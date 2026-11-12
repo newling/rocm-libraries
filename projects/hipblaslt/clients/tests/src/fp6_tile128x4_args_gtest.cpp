@@ -7,10 +7,13 @@
 // selection, and a valid one is accepted whether or not a kernel exists.
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include <cstdint>
 #include <ostream>
+#include <string>
 #include <vector>
 
 namespace
