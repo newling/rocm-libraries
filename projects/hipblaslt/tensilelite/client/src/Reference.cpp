@@ -1019,8 +1019,12 @@ namespace TensileLite
             }
             else
             {
-                std::string msg = "Unsupported reduction dimension "
-                                  + std::to_string(tensor.dimensions()) + ".";
+                std::string msg = "Bias-gradient reduction requires a 2-D tensor or a single batch; got "
+                                  + std::to_string(tensor.dimensions()) + " dimensions"
+                                  + (tensor.dimensions() == 3
+                                         ? " and " + std::to_string(tensor.sizes()[2]) + " batches"
+                                         : "")
+                                  + ".";
                 return msg;
             }
             return "";
@@ -1395,8 +1399,7 @@ namespace TensileLite
             }
 
             // The bias gradient is reduced by ReductionCPU on both paths. For a source
-            // shape it does not support, the slow path does not report the error
-            // (and frees its D workspace twice); such problems stay on it.
+            // shape it does not support, the slow path reports the reduction error.
             if(problem.useGradient() && problem.useBias())
             {
                 auto src = problem.biasSrc();
@@ -1707,8 +1710,6 @@ namespace TensileLite
                 throw std::runtime_error("Unsupported bias reduction source "
                                          + std::to_string(problem.biasSrc()) + ".");
             }
-            // Not reached: isFastPathEligible rejects the shapes ReductionCPU does not
-            // support.
             if(!msg.empty())
                 throw std::runtime_error(msg);
         }
@@ -2324,14 +2325,13 @@ namespace TensileLite
             ContractionInputs const&      inputs,
             size_t                        elementsToValidate)
         {
-            Accumulator* ws                   = nullptr;
+            std::vector<Accumulator> ws;
             size_t       validationStrideGemm = 1;
             if(problem.useGradient() && problem.useBias()
                && (problem.biasSrc() == ContractionProblemGemm::D))
             {
                 validationStrideGemm = 1;
-                ws                   = (Accumulator*)malloc(problem.d().totalAllocatedElements()
-                                          * sizeof(Accumulator));
+                ws.resize(problem.d().totalAllocatedElements());
             }
             else
             {
@@ -2791,44 +2791,10 @@ namespace TensileLite
 
             if(problem.useGradient() && problem.useBias())
             {
-                auto& biasTensor = problem.tensor(ContractionProblemGemm::TENSOR::BIAS);
-                if(problem.biasSrc() == ContractionProblemGemm::D)
-                {
-                    auto msg = ReductionCPU<Accumulator, Accumulator>(
-                        biasTensor, d, ws, inputs, elementsToValidate, 1);
-                    if(!msg.empty())
-                    {
-                        free(ws);
-                        std::runtime_error(msg.c_str());
-                    }
-                }
-                else if(problem.biasSrc() == ContractionProblemGemm::A)
-                {
-                    auto reducIdx = problem.transA() ? 0 : 1;
-                    auto msg      = ReductionCPU<typename Inputs::AType, Accumulator>(
-                        biasTensor, a, inputs.a, inputs, elementsToValidate, reducIdx);
-                    if(!msg.empty())
-                    {
-                        std::runtime_error(msg.c_str());
-                    }
-                }
-                else if(problem.biasSrc() == ContractionProblemGemm::B)
-                {
-                    auto reducIdx = problem.transB() ? 1 : 0;
-                    auto msg      = ReductionCPU<typename Inputs::BType, Accumulator>(
-                        biasTensor, b, inputs.b, inputs, elementsToValidate, reducIdx);
-                    if(!msg.empty())
-                    {
-                        std::runtime_error(msg.c_str());
-                    }
-                }
+                if constexpr(TypeInfo<Accumulator>::IsComplex)
+                    throw std::runtime_error("Bias-gradient reduction does not support complex inputs.");
                 else
-                {
-                    std::string msg = "Unsupported bias reduction source "
-                                      + std::to_string(problem.biasSrc()) + ".";
-                    throw std::runtime_error(msg.c_str());
-                }
-                free(ws);
+                    reduceBiasGradient<Accumulator>(problem, inputs, ws.data(), elementsToValidate);
             }
         }
 
