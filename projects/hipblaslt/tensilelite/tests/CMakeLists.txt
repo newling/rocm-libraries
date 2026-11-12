@@ -227,6 +227,18 @@ function(add_cpu_gemm_test TEST_NAME)
     )
 endfunction()
 
+# Check both the exit code and the diagnostic: any unrelated error must fail the test.
+function(add_cpu_gemm_failure_test TEST_NAME EXPECTED_ERROR)
+    add_test(
+        NAME "CPUGemm.${TEST_NAME}"
+        COMMAND "${CMAKE_COMMAND}"
+            "-DDRIVER=$<TARGET_FILE:cpu-gemm-driver>"
+            "-DARGS=${ARGN}"
+            "-DEXPECTED_ERROR=${EXPECTED_ERROR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/CheckCpuGemmFailure.cmake"
+    )
+endfunction()
+
 # Default test sizes. Non-tile-aligned to stress remainder handling.
 # f32, f64, and f16/bf16 use different sizes to increase coverage diversity.
 set(F32_SIZES -M 133 -N 147 -K 165)
@@ -338,11 +350,9 @@ foreach(PATH fast slow)
     endforeach()
 endforeach()
 
-add_test(
-    NAME "CPUGemm.validation_InjectedFailure_Rejected"
-    COMMAND cpu-gemm-driver -M 8 -N 8 -K 8 --type f32 --validate --tryFastPath --injectValidationFailure
+add_cpu_gemm_failure_test(validation_InjectedFailure_Rejected "FAILED!"
+    -M 8 -N 8 -K 8 --type f32 --validate --tryFastPath --injectValidationFailure
 )
-set_tests_properties("CPUGemm.validation_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
 
 #################################################
 #        FP8 tests (fast & slow)                #
@@ -504,17 +514,13 @@ foreach(PATH fast slow)
     endforeach()
 endforeach()
 
-add_test(
-    NAME "CPUGemm.tf32_MixedA_Rejected"
-    COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --typeA tf32 --typeB f32 --validate
+add_cpu_gemm_failure_test(tf32_MixedA_Rejected "Error: tf32 is an F32 math-op mode and must be used for both inputs or neither"
+    -M 16 -N 16 -K 16 --typeA tf32 --typeB f32 --validate
 )
-set_tests_properties("CPUGemm.tf32_MixedA_Rejected" PROPERTIES WILL_FAIL TRUE)
 
-add_test(
-    NAME "CPUGemm.tf32_MixedB_Rejected"
-    COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --typeA f32 --typeB tf32 --validate
+add_cpu_gemm_failure_test(tf32_MixedB_Rejected "Error: tf32 is an F32 math-op mode and must be used for both inputs or neither"
+    -M 16 -N 16 -K 16 --typeA f32 --typeB tf32 --validate
 )
-set_tests_properties("CPUGemm.tf32_MixedB_Rejected" PROPERTIES WILL_FAIL TRUE)
 
 #################################################
 #        FP4 / MX Scale tests (fast & slow)     #
@@ -606,18 +612,14 @@ if(NOT WIN32)
     )
 
     # Negative test: slow path must reject asymmetric MX.
-    add_test(
-        NAME "CPUGemm.slow_f4_MX_A32_B64_Rejected"
-        COMMAND cpu-gemm-driver ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate
+    add_cpu_gemm_failure_test(slow_f4_MX_A32_B64_Rejected "is only supported on the fast path"
+        ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate
     )
-    set_tests_properties("CPUGemm.slow_f4_MX_A32_B64_Rejected" PROPERTIES WILL_FAIL TRUE)
 
     # Negative test: one-sided MX (only A or only B) must be rejected.
-    add_test(
-        NAME "CPUGemm.f4_MX_OneSided_Rejected"
-        COMMAND cpu-gemm-driver ${F4_SIZES_32} --type f4 --mxBlockA 32 --validate
+    add_cpu_gemm_failure_test(f4_MX_OneSided_Rejected "Error: --mxBlockA and --mxBlockB must both be > 0"
+        ${F4_SIZES_32} --type f4 --mxBlockA 32 --validate
     )
-    set_tests_properties("CPUGemm.f4_MX_OneSided_Rejected" PROPERTIES WILL_FAIL TRUE)
 
     # Edge-size mxfp4 coverage: K equal to mxBlock (single MX block per row),
     # M=1 / N=1 strips, and alpha=0 short-circuit. Both fast and slow paths.
@@ -647,9 +649,8 @@ if(NOT WIN32)
     )
 
     # Partial last MX block (K not a multiple of mxBlockA and/or mxBlockB), as in
-    # mxfp4_mxfp4_bf16_tn_act (K = 333 / 255 / 63, block 32). Fast path only: the
-    # slow path's MX inner loop sums whole blocks, reading past K (the driver
-    # rejects K tails without --tryFastPath, see the BadK tests below).
+    # mxfp4_mxfp4_bf16_tn_act (K = 333 / 255 / 63, block 32). The equal-block
+    # slow path also supports K tails and has two smoke cases below.
     foreach(TRANS NN TN NT TT)
         get_trans_flags(${TRANS} TFLAGS)
         add_cpu_gemm_test(fast_f4_MX32_KTail333_${TRANS}
@@ -704,18 +705,14 @@ if(NOT WIN32)
     )
 
     # Negative test: non-power-of-2 mxBlock should be rejected
-    add_test(
-        NAME "CPUGemm.slow_f4_MX6_BadPow2"
-        COMMAND cpu-gemm-driver -M 4 -N 4 -K 12 --type f4 --mxBlockA 6 --mxBlockB 6 --validate
+    add_cpu_gemm_failure_test(slow_f4_MX6_BadPow2 "must be a power of 2"
+        -M 4 -N 4 -K 12 --type f4 --mxBlockA 6 --mxBlockB 6 --validate
     )
-    set_tests_properties("CPUGemm.slow_f4_MX6_BadPow2" PROPERTIES WILL_FAIL TRUE)
 
     # Negative test: mxBlock with non-FP4 types should be rejected
-    add_test(
-        NAME "CPUGemm.slow_f32_MX32_Rejected"
-        COMMAND cpu-gemm-driver -M 16 -N 16 -K 32 --type f32 --mxBlockA 32 --mxBlockB 32 --validate
+    add_cpu_gemm_failure_test(slow_f32_MX32_Rejected "Error: mxBlockA/mxBlockB is only supported for type f4, not f32"
+        -M 16 -N 16 -K 32 --type f32 --mxBlockA 32 --mxBlockB 32 --validate
     )
-    set_tests_properties("CPUGemm.slow_f32_MX32_Rejected" PROPERTIES WILL_FAIL TRUE)
 endif()
 
 #################################################
@@ -966,11 +963,9 @@ if(NOT WIN32)
         endforeach()
 
         # A perturbed (here saturated) Float8 D element must fail validation.
-        add_test(
-            NAME "CPUGemm.${PATH}_F8_F8_S_InjectedFailure_Rejected"
-            COMMAND cpu-gemm-driver ${F16_SIZES} --type f8 --typeCD f8 --useScaleAB Scalar --validate --injectValidationFailure ${PATH_FLAGS}
+        add_cpu_gemm_failure_test(${PATH}_F8_F8_S_InjectedFailure_Rejected "FAILED!"
+            ${F16_SIZES} --type f8 --typeCD f8 --useScaleAB Scalar --validate --injectValidationFailure ${PATH_FLAGS}
         )
-        set_tests_properties("CPUGemm.${PATH}_F8_F8_S_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
     endforeach()
 endif()
 
@@ -1025,11 +1020,9 @@ foreach(PATH fast slow)
         )
     endforeach()
 
-    add_test(
-        NAME "CPUGemm.${PATH}_c_InjectedFailure_Rejected"
-        COMMAND cpu-gemm-driver ${F32_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
+    add_cpu_gemm_failure_test(${PATH}_c_InjectedFailure_Rejected "FAILED!"
+        ${F32_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
     )
-    set_tests_properties("CPUGemm.${PATH}_c_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
 endforeach()
 
 #################################################
@@ -1155,37 +1148,36 @@ endforeach()
 
 # Option checks: these must be rejected.
 foreach(CASE
-        "I8_MixedA;--typeA i8 --typeB f32"
-        "I8_UnsupportedCD;--type i8 --typeCD f32"
-        "I8_NonIntegerAlpha;--type i8 --typeCD i32 --typeAlpha i32 --alpha 0.5"
-        "I8_Int8RangeOutOfBounds;--type i8 --int8Min -129"
-        "I8_Int8RangeEmpty;--type i8 --int8Min 3 --int8Max 2"
-        "F32_Int8Range;--type f32 --int8Max 3"
-        "F32_TypeCD;--type f32 --typeCD f16"
-        "F32_F8CD;--type f32 --typeCD f8"
-        "F8_F8CDOtherFamily;--type f8 --typeCD f8fnuz"
-        "F8_F8CDTypeAlpha;--type f8 --typeCD f8 --typeAlpha f64"
-        "B8H_B8CD;--typeA bf8 --typeB f16 --computeInputA f16 --typeCD bf8"
-        "F8H_F8CDNoTypeId;--typeA f8 --typeB f16 --typeCD f8"
-        "C_MixedZ;--typeA c --typeB z"
-        "C_MixedF32;--typeA c --typeB f32"
-        "C_TypeCD;--type c --typeCD f32"
-        "C_ComputeInput;--type c --computeInputA f32"
-        "C_Bias;--type c --bias"
-        "Z_ScaleAB;--type z --useScaleAB Scalar"
-        "C_UseE;--type c --useE"
-        "C_Gradient;--type c --gradient"
-        "F32_BiasSrcWithoutGradient;--type f32 --bias --biasSrc a"
-        "F32_UnknownBiasSrc;--type f32 --gradient --bias --biasSrc c"
-        "F32_GradientBiasBatched;--type f32 --gradient --bias --batchCount 2"
-        "F4_GradientBiasSrcA;--type f4 --gradient --bias --biasSrc a"
-        "F32_ConjA;--type f32 --conjA")
+        "I8_MixedA;--typeA i8 --typeB f32;Error: mixed i8 / non-i8 input is not supported"
+        "I8_UnsupportedCD;--type i8 --typeCD f32;Error: unsupported i8 type combination --typeCD f32 --typeAlpha f32"
+        "I8_NonIntegerAlpha;--type i8 --typeCD i32 --typeAlpha i32 --alpha 0.5;Error: --typeAlpha i32 needs integer --alpha and --beta"
+        "I8_Int8RangeOutOfBounds;--type i8 --int8Min -129;Error: --int8Min/--int8Max need i8 inputs and -128 <= int8Min <= int8Max <= 127"
+        "I8_Int8RangeEmpty;--type i8 --int8Min 3 --int8Max 2;Error: --int8Min/--int8Max need i8 inputs and -128 <= int8Min <= int8Max <= 127"
+        "F32_Int8Range;--type f32 --int8Max 3;Error: --int8Min/--int8Max need i8 inputs and -128 <= int8Min <= int8Max <= 127"
+        "F32_TypeCD;--type f32 --typeCD f16;Error: --typeCD f16 / --typeAlpha f32 is only supported for i8 inputs, or f8/bf8/f8fnuz/bf8fnuz C/D with f32 alpha"
+        "F32_F8CD;--type f32 --typeCD f8;Error: unsupported --typeCD f8 for typeA=f32 typeB=f32"
+        "F8_F8CDOtherFamily;--type f8 --typeCD f8fnuz;Error: unsupported --typeCD f8fnuz for typeA=f8 typeB=f8"
+        "F8_F8CDTypeAlpha;--type f8 --typeCD f8 --typeAlpha f64;Error: --typeCD f8 / --typeAlpha f64 is only supported for i8 inputs, or f8/bf8/f8fnuz/bf8fnuz C/D with f32 alpha"
+        "B8H_B8CD;--typeA bf8 --typeB f16 --computeInputA f16 --typeCD bf8;Error: unsupported --typeCD bf8 for typeA=bf8 typeB=f16"
+        "F8H_F8CDNoTypeId;--typeA f8 --typeB f16 --typeCD f8;Runtime Error: Data type not implemented."
+        "C_MixedZ;--typeA c --typeB z;Error: complex inputs need the same complex type for A and B"
+        "C_MixedF32;--typeA c --typeB f32;Error: complex inputs need the same complex type for A and B"
+        "C_TypeCD;--type c --typeCD f32;Error: --typeCD f32 / --typeAlpha c is only supported for i8 inputs, or f8/bf8/f8fnuz/bf8fnuz C/D with f32 alpha"
+        "C_ComputeInput;--type c --computeInputA f32;Error: complex inputs do not support a computeInput override"
+        "C_Bias;--type c --bias;Error: complex inputs do not support --bias, --activation, --scaleAlphaVec, --useScaleAB, --outputAmaxD, --useE or --gradient"
+        "Z_ScaleAB;--type z --useScaleAB Scalar;Error: complex inputs do not support --bias, --activation, --scaleAlphaVec, --useScaleAB, --outputAmaxD, --useE or --gradient"
+        "C_UseE;--type c --useE;Error: complex inputs do not support --bias, --activation, --scaleAlphaVec, --useScaleAB, --outputAmaxD, --useE or --gradient"
+        "C_Gradient;--type c --gradient;Error: complex inputs do not support --bias, --activation, --scaleAlphaVec, --useScaleAB, --outputAmaxD, --useE or --gradient"
+        "F32_BiasSrcWithoutGradient;--type f32 --bias --biasSrc a;Error: --biasSrc needs --gradient and --bias"
+        "F32_UnknownBiasSrc;--type f32 --gradient --bias --biasSrc c;Unknown biasSrc: c"
+        "F32_GradientBiasBatched;--type f32 --gradient --bias --batchCount 2;Error: --gradient with --bias needs --batchCount 1"
+        "F4_GradientBiasSrcA;--type f4 --gradient --bias --biasSrc a;Error: --biasSrc a/b is not supported for f4 inputs"
+        "F32_ConjA;--type f32 --conjA;Error: --conjA/--conjB need complex inputs")
     list(GET CASE 0 NAME)
     list(GET CASE 1 FLAGS)
+    list(GET CASE 2 EXPECTED_ERROR)
     separate_arguments(FLAGS)
-    add_test(
-        NAME "CPUGemm.${NAME}_Rejected"
-        COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 ${FLAGS} --validate
+    add_cpu_gemm_failure_test(${NAME}_Rejected "${EXPECTED_ERROR}"
+        -M 16 -N 16 -K 16 ${FLAGS} --validate
     )
-    set_tests_properties("CPUGemm.${NAME}_Rejected" PROPERTIES WILL_FAIL TRUE)
 endforeach()
