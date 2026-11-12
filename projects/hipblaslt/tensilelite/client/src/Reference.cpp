@@ -1955,21 +1955,6 @@ namespace TensileLite
                             }
                         }
 
-                        // Copy from cReg back, converting each sum from MacT to AccumT.
-                        for(size_t nn = 0; nn < BLOCK_N; ++nn)
-                        {
-                            for(size_t mm = 0; mm < BLOCK_M; ++mm)
-                            {
-                                size_t global_n = n0 + nn;
-                                size_t global_m = m0 + mm;
-                                if(global_n < sizeN && global_m < sizeM)
-                                {
-                                    size_t idxD     = global_n * strideND + global_m;
-                                    curBatchD[idxD] = static_cast<AccumT>(cReg[mm * BLOCK_N + nn]);
-                                }
-                            }
-                        }
-
                         // Perform all the post-reduction stuff.
                         const AccumT beta = constVariantCast<AccumT>(inputs.beta);
                         for(size_t nn = 0; nn < BLOCK_N; ++nn)
@@ -1983,7 +1968,7 @@ namespace TensileLite
                                     size_t idxD      = global_m + (global_n * strideND);
                                     size_t idxC      = global_m + (global_n * strideNC);
                                     auto   startingC = curBatchC[idxC];
-                                    auto   current   = curBatchD[idxD];
+                                    auto current = static_cast<AccumT>(cReg[mm * BLOCK_N + nn]);
                                     // DeviceScalarAlpha replaces inline alpha. Apply the
                                     // independent A/B scales to the selected alpha value.
                                     AccumT alpha = effectiveAlpha;

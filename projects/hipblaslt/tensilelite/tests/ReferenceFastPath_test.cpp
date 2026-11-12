@@ -861,3 +861,18 @@ TEST(ReferenceFastPath, ComplexMatchesSlowPathExactly)
         checkComplexFastMatchesSlow<double>(rocisa::DataType::ComplexDouble);
     }
 }
+
+TEST(ReferenceFastPath, ComplexInPlaceCDPreservesBetaInput)
+{
+    auto check = [](auto tag) {
+        using T = decltype(tag);
+        auto problem = makeComplexProblem(TypeInfo<T>::Enum, 1, 1, 1, false, false);
+        T a(2, 1), b(3, 2), cd(5, 1);
+        ContractionInputs inputs(&a, &b, &cd, &cd, T(1, 0), T(1, 0));
+        ASSERT_TRUE(isFastPathEligible(problem));
+        SolveGemmCPU(problem, inputs, -1, true);
+        EXPECT_EQ(cd, T(9, 8));
+    };
+    check(std::complex<float>{});
+    check(std::complex<double>{});
+}
