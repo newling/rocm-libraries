@@ -53,9 +53,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <ios>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -1429,8 +1431,7 @@ namespace
             for(void* ptr : {dA, dB, dScaleA, dScaleB, dD, dWorkspace})
                 static_cast<void>(hipFree(ptr));
         };
-        if(hipMalloc(&dA, tiledA.size()) != hipSuccess
-           || hipMalloc(&dB, dataB.size()) != hipSuccess
+        if(hipMalloc(&dA, tiledA.size()) != hipSuccess || hipMalloc(&dB, dataB.size()) != hipSuccess
            || hipMalloc(&dScaleA, shuffledA.size()) != hipSuccess
            || hipMalloc(&dScaleB, shuffledB.size()) != hipSuccess
            || hipMalloc(&dD, static_cast<size_t>(m * n) * sizeof(uint16_t)) != hipSuccess
@@ -1582,7 +1583,7 @@ namespace
         EXPECT_EQ(badRow, -1) << "D(" << badRow << ", " << badCol << ") differs bitwise from D(0, "
                               << badCol << ") with uniform summation order enabled";
         EXPECT_NE(std::count(hostD.begin(), hostD.begin() + m * n, hostD[0]),
-                  static_cast<ptrdiff_t>(m * n))
+                  static_cast<std::ptrdiff_t>(m * n))
             << "D is constant, so the fill did not reach the output";
 
         int mismatches = 0;
