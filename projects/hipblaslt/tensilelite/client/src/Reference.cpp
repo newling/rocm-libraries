@@ -1441,6 +1441,15 @@ namespace TensileLite
                 return rejectFast("unsupported_complex_type_combination");
             }
 
+            // Non-HPA Half/BFloat16 bias reductions accumulate in the output type.
+            // The float fast path would change that rounding at every addition.
+            if(problem.useGradient() && problem.useBias() && !problem.highPrecisionAccumulate())
+            {
+                auto typeId = getInputContractionInputsTypeId(problem);
+                if(typeId == TypedGemm_H_H_H::TypeId() || typeId == TypedGemm_B_B_S::TypeId())
+                    return rejectFast("non_hpa_bias_reduction");
+            }
+
             // The slow path reads complex bias, ScaleAB, scaleAlphaVec and gate
             // residual values as zero (GetValue has no complex case) and leaves complex
             // values unchanged by activation. The complex fast path does not take these

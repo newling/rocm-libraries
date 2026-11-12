@@ -16,6 +16,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -1015,7 +1016,7 @@ TEST(ReferenceFastPath, GradientEligibility)
         setBiasGradient(single, src);
         EXPECT_TRUE(isFastPathEligible(single));
 
-        // ReductionCPU reduces one batch only; the slow path keeps the others.
+        // ReductionCPU reports an error for more than one batch.
         auto batched = makeGradientProblem(4, 4, 4, false, false, 2);
         setBiasGradient(batched, src);
         EXPECT_FALSE(isFastPathEligible(batched));
@@ -1160,4 +1161,32 @@ TEST(ReferenceFastPath, BatchedBiasGradientReportsUnsupportedShape)
             EXPECT_EQ(bias, 99.0f);
         }
     }
+}
+
+TEST(ReferenceFastPath, NonHpaBiasGradientKeepsNarrowAccumulation)
+{
+    auto check = [](auto tag, size_t n, float expected) {
+        using T = decltype(tag);
+        auto problem = makePackedProblem(TypeInfo<T>::Enum, TypeInfo<T>::Enum,
+                                         TypeInfo<T>::Enum, 1, n, 1);
+        if constexpr(std::is_same_v<T, BFloat16>)
+        {
+            problem.setAlphaType(rocisa::DataType::Float);
+            problem.setBetaType(rocisa::DataType::Float);
+        }
+        problem.setHighPrecisionAccumulate(false);
+        problem.setUseGradient(true);
+        problem.setUseBias(1);
+        problem.setBias(TypeInfo<T>::Enum, 1, 1, true, ContractionProblemGemm::D);
+        ASSERT_FALSE(isFastPathEligible(problem));
+        T a(1.0f), bias(0.0f);
+        std::vector<T> b(n, T(1.0f)), c(n, T(0.0f)), d(n, T(0.0f));
+        ContractionInputs inputs(&a, b.data(), c.data(), d.data(), 1.0f, 0.0f);
+        inputs.bias = &bias;
+        SolveGemmCPU(problem, inputs, -1, true);
+        EXPECT_EQ(float(bias), expected);
+    };
+    // Adding ones in these formats stops changing the running sum at these values.
+    check(Half{}, 4097, 2048.0f);
+    check(BFloat16{}, 513, 256.0f);
 }
