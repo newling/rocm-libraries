@@ -1356,6 +1356,16 @@ namespace TensileLite
                 return rejectFast("unsupported_float8_output_type_combination");
             }
 
+            // ScaleAB and Half-to-Float8 conversion are ordered differently in the
+            // slow path. Scaling a completed fast-path sum cannot reproduce it.
+            if(isFloat8Output
+               && (problem.useScaleAB() == "Scalar" || problem.useScaleAB() == "Vector")
+               && ((problem.a().dataType() == rocisa::DataType::Half
+                    && isFloat8Type(problem.computeInputTypeA()))
+                   || (problem.b().dataType() == rocisa::DataType::Half
+                       && isFloat8Type(problem.computeInputTypeB()))))
+                return rejectFast("scaled_half_to_float8_input");
+
             if(problem.useScaleCD())
             {
                 return rejectFast("scaleCD");

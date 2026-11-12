@@ -668,3 +668,33 @@ TEST(ReferenceFastPath, Float8OutputRoundsToNearestEvenAndSaturates)
                                              {1.5f * s, 2.0f * s}});
     }
 }
+
+TEST(ReferenceFastPath, ScaledHalfToFloat8KeepsSlowPathConversionOrder)
+{
+    using DT = rocisa::DataType;
+    for(bool halfA : {false, true})
+    {
+        for(auto mode : {"Scalar", "Vector"})
+        {
+            auto problem = makeFloat8OutputProblem(halfA ? DT::Half : DT::Float8,
+                                                   halfA ? DT::Float8 : DT::Half,
+                                                   DT::Float8, DT::Float8, DT::Float8, 1, 1, 1);
+            problem.setUseScaleAB(mode);
+            problem.setScaleA(DT::Float, 1);
+            problem.setScaleB(DT::Float, 1);
+            ASSERT_FALSE(isFastPathEligible(problem));
+            Half h(0.9f);
+            Float8 f(1.0f), c(0.0f), d(0.0f);
+            float sa = halfA ? 3.0f : 1.0f, sb = halfA ? 1.0f : 3.0f;
+            ContractionInputs inputs(halfA ? static_cast<void*>(&h) : &f,
+                                     halfA ? static_cast<void*>(&f) : &h,
+                                     &c, &d, 1.0f, 0.0f);
+            inputs.scaleA = &sa;
+            inputs.scaleB = &sb;
+            SolveGemmCPU(problem, inputs, -1, true);
+            // Scalar scaling precedes conversion; Vector retains the slow path's
+            // existing omission of the narrowed operand's scale.
+            EXPECT_EQ(float(d), std::string(mode) == "Scalar" ? 2.75f : 0.875f);
+        }
+    }
+}
