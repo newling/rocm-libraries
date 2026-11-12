@@ -692,18 +692,16 @@ if(NOT WIN32)
         ARGS -M 133 -N 147 -K 333 --transA --type f4 --mxBlockA 32 --mxBlockB 64 --validate --tryFastPath
     )
 
-    # Negative tests: K/mxBlock combos the slow path rejects should fail with a clear error
+    # The slow path clamps the last MX segment at K, including K below one block.
     add_test(
-        NAME "CPUGemm.slow_f4_MX32_BadK_Unaligned"
+        NAME "CPUGemm.slow_f4_MX32_KTail"
         COMMAND cpu-gemm-driver -M 16 -N 16 -K 33 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
     )
-    set_tests_properties("CPUGemm.slow_f4_MX32_BadK_Unaligned" PROPERTIES WILL_FAIL TRUE)
 
     add_test(
-        NAME "CPUGemm.slow_f4_MX32_BadK_TooSmall"
+        NAME "CPUGemm.slow_f4_MX32_KBelowBlock"
         COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
     )
-    set_tests_properties("CPUGemm.slow_f4_MX32_BadK_TooSmall" PROPERTIES WILL_FAIL TRUE)
 
     # Negative test: non-power-of-2 mxBlock should be rejected
     add_test(
