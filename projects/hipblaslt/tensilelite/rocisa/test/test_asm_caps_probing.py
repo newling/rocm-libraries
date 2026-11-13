@@ -53,7 +53,9 @@ def _probe(assembler, isas, debug=False, interval=0):
         ],
         # Under nohup the runner ignores SIGHUP and its children inherit that, so
         # restore it for the probe, whose assembler may have to die of it.
-        preexec_fn=(lambda: signal.signal(signal.SIGHUP, signal.SIG_DFL)) if os.name == "posix" else None,
+        preexec_fn=(
+            (lambda: signal.signal(signal.SIGHUP, signal.SIG_DFL)) if os.name == "posix" else None
+        ),
         capture_output=True,
         text=True,
     )
@@ -94,7 +96,9 @@ def test_batched_probes_answer_like_one_at_a_time(assembler):
 @_shell_assembler
 def test_probing_an_isa_takes_a_few_assembler_runs(tmp_path, assembler, isa):
     log = tmp_path / "runs.log"
-    script = _script(tmp_path / "bin" / "amdclang++", f'echo run >> "{log}"\nexec "{assembler}" "$@"\n')
+    script = _script(
+        tmp_path / "bin" / "amdclang++", f'echo run >> "{log}"\nexec "{assembler}" "$@"\n'
+    )
 
     assert _probe(script, [isa]) == _probe(assembler, [isa], debug=True)
     # About a hundred probes, one at a time.
@@ -112,7 +116,7 @@ def test_unreadable_batches_are_probed_one_source_at_a_time(tmp_path, assembler,
     }[failure]
     script = _script(
         tmp_path / "amdclang++",
-        'src=$(cat)\n'
+        "src=$(cat)\n"
         f'[ "$(printf "%s\\n" "$src" | wc -l)" -le 1 ] || {{ {fail}; }}\n'
         f'printf "%s\\n" "$src" | exec "{assembler}" "$@"\n',
     )
