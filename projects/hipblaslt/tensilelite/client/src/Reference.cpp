@@ -33,6 +33,8 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <omp.h>
 #include <optional>
@@ -1417,9 +1419,20 @@ namespace TensileLite
                         auto c_index = m_i * BLOCK_N + n_i;
                         MacT valB    = B[b_index];
                         MacT valA    = A[a_index];
-                        C[c_index]
-                            += static_cast<MacT>(static_cast<OperandMathOpT>(valA))
-                               * static_cast<MacT>(static_cast<OperandMathOpT>(valB));
+                        const MacT a = static_cast<MacT>(static_cast<OperandMathOpT>(valA));
+                        const MacT b = static_cast<MacT>(static_cast<OperandMathOpT>(valB));
+                        if constexpr(std::is_same_v<MacT, int32_t>)
+                        {
+                            // Int8 dot products wrap in the GPU's 32-bit accumulator.
+                            // Unsigned arithmetic avoids signed overflow; memcpy preserves
+                            // the signed interpretation without an out-of-range cast.
+                            const uint32_t sum = static_cast<uint32_t>(C[c_index])
+                                                 + static_cast<uint32_t>(a)
+                                                       * static_cast<uint32_t>(b);
+                            std::memcpy(&C[c_index], &sum, sizeof(sum));
+                        }
+                        else
+                            C[c_index] += a * b;
                     }
                 }
             }
@@ -1503,8 +1516,8 @@ namespace TensileLite
         // registers and the K-loop sums (including the MX block scaling) are in it;
         // each finished sum is converted to AccumT once, before the epilogue.
         // Default matches AccumT, making that conversion a no-op. An integer MacT
-        // (int32_t, Int8 inputs) makes the K loop exact, and the epilogue then follows
-        // the slow path's operation order (see slowPathEpilogueOrder below).
+        // (int32_t, Int8 inputs) sums modulo 2^32 with a signed result. The epilogue
+        // then follows the slow path's operation order (see slowPathEpilogueOrder below).
         template <typename AccumT = float, typename OperandMathOpT = AccumT, typename MacT = AccumT>
         void solveCPUFast(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs)
@@ -1519,8 +1532,9 @@ namespace TensileLite
             // Int8 inputs (integer MacT): the epilogue applies alpha, the ScaleAB
             // scales, scaleAlphaVec, beta * C, bias, activation and the output cast in
             // the slow path's order and types (ReferenceSolution<...>::SolveCPU), so D
-            // matches the slow path exactly, including round-half-to-even ties of the
-            // Int8 output cast. The other types keep the folded order below.
+            // preserves its rounding after the K sum, including round-half-to-even ties
+            // of the Int8 output cast. The legacy float K sum can lose precision above
+            // 2^24. The other types keep the folded order below.
             constexpr bool slowPathEpilogueOrder = std::is_integral_v<MacT>;
 
             // MX block scaling is floating-point only; isFastPathEligible rejects MX
@@ -3469,7 +3483,7 @@ namespace TensileLite
                 bool isInt8   = (problem.a().dataType() == rocisa::DataType::Int8);
                 if(isInt8)
                 {
-                    // Exact int32_t K loop; epilogue in the slow path's accumulator type.
+                    // Wrapping int32_t K loop; epilogue in the slow path's accumulator type.
                     if(getInt8FastPathEpilogue(problem) == Int8FastPathEpilogue::Int32)
                         solveCPUFast<int32_t, int32_t, int32_t>(problem, inputs);
                     else
