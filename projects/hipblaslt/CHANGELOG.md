@@ -17,8 +17,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Changed
 
-* Public functions that fail with a C++ exception now log the exception message at
-  `HIPBLASLT_LOG_LEVEL=1` (error). The returned status is unchanged.
+* Public functions that fail with a C++ exception now log the exception message, labelled
+  with the function's name, at `HIPBLASLT_LOG_LEVEL=1` (error). The returned status is unchanged.
 
 ### Resolved issues
 
