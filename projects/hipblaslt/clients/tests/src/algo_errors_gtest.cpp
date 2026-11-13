@@ -53,8 +53,7 @@ namespace
         return algo;
     }
 
-    // One FP16 NN problem. The buffers are never read: every call under test
-    // returns before a kernel is launched.
+    // One FP16 NN problem. Tests that launch kernels initialize the input buffers.
     class AlgoErrors : public ::testing::Test
     {
     protected:
@@ -163,6 +162,13 @@ namespace
         auto freeBuffer = [](void* p) { static_cast<void>(hipFree(p)); };
         const std::unique_ptr<void, decltype(freeBuffer)> workspaceOwner(workspace, freeBuffer);
 
+        // The two grouped GEMMs can run concurrently and need separate output buffers.
+        void* secondD = nullptr;
+        ASSERT_EQ(hipMalloc(&secondD, kSize * kSize * sizeof(uint16_t)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> secondDOwner(secondD, freeBuffer);
+        for(void* buffer : {a, b, c})
+            ASSERT_EQ(hipMemset(buffer, 0, kSize * kSize * sizeof(uint16_t)), hipSuccess);
+
         for(const int32_t uniformOrder : {1, 0})
         {
             SCOPED_TRACE("uniform summation order " + std::to_string(uniformOrder));
@@ -200,6 +206,7 @@ namespace
             std::vector<int64_t>                     size(2, kSize), batch(2, 1);
             std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
             std::vector<hipblaslt_ext::GemmInputs>   ins(2, inputs());
+            ins[1].setD(secondD);
             ASSERT_EQ(grouped.setProblem(size, size, size, batch, epilogues, ins),
                       HIPBLAS_STATUS_SUCCESS);
             grouped.setMaxWorkspaceBytes(kWorkspace);
