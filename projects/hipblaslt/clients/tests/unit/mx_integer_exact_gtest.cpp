@@ -106,6 +106,41 @@ namespace
     }
 } // namespace
 
+TEST(HostUnitMXIntegerExact, smoke_KContiguousReferenceIncludesStridePadding)
+{
+    size_t const rows = 64, cols = 4, stride = 96;
+    size_t const storageSize = stride * cols;
+    for(hipDataType type : {HIP_R_6F_E2M3, HIP_R_6F_E3M2, HIP_R_8F_E4M3, HIP_R_8F_E5M2})
+        for(bool isMatrixA : {true, false})
+        {
+            SCOPED_TRACE(::testing::Message() << "type=" << type << " isMatrixA=" << isMatrixA);
+            bool const           fp6 = type == HIP_R_6F_E2M3 || type == HIP_R_6F_E3M2;
+            std::vector<uint8_t> data(fp6 ? fp6Bytes(storageSize) : storageSize);
+            std::vector<uint8_t> scale(storageSize / 32);
+            auto const           ref = generateMXInput(type,
+                                             HIP_R_8U,
+                                             data.data(),
+                                             scale.data(),
+                                             rows,
+                                             cols,
+                                             stride,
+                                             /*isTranspose=*/isMatrixA,
+                                             isMatrixA ? 32 : 1,
+                                             isMatrixA ? 1 : 32,
+                                             isMatrixA,
+                                             MXScaleLayout::None,
+                                             "integer_exact");
+            ASSERT_EQ(ref.size(), storageSize);
+            for(size_t idx = 0; idx < storageSize; ++idx)
+            {
+                float const element
+                    = fp6 ? decodeFp6(type, fp6At(data, idx)) : decodeFp8(type, data[idx]);
+                float const expected = element * std::ldexp(1.f, int(scale[idx / 32]) - 127);
+                ASSERT_EQ(ref[idx], expected) << "element " << idx;
+            }
+        }
+}
+
 // Every dequantized value is an element in {0, 1, 2} (A) or {-2, ..., 2} (B) times a scale of
 // 1, 2 or 4, more than one scale is used, and the reference matches the packed bytes and scales
 // the GPU reads, in all four A and B layouts.

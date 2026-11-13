@@ -539,10 +539,9 @@ std::vector<float> generateData(T                           dgen,
         // return the reference float directly since they are aligned already.
         if(!integerExact)
             return dgen.getReferenceFloat();
-        // The generator's reference floats describe its own values, which integerExact replaced;
-        // recompute them from the bytes with the generator's scale mapping, in which each stored
-        // row starts a new block, so a partial block at the end of a row keeps its own scale.
-        size_t const       count = static_cast<size_t>(sizes[0]) * static_cast<size_t>(sizes[1]);
+        // integerExact replaced the generator's values. Decode the replacement bytes over the
+        // full storage extent, including padding, using the generator's scale-block layout.
+        size_t const       count = static_cast<size_t>(strides[1]) * static_cast<size_t>(sizes[1]);
         std::vector<float> ref(count);
         for(size_t idx = 0; idx < count; idx++)
         {
