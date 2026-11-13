@@ -6655,9 +6655,11 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
@@ -6744,9 +6746,11 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
@@ -7211,9 +7215,11 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
@@ -7264,9 +7270,11 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
@@ -7378,9 +7386,11 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
     }
     catch(const std::exception& e)
     {
+        log_error(__func__, e.what());
     }
     catch(...)
     {
+        log_error(__func__, "unknown exception");
     }
 
     return status;
