@@ -915,8 +915,7 @@ def writeSolutionsAndKernelsTCL(
             # The source is on disk (and assembled) by now; don't ship it back
             # to the parent, which only needs the post-codegen kernel info.
             slim = processed_kernel._replace(src=None, header=None)
-            # Hand the 20-100 MiB this kernel's module tree and text occupied
-            # back to the OS instead of letting it inflate the worker's RSS.
+            # Release free allocator pages after dropping the source and write results.
             del processed_kernel, written_kernel, assembled_kernel
             releaseFreedMemory()
             return slim
