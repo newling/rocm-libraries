@@ -486,3 +486,40 @@ TEST(ReferenceFastPath, Int8FloatEpilogueFollowsSlowPathOrder)
         EXPECT_EQ(dFast[0], dSlow[0]);
     }
 }
+
+TEST(ReferenceFastPath, Int8InPlaceCDPreservesBetaInput)
+{
+    auto problem = makeInt8Problem(rocisa::DataType::Int32, rocisa::DataType::Int32, 1, 1, 1);
+    int8_t a = 2, b = 3;
+    int32_t cd = 5;
+    ContractionInputs inputs(&a, &b, &cd, &cd, int32_t(1), int32_t(1));
+    ASSERT_TRUE(isFastPathEligible(problem));
+    SolveGemmCPU(problem, inputs, -1, true);
+    EXPECT_EQ(cd, 11);
+}
+
+TEST(ReferenceFastPath, Int8DotProductWrapsAtInt32Boundary)
+{
+    constexpr size_t K = 140000;
+    const std::vector<int8_t> a(K, -128);
+    // The exact sums are 2,293,760,000 and -2,275,840,000. Subtracting or
+    // adding 2^32 gives these signed results, both exactly representable in float.
+    for(auto [bValue, expected] : {std::pair{int8_t(-128), int32_t(-2001207296)},
+                                  std::pair{int8_t(127), int32_t(2019127296)}})
+    {
+        const std::vector<int8_t> b(K, bValue);
+        auto check = [&](auto alpha) {
+            using ScalarT = decltype(alpha);
+            auto problem = makeInt8Problem(
+                rocisa::DataType::Int32, TypeInfo<ScalarT>::Enum, 1, 1, K);
+            int32_t c = 0, d = 0;
+            ContractionInputs inputs(a.data(), b.data(), &c, &d, alpha, ScalarT(0));
+            ASSERT_TRUE(isFastPathEligible(problem));
+            SolveGemmCPU(problem, inputs, -1, true);
+            EXPECT_EQ(d, expected) << "B=" << int(bValue)
+                                   << ", alpha type=" << ToString(TypeInfo<ScalarT>::Enum);
+        };
+        check(int32_t(1));
+        check(1.0f);
+    }
+}
