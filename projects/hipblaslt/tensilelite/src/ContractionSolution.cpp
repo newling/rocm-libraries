@@ -4638,8 +4638,22 @@ namespace TensileLite
 
         if(!problemType.useScaleAB.empty()) // GSU dep
         {
-            args.template append<void const*>("scaleA", inputs.scaleA);
-            args.template append<void const*>("scaleB", inputs.scaleB);
+            auto scaleA = inputs.scaleA;
+            auto scaleB = inputs.scaleB;
+            if(problemType.useScaleAB == "Scalar")
+            {
+                // The main kernel consumes a Scalar scale before narrowing its
+                // operand. The conversion helper must not apply it again; null
+                // selects unit scale. Vector scales remain in the epilogue.
+                if(DataTypeInfo::Get(problem.a().dataType()).elementSize
+                   > DataTypeInfo::Get(problem.computeInputTypeA()).elementSize)
+                    scaleA = nullptr;
+                if(DataTypeInfo::Get(problem.b().dataType()).elementSize
+                   > DataTypeInfo::Get(problem.computeInputTypeB()).elementSize)
+                    scaleB = nullptr;
+            }
+            args.template append<void const*>("scaleA", scaleA);
+            args.template append<void const*>("scaleB", scaleB);
         }
         if(problemType.useScaleCD) // GSU dep
         {

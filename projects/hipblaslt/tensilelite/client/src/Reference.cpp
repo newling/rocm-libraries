@@ -2009,7 +2009,7 @@ namespace TensileLite
             constexpr bool isInt8Mac = std::is_same_v<typename Inputs::AType, int8_t>
                                        && std::is_same_v<typename Inputs::BType, int8_t>;
             using ReductionT       = std::conditional_t<isInt8Mac, uint32_t, EpilogueT>;
-            using ReductionMathT   = std::conditional_t<isInt8Mac, uint32_t, InputMathT>;
+            using ReductionMathT = std::conditional_t<isInt8Mac, uint32_t, InputMathT>;
             using SignedReductionT = std::conditional_t<isInt8Mac, int32_t, ReductionT>;
             if constexpr(isInt8Mac)
             {
@@ -2018,13 +2018,14 @@ namespace TensileLite
                     throw std::runtime_error("Int8 CPU reference does not support MX scales");
             }
 
-            EpilogueT*   ws                   = nullptr;
+            EpilogueT* ws                   = nullptr;
             size_t       validationStrideGemm = 1;
             if(problem.useGradient() && problem.useBias()
                && (problem.biasSrc() == ContractionProblemGemm::D))
             {
                 validationStrideGemm = 1;
-                ws = (EpilogueT*)malloc(problem.d().totalAllocatedElements() * sizeof(EpilogueT));
+                ws                   = (EpilogueT*)malloc(problem.d().totalAllocatedElements()
+                                          * sizeof(EpilogueT));
             }
             else
             {
@@ -2103,8 +2104,8 @@ namespace TensileLite
                 }
             }
 
-            EpilogueT      amaxD(0);
-            EpilogueT      negOne(-1);
+            EpilogueT    amaxD(0);
+            EpilogueT    negOne(-1);
             constexpr bool notCmplxAmaxD = !std::is_same<EpilogueT, std::complex<double>>()
                                            && !std::is_same<EpilogueT, std::complex<float>>();
 
@@ -2238,7 +2239,7 @@ namespace TensileLite
                             // the previous behaviour read past the end of A/B.
                             // See ReferenceMXBlock128Demo.BlockAlignedKMakesTheSegmentClampANoOp.
                             size_t      segment = std::min(innerMXLoop, boundSize[0] - i);
-                            ReductionT  val(0);
+                            ReductionT val(0);
                             for(size_t j = 0; j < segment; j++)
                             {
                                 size_t idx = i + j;
@@ -2302,7 +2303,7 @@ namespace TensileLite
                 // independent multipliers and are applied below.
                 EpilogueT alpha = effectiveAlpha;
                 EpilogueT beta  = constVariantCast<EpilogueT>(inputs.beta);
-                auto      zero  = static_cast<EpilogueT>(0);
+                auto        zero  = static_cast<EpilogueT>(0);
 
                 if(problem.useScaleAB() == "Scalar")
                 {
@@ -2322,17 +2323,14 @@ namespace TensileLite
                 {
                     auto posB = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
                     auto posA = int(dNum % problem.d().sizes()[0]);
-                    EpilogueT scaleA
-                        = GetValue<EpilogueT>(problem.alphaType(), inputs.scaleA, posA, aConjugate);
-                    EpilogueT scaleB
-                        = GetValue<EpilogueT>(problem.alphaType(), inputs.scaleB, posB, aConjugate);
-                    if constexpr(sizeof(typename Inputs::AType)
-                                 <= sizeof(typename Inputs::ComputeInputTypeA))
-                        alpha *= scaleA;
-
-                    if constexpr(sizeof(typename Inputs::BType)
-                                 <= sizeof(typename Inputs::ComputeInputTypeB))
-                        alpha *= scaleB;
+                    EpilogueT scaleA = GetValue<EpilogueT>(
+                        problem.alphaType(), inputs.scaleA, posA, aConjugate);
+                    EpilogueT scaleB = GetValue<EpilogueT>(
+                        problem.alphaType(), inputs.scaleB, posB, aConjugate);
+                    // Vector scales are applied after the dot product, including
+                    // when an input was narrowed before multiplication.
+                    alpha *= scaleA;
+                    alpha *= scaleB;
                 }
 
                 auto resultD = multiply<EpilogueT>(alpha, value);
@@ -2355,8 +2353,8 @@ namespace TensileLite
                     EpilogueT cValue = multiply<EpilogueT>(beta, cPtr[cIndex]);
                     if(problem.useScaleCD())
                     {
-                        EpilogueT scaleC
-                            = GetValue<EpilogueT>(problem.betaType(), inputs.scaleC, 0, aConjugate);
+                        EpilogueT scaleC = GetValue<EpilogueT>(
+                            problem.betaType(), inputs.scaleC, 0, aConjugate);
                         cValue *= scaleC;
                     }
 
@@ -2435,8 +2433,8 @@ namespace TensileLite
 
                 if(problem.useScaleCD())
                 {
-                    EpilogueT scaleD
-                        = GetValue<EpilogueT>(problem.betaType(), inputs.scaleD, 0, aConjugate);
+                    EpilogueT scaleD = GetValue<EpilogueT>(
+                        problem.betaType(), inputs.scaleD, 0, aConjugate);
                     resultD *= scaleD;
                 }
                 if(problem.useBias() && problem.useGradient()
@@ -2449,10 +2447,11 @@ namespace TensileLite
                 if(problem.useGateResidual() && inputs.gateResidual)
                 {
                     auto gateIndex = problem.gateResidual().index(dCoord);
-                    EpilogueT gateVal   = GetValue<EpilogueT>(problem.gateResidual().dataType(),
-                                                            inputs.gateResidual,
-                                                            gateIndex,
-                                                            aConjugate);
+                    EpilogueT gateVal
+                        = GetValue<EpilogueT>(problem.gateResidual().dataType(),
+                                               inputs.gateResidual,
+                                               gateIndex,
+                                               aConjugate);
                     resultD = gateVal * resultD + gateVal;
                 }
 
