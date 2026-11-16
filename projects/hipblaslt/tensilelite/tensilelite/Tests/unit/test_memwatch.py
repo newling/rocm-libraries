@@ -309,3 +309,49 @@ def test_sigterm_to_memwatch_reaches_the_whole_process_group(tmp_path):
         time.sleep(0.05)
     else:
         pytest.fail(f"grandchild {grandchild} still running")
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="uses /dev/full and /proc")
+def test_output_failure_stops_the_monitored_process(tmp_path):
+    marker = tmp_path / "child.pid"
+    child = (
+        "import os, pathlib, time\n"
+        f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+        "print('x' * 65536, flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            str(MEMWATCH),
+            "--quiet",
+            "--log",
+            "/dev/full",
+            "--out",
+            str(tmp_path / "summary.json"),
+            "--",
+            sys.executable,
+            "-c",
+            child,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _, stderr = proc.communicate(timeout=10)
+        assert proc.returncode != 0
+        assert "No space left on device" in stderr
+        child_pid = int(marker.read_text())
+        stat = Path(f"/proc/{child_pid}/stat")
+        state = stat.read_text().rpartition(")")[2].split()[0] if stat.exists() else None
+        assert state in (None, "Z"), "the command survived its monitor's output failure"
+    finally:
+        if marker.exists():
+            try:
+                os.killpg(int(marker.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()

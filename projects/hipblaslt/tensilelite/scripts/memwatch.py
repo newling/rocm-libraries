@@ -455,20 +455,30 @@ def main(argv=None):
     signal.signal(signal.SIGINT, forward)
     signal.signal(signal.SIGTERM, forward)
 
-    for line in proc.stdout:
-        phase = phase_from_line(line)
-        if phase:
-            sampler.set_phase(phase)
+    try:
+        for line in proc.stdout:
+            phase = phase_from_line(line)
+            if phase:
+                sampler.set_phase(phase)
+            if log:
+                log.write(line)
+            if not args.quiet:
+                sys.stdout.write(line)
+        proc.wait()
+        elapsed = time.monotonic() - t0
+    except BaseException:
+        # A failed log or output pipe must not leave the monitored build running.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
+        raise
+    finally:
+        sampler.stop_event.set()
+        sampler.join()
         if log:
-            log.write(line)
-        if not args.quiet:
-            sys.stdout.write(line)
-    proc.wait()
-    elapsed = time.monotonic() - t0
-    sampler.stop_event.set()
-    sampler.join()
-    if log:
-        log.close()
+            log.close()
 
     summary = sampler.summary(elapsed, proc.returncode, cmd)
     with open(args.out, "w") as f:
