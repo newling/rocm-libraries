@@ -82,7 +82,7 @@
  * # Half gradient GEMM: D times relu(E) (E an input), bias gradient reduced from A
  * ./cpu_gemm_driver --type f16 --gradient --activation relu --useE --bias --biasSrc a --validate
  *
- * # MXFP4 with K not a multiple of the MX block (partial last block; fast path only)
+ * # MXFP4 with K not a multiple of the MX block (partial last block)
  * ./cpu_gemm_driver --type f4 --mxBlockA 32 --mxBlockB 32 -M 64 -N 64 -K 333 --transA --validate --tryFastPath
  *
  * # Benchmark mode (validation disabled)
@@ -595,7 +595,7 @@ int runGemm(size_t         m,
                       << "); set both > 0 or both 0." << std::endl;
             return 1;
         }
-        auto checkSide = [&](const char* name, int b) -> int {
+        auto checkSide = [](const char* name, int b) -> int {
             if(b <= 0) return 0;
             if((b & (b - 1)) != 0)
             {
@@ -603,28 +603,13 @@ int runGemm(size_t         m,
                           << std::endl;
                 return 1;
             }
-            // A partial last MX block (K < block or K not a multiple of it) is only
-            // supported on the fast path: the production slow path's MX inner loop
-            // sums whole blocks, so it reads the last block's elements past K.
-            if(tryFastPath)
-                return 0;
-            if(k < static_cast<size_t>(b))
-            {
-                std::cerr << "Error: K (" << k << ") must be >= " << name << " (" << b << ")"
-                          << " on the slow path (use --tryFastPath)" << std::endl;
-                return 1;
-            }
-            if(k % static_cast<size_t>(b) != 0)
-            {
-                std::cerr << "Error: K (" << k << ") must be a multiple of " << name << " (" << b
-                          << ") on the slow path (use --tryFastPath)" << std::endl;
-                return 1;
-            }
             return 0;
         };
         if(int rc = checkSide("mxBlockA", mxBlockA)) return rc;
         if(int rc = checkSide("mxBlockB", mxBlockB)) return rc;
 
+        // Both paths stop their final MX segment at K, so equal-block MX
+        // supports K below the block size and K not divisible by that size.
         // Asymmetric MX (mxBlockA != mxBlockB) is only supported on the fast
         // path. The production slow path's MX inner loop uses a single scale
         // per max(mxBlockA, mxBlockB)-sized segment, which collapses the
@@ -1378,8 +1363,8 @@ int main(int argc, char* argv[])
         "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
         "factorDim", po::value<int>()->default_value(0), "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
         "useScaleAB", po::value<std::string>()->default_value("none"), "ScaleAB mode (none, Scalar, Vector)")(
-        "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together; K not a multiple of it needs --tryFastPath)")(
-        "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together; K not a multiple of it needs --tryFastPath)")(
+        "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together; unequal blocks need --tryFastPath)")(
+        "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together; unequal blocks need --tryFastPath)")(
         "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)")(
         "outputAmaxD", po::value<bool>()->default_value(false), "Also output AMAX-D (max |D|) and validate it against the golden GEMM")(
         "int8Min", po::value<int>()->default_value(-128), "Smallest i8 A/B value (i8 inputs only; default -128)")(
