@@ -735,7 +735,7 @@ endif()
 # --outputAmaxD makes the reference also write AMAX-D (max |D| over every
 # batch); the driver checks it against max |D| of the golden GEMM, so the
 # check does not depend on which CPU path ran. The fast path does not support
-# AMAX-D (isFastPathEligible rejects "amaxD"), so these run without
+# AMAX-D (isFastPathEligible rejects it), so these run without
 # --tryFastPath, on the slow path.
 foreach(TYPE f32 f16 bf16)
     get_test_sizes(${TYPE} SIZES)
@@ -1217,6 +1217,19 @@ endforeach()
 add_cpu_gemm_test(slow_I8_I32_I32_Int32BetaBoundary
     ARGS -M 1 -N 1 -K 0 --type i8 --typeCD i32 --typeAlpha i32 --alpha 0 --beta 2147483647 --validate
 )
+
+# A valid GEMM can still require the slow path; explain why forcing fast fails.
+add_cpu_gemm_test(fast_AmaxD_Rejected
+    EXPECTED_ERROR "AMAX-D output is not supported by the fast path"
+    ARGS -M 1 -N 1 -K 1 --type f32 --outputAmaxD --tryFastPath --validate
+)
+
+if(NOT WIN32)
+    add_cpu_gemm_test(fast_f4_MX4_Rejected
+        EXPECTED_ERROR "mxBlockA must be a multiple of the 8-element K tile"
+        ARGS -M 1 -N 1 -K 16 --type f4 --mxBlockA 4 --mxBlockB 4 --tryFastPath --validate
+    )
+endif()
 
 if(COMMAND apply_ctest_category_labels)
     apply_ctest_category_labels(
