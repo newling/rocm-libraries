@@ -133,6 +133,8 @@ namespace
     //
     // scaleA is always indexed by row (M), scaleB always by col (N).
     // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
+    // preQuantizeScaleA/B scale operands before narrowing through quantizeA/B;
+    // the caller folds other scalar scales into alpha.
     //
     // preActivation (if not null) receives the value before activation, i.e.
     // after bias, which the reference writes to E (useE).
@@ -308,22 +310,24 @@ namespace
                          bool           transB,
                          AccumT         alpha,
                          AccumT         beta,
-                         const AccumT*  biasVec       = nullptr,
-                         const AccumT*  scaleAlphaVec = nullptr,
-                         ActivationType activation    = ActivationType::None,
-                         const AccumT*  scaleAVec     = nullptr,
-                         const AccumT*  scaleBVec     = nullptr,
-                         int            factorDim     = 0,
-                         QuantizeFn     quantizeA     = nullptr,
-                         QuantizeFn     quantizeB     = nullptr,
-                         AccumT*        preActivation = nullptr,
-                         const AccumT*  gradientE     = nullptr
+                         const AccumT*  biasVec           = nullptr,
+                         const AccumT*  scaleAlphaVec     = nullptr,
+                         ActivationType activation        = ActivationType::None,
+                         const AccumT*  scaleAVec         = nullptr,
+                         const AccumT*  scaleBVec         = nullptr,
+                         int            factorDim         = 0,
+                         QuantizeFn     quantizeA         = nullptr,
+                         QuantizeFn     quantizeB         = nullptr,
+                         MacT           preQuantizeScaleA = MacT(1),
+                         MacT           preQuantizeScaleB = MacT(1),
+                         AccumT*        preActivation     = nullptr,
+                         const AccumT*  gradientE         = nullptr
 #ifndef _WIN32
                          ,
-                         MXGemmOperand  mxA           = {},
-                         MXGemmOperand  mxB           = {}
+                         MXGemmOperand mxA = {},
+                         MXGemmOperand mxB = {}
 #endif
-                         )
+    )
     {
 
         switch(activation)
@@ -377,8 +381,8 @@ namespace
                             size_t l    = lBase + t;
                             MacT   aVal = a[i * strideAM + l * strideAK];
                             MacT   bVal = b[l * strideBK + j * strideBN];
-                            aVal        = quantizeOperand(quantizeA, aVal);
-                            bVal        = quantizeOperand(quantizeB, bVal);
+                            aVal        = quantizeOperand(quantizeA, aVal * preQuantizeScaleA);
+                            bVal        = quantizeOperand(quantizeB, bVal * preQuantizeScaleB);
                             blockSum
                                 += static_cast<MacT>(static_cast<OperandMathOpT>(aVal))
                                    * static_cast<MacT>(static_cast<OperandMathOpT>(bVal));
@@ -405,8 +409,8 @@ namespace
                     {
                         MacT aVal = a[i * strideAM + l * strideAK];
                         MacT bVal = b[l * strideBK + j * strideBN];
-                        aVal      = quantizeOperand(quantizeA, aVal);
-                        bVal      = quantizeOperand(quantizeB, bVal);
+                        aVal      = quantizeOperand(quantizeA, aVal * preQuantizeScaleA);
+                        bVal      = quantizeOperand(quantizeB, bVal * preQuantizeScaleB);
                         sum += static_cast<MacT>(static_cast<OperandMathOpT>(aVal))
                                * static_cast<MacT>(static_cast<OperandMathOpT>(bVal));
                     }
@@ -1115,15 +1119,21 @@ int runGemm(size_t         m,
         }
 #endif
 
-        // Scalar ScaleAB folds into alpha (alpha * scaleA * scaleB, in the
-        // reference's order); an int32_t alpha is range-checked like the other
-        // int32_t intermediates.
-        using GoldenAlphaT     = GoldenWideT<AccumulateT>;
+        // Scalar scales apply before narrowing; other scales fold into alpha in
+        // A-then-B order. Keep aRef/bRef unscaled for input bias-gradient reductions.
+        using GoldenAlphaT             = GoldenWideT<AccumulateT>;
         GoldenAlphaT wideAlpha = static_cast<GoldenAlphaT>(static_cast<AccumulateT>(alpha));
+        MacT         preQuantizeScaleA = MacT(1), preQuantizeScaleB = MacT(1);
         if(useScaleAB == "Scalar")
         {
-            wideAlpha = checkedInt32(wideAlpha * static_cast<GoldenAlphaT>(scaleABuf[0]));
-            wideAlpha = checkedInt32(wideAlpha * static_cast<GoldenAlphaT>(scaleBBuf[0]));
+            if(TypeInfo<InputAT>::ElementSize > DataTypeInfo::Get(computeInputA).elementSize)
+                preQuantizeScaleA = static_cast<MacT>(scaleABuf[0]);
+            else
+                wideAlpha = checkedInt32(wideAlpha * static_cast<GoldenAlphaT>(scaleABuf[0]));
+            if(TypeInfo<InputBT>::ElementSize > DataTypeInfo::Get(computeInputB).elementSize)
+                preQuantizeScaleB = static_cast<MacT>(scaleBBuf[0]);
+            else
+                wideAlpha = checkedInt32(wideAlpha * static_cast<GoldenAlphaT>(scaleBBuf[0]));
         }
         const AccumulateT goldenAlpha = static_cast<AccumulateT>(wideAlpha);
 
@@ -1162,20 +1172,22 @@ int runGemm(size_t         m,
                     factorDim,
                     quantA,
                     quantB,
+                    preQuantizeScaleA,
+                    preQuantizeScaleB,
                     ePtr,
                     gradientEPtr
 #ifndef _WIN32
                     ,
-                    MXGemmOperand{
-                        (isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride : nullptr,
-                        mxBlockA,
-                        mxsaStrideM,
-                        mxsaStrideKBlk},
-                    MXGemmOperand{
-                        (isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride : nullptr,
-                        mxBlockB,
-                        mxsbStrideN,
-                        mxsbStrideKBlk}
+                    MXGemmOperand{(isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride
+                                                          : nullptr,
+                                  mxBlockA,
+                                  mxsaStrideM,
+                                  mxsaStrideKBlk},
+                    MXGemmOperand{(isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride
+                                                          : nullptr,
+                                  mxBlockB,
+                                  mxsbStrideN,
+                                  mxsbStrideKBlk}
 #endif
                 );
             }
@@ -1198,7 +1210,7 @@ int runGemm(size_t         m,
         // scaleAlphaVec values are +-1, so both give the same value.)
         // Float8/BFloat8 outputs must match exactly too: with this driver's data every
         // K-loop sum is exact in float. Products are +-1, or (one operand quantized to
-        // e4m3 from (-1, 1), the other +-1) multiples of 2^-9 (fnuz: 2^-10), whose sums
+        // e4m3, the other +-1) multiples of 2^-9 (fnuz: 2^-10), whose sums
         // are exact while |partial sum| < 2^15 (fnuz: 2^14). C, bias and scaleAlphaVec
         // are +-1 and the ScaleAB scales integers, so the golden and the reference round
         // the same epilogue operations to the same float values before the cast, and a

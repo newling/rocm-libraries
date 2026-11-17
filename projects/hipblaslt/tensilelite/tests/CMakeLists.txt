@@ -909,11 +909,11 @@ endforeach()
 #
 # Test sets: "full" for the four ids with the same type in A, B and C/D;
 # "basic" for the cross-output and hybrid ids and Float8 x Half with a Half MAC;
-# "noscale" for Float8 x Half with a Float8 MAC (--computeInput f8 on the Half
+# "narrow" for Float8 x Half with a Float8 MAC (--computeInput f8 on the Half
 # operand). Scalar scaling precedes narrowing and is rejected by fast-path
-# eligibility. Vector scaling remains fast-eligible: the preceding correctness
-# PR makes both reference paths apply both vectors after the dot product.
-# These driver cases stay unscaled; ReferenceFastPath_test.cpp checks Scalar
+# eligibility. Vector scales apply after the dot product on both reference paths.
+# The small Scalar case avoids output saturation and checks that bias gradients
+# still reduce the original inputs. ReferenceFastPath_test.cpp checks Scalar
 # fallback and Vector results with independent, quantization-aware expectations.
 if(NOT WIN32)
     foreach(PATH fast slow)
@@ -944,10 +944,10 @@ if(NOT WIN32)
                 "HF8_H_FP8_S;f16;f8;f8;--computeInputB f16;basic"
                 "F8NH_H_FP8_S;f8fnuz;f16;f8fnuz;--computeInputA f16;basic"
                 "HF8N_H_FP8_S;f16;f8fnuz;f8fnuz;--computeInputB f16;basic"
-                "F8H_FP8_FP8_S;f8;f16;f8;--computeInputB f8;noscale"
-                "HF8_FP8_FP8_S;f16;f8;f8;--computeInputA f8;noscale"
-                "F8NH_FP8_FP8_S;f8fnuz;f16;f8fnuz;--computeInputB f8fnuz;noscale"
-                "HF8N_FP8_FP8_S;f16;f8fnuz;f8fnuz;--computeInputA f8fnuz;noscale")
+                "F8H_FP8_FP8_S;f8;f16;f8;--computeInputB f8;narrow"
+                "HF8_FP8_FP8_S;f16;f8;f8;--computeInputA f8;narrow"
+                "F8NH_FP8_FP8_S;f8fnuz;f16;f8fnuz;--computeInputB f8fnuz;narrow"
+                "HF8N_FP8_FP8_S;f16;f8fnuz;f8fnuz;--computeInputA f8fnuz;narrow")
             list(GET COMBO 0 NAME)
             list(GET COMBO 1 TYPE_A)
             list(GET COMBO 2 TYPE_B)
@@ -967,9 +967,19 @@ if(NOT WIN32)
             add_cpu_gemm_test(${PATH}_${NAME}_TN_AllFeatures
                 ARGS ${F8OUT_ARGS} --transA --alpha 0.3 --beta 0.5 --bias --activation relu --scaleAlphaVec
             )
-            if(NOT "${TEST_SET}" STREQUAL "noscale")
+            if(NOT "${TEST_SET}" STREQUAL "narrow")
                 add_cpu_gemm_test(${PATH}_${NAME}_ScaleAB_Scalar
                     ARGS ${F8OUT_ARGS} --useScaleAB Scalar
+                )
+            elseif("${PATH}" STREQUAL "slow")
+                if("${TYPE_A}" STREQUAL "f16")
+                    set(BIAS_SRC a)
+                else()
+                    set(BIAS_SRC b)
+                endif()
+                add_cpu_gemm_test(${PATH}_${NAME}_ScalarNarrowing_BiasGradient
+                    ARGS -M 2 -N 2 -K 2 --typeA ${TYPE_A} --typeB ${TYPE_B} --typeCD ${TYPE_CD} ${COMPUTE_FLAGS}
+                         --alpha 0.01 --useScaleAB Scalar --gradient --bias --biasSrc ${BIAS_SRC} --validate
                 )
             endif()
             if("${TEST_SET}" STREQUAL "full")
