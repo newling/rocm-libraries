@@ -685,8 +685,8 @@ namespace
 {
     // A = B = 1 (K = 1, N = 1) with scaleAlphaVec[m] = cases[m].first, so the float
     // value before the output cast is exactly cases[m].first on both paths. Checks
-    // that the Float8/BFloat8 output is cases[m].second on the fast path, and the
-    // same as on the slow path (SaturateCast).
+    // that the Float8/BFloat8 output is cases[m].second on both paths, including
+    // non-finite results from SaturateCast.
     template <typename OutT>
     void checkFloat8OutputCast(rocisa::DataType                           type,
                                std::vector<std::pair<float, float>> const& cases)
@@ -708,19 +708,31 @@ namespace
               });
         for(size_t m = 0; m < M; ++m)
         {
-            EXPECT_EQ(static_cast<float>(dFast[m]), cases[m].second) << "value " << cases[m].first;
-            EXPECT_EQ(static_cast<float>(dFast[m]), static_cast<float>(dSlow[m]))
-                << "value " << cases[m].first;
+            SCOPED_TRACE(::testing::Message() << "value " << cases[m].first);
+            if(std::isnan(cases[m].second))
+            {
+                EXPECT_TRUE(std::isnan(static_cast<float>(dFast[m])));
+                EXPECT_TRUE(std::isnan(static_cast<float>(dSlow[m])));
+            }
+            else
+            {
+                EXPECT_EQ(static_cast<float>(dFast[m]), cases[m].second);
+                EXPECT_EQ(static_cast<float>(dSlow[m]), cases[m].second);
+            }
         }
     }
 } // namespace
 
-// Float8/BFloat8 outputs round to nearest even (ties between two F8 values, also
-// subnormal ones) and saturate to the largest finite value (including values that
-// round up past it). fnuz types have no negative zero: a tiny negative value is +0.
+// Finite Float8/BFloat8 outputs round to nearest even (ties between two F8 values,
+// also subnormal ones) and saturate to the largest finite value (including values
+// that round up past it). fnuz types have no negative zero: a tiny negative value
+// is +0. OCP E5M2 preserves signed infinity; OCP E4M3 and both fnuz types map
+// infinity to NaN. All four types preserve NaN.
 TEST(ReferenceFastPath, Float8OutputRoundsToNearestEvenAndSaturates)
 {
     const float tiny = std::ldexp(1.0f, -20);
+    const float inf  = std::numeric_limits<float>::infinity();
+    const float nan  = std::numeric_limits<float>::quiet_NaN();
     {
         SCOPED_TRACE("Float8 (E4M3, max 448, smallest subnormal 2^-9)");
         const float s = std::ldexp(1.0f, -9);
@@ -735,6 +747,9 @@ TEST(ReferenceFastPath, Float8OutputRoundsToNearestEvenAndSaturates)
                                        {464.0f, 448.0f},
                                        {1000.0f, 448.0f},
                                        {-1.0e6f, -448.0f},
+                                       {inf, nan},
+                                       {-inf, nan},
+                                       {nan, nan},
                                        {0.5f * s, 0.0f},
                                        {1.5f * s, 2.0f * s},
                                        {2.5f * s, 2.0f * s}});
@@ -752,6 +767,9 @@ TEST(ReferenceFastPath, Float8OutputRoundsToNearestEvenAndSaturates)
                                         {61440.0f, 57344.0f},
                                         {1.0e6f, 57344.0f},
                                         {-1.0e6f, -57344.0f},
+                                        {inf, inf},
+                                        {-inf, -inf},
+                                        {nan, nan},
                                         {0.5f * s, 0.0f},
                                         {1.5f * s, 2.0f * s}});
     }
@@ -767,6 +785,9 @@ TEST(ReferenceFastPath, Float8OutputRoundsToNearestEvenAndSaturates)
                                             {248.0f, 240.0f},
                                             {1000.0f, 240.0f},
                                             {-1.0e6f, -240.0f},
+                                            {inf, nan},
+                                            {-inf, nan},
+                                            {nan, nan},
                                             {0.5f * s, 0.0f},
                                             {-0.5f * s, 0.0f},
                                             {1.5f * s, 2.0f * s}});
@@ -783,6 +804,9 @@ TEST(ReferenceFastPath, Float8OutputRoundsToNearestEvenAndSaturates)
                                              {61440.0f, 57344.0f},
                                              {1.0e6f, 57344.0f},
                                              {-1.0e6f, -57344.0f},
+                                             {inf, nan},
+                                             {-inf, nan},
+                                             {nan, nan},
                                              {0.5f * s, 0.0f},
                                              {-0.5f * s, 0.0f},
                                              {1.5f * s, 2.0f * s}});
