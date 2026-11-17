@@ -1531,8 +1531,9 @@ namespace TensileLite
             // scales, scaleAlphaVec, beta * C, bias, activation and the output cast in
             // the slow path's order and types (ReferenceSolution<...>::SolveCPU), so D
             // preserves its rounding after the K sum, including round-half-to-even ties
-            // of the Int8 output cast. The legacy float K sum can lose precision above
-            // 2^24. The other types keep the folded order below.
+            // of the Int8 output cast. Both paths reduce modulo 2^32, interpret the
+            // result as signed Int32 and convert once to the epilogue type. The
+            // other types keep the folded order below.
             constexpr bool slowPathEpilogueOrder = std::is_integral_v<MacT>;
 
             // MX block scaling is floating-point only; isFastPathEligible rejects MX
@@ -1825,21 +1826,6 @@ namespace TensileLite
                             }
                         }
 
-                        // Copy from cReg back, converting each sum from MacT to AccumT.
-                        for(size_t nn = 0; nn < BLOCK_N; ++nn)
-                        {
-                            for(size_t mm = 0; mm < BLOCK_M; ++mm)
-                            {
-                                size_t global_n = n0 + nn;
-                                size_t global_m = m0 + mm;
-                                if(global_n < sizeN && global_m < sizeM)
-                                {
-                                    size_t idxD     = global_n * strideND + global_m;
-                                    curBatchD[idxD] = static_cast<AccumT>(cReg[mm * BLOCK_N + nn]);
-                                }
-                            }
-                        }
-
                         // Perform all the post-reduction stuff.
                         const AccumT beta = constVariantCast<AccumT>(inputs.beta);
                         for(size_t nn = 0; nn < BLOCK_N; ++nn)
@@ -1853,7 +1839,7 @@ namespace TensileLite
                                     size_t idxD      = global_m + (global_n * strideND);
                                     size_t idxC      = global_m + (global_n * strideNC);
                                     auto   startingC = curBatchC[idxC];
-                                    auto   current   = curBatchD[idxD];
+                                    auto current = static_cast<AccumT>(cReg[mm * BLOCK_N + nn]);
                                     // DeviceScalarAlpha replaces inline alpha. Apply the
                                     // independent A/B scales to the selected alpha value.
                                     AccumT alpha = effectiveAlpha;

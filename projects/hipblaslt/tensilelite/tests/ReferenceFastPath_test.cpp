@@ -358,8 +358,9 @@ TEST(ReferenceFastPath, Int8Int32EpilogueIsExactAboveFloatRange)
 }
 
 // float epilogue (I8_I32_S): D = int32_t(alpha * float(exact sum)). Here the exact
-// sum is a float value; accumulating the same products in float, as the slow path
-// does, gives 16,790,288 (4 short): the 1041st product rounds 16,790,289 down to
+// sum is a float value. Both paths reduce in integers before the float epilogue.
+// The former per-K float reduction gives 16,790,288 (4 short): the 1041st
+// product rounds 16,790,289 down to
 // even, and the last three products (+1 each) are lost above 2^24.
 TEST(ReferenceFastPath, Int8FloatEpilogueStartsFromExactSum)
 {
@@ -377,13 +378,9 @@ TEST(ReferenceFastPath, Int8FloatEpilogueStartsFromExactSum)
     ASSERT_EQ(static_cast<int32_t>(static_cast<float>(exactSum)), exactSum);
     ASSERT_NE(floatSum, static_cast<float>(exactSum));
 
-    std::vector<int32_t> c(1, 0);
-    std::vector<int32_t> d(1, 0);
-    ASSERT_TRUE(isFastPathEligible(problem));
-    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
-    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
-
-    EXPECT_EQ(d[0], exactSum);
+    auto [dFast, dSlow] = solveInt8FastAndSlow<int32_t>(problem, a, b, 1.0f, 0.0f);
+    EXPECT_EQ(dFast[0], exactSum);
+    EXPECT_EQ(dSlow[0], exactSum);
 }
 
 // int32_t epilogue (I8_I8_I32): the Int8 output is clamped to [-128, 127].
