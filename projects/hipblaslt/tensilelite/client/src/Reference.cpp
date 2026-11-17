@@ -1531,9 +1531,9 @@ namespace TensileLite
             // scales, scaleAlphaVec, beta * C, bias, activation and the output cast in
             // the slow path's order and types (ReferenceSolution<...>::SolveCPU), so D
             // preserves its rounding after the K sum, including round-half-to-even ties
-            // of the Int8 output cast. Both paths reduce modulo 2^32, interpret the
-            // result as signed Int32 and convert once to the epilogue type. The
-            // other types keep the folded order below.
+            // of the Int8 output cast. The fast reduction and corrected slow
+            // float-alpha reduction use modulo 2^32 with a signed Int32 result,
+            // converted once to the epilogue type. Other types keep the folded order.
             constexpr bool slowPathEpilogueOrder = std::is_integral_v<MacT>;
 
             // MX block scaling is floating-point only; isFastPathEligible rejects MX

@@ -734,9 +734,9 @@ endif()
 # to C/D with the reference's SaturateCast rules, so D must match exactly, on
 # both paths: fast and slow therefore also match each other exactly.
 #
-# Both references reduce modulo 2^32 with a signed Int32 interpretation,
-# then convert once to the alpha/beta type (#15765). Float precision no
-# longer limits K. The large-K cases allow sums above 2^24; the golden still
+# Both references reduce in integers before the alpha/beta epilogue. The
+# fast reduction and corrected slow float-alpha reduction (#15765) use modulo
+# 2^32 with a signed Int32 interpretation. Float precision no longer limits K. The large-K cases allow sums above 2^24; the golden still
 # requires completed sums and integer epilogue intermediates to fit Int32.
 # Dedicated reference gtests check exact boundary and wrapping values.
 #
