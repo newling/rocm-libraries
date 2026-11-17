@@ -399,7 +399,7 @@ TEST(ReferenceFastPath, Int8FloatEpilogueStartsFromExactSum)
     ASSERT_EQ(static_cast<int32_t>(static_cast<float>(exactSum)), exactSum);
     ASSERT_NE(floatSum, static_cast<float>(exactSum));
 
-    auto [dFast, dSlow] = solveInt8FastAndSlow<int32_t>(problem, a, b, 1.0f, 0.0f);
+    auto [dFast, dSlow] = solveFastAndSlow<int32_t>(problem, a, b, 1.0f, 0.0f);
     EXPECT_EQ(dFast[0], exactSum);
     EXPECT_EQ(dSlow[0], exactSum);
 }
