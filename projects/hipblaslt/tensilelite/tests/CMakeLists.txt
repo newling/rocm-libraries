@@ -353,7 +353,7 @@ foreach(PATH fast slow)
 endforeach()
 
 add_cpu_gemm_test(validation_InjectedFailure_Rejected
-    WILL_FAIL
+    EXPECTED_ERROR "FAILED! (max diff:"
     ARGS -M 8 -N 8 -K 8 --type f32 --validate --tryFastPath --injectValidationFailure
 )
 
@@ -518,12 +518,12 @@ foreach(PATH fast slow)
 endforeach()
 
 add_cpu_gemm_test(tf32_MixedA_Rejected
-    WILL_FAIL
+    EXPECTED_ERROR "tf32 is an F32 math-op mode and must be used for both inputs or neither (typeA=tf32, typeB=f32)"
     ARGS -M 16 -N 16 -K 16 --typeA tf32 --typeB f32 --validate
 )
 
 add_cpu_gemm_test(tf32_MixedB_Rejected
-    WILL_FAIL
+    EXPECTED_ERROR "tf32 is an F32 math-op mode and must be used for both inputs or neither (typeA=f32, typeB=tf32)"
     ARGS -M 16 -N 16 -K 16 --typeA f32 --typeB tf32 --validate
 )
 
@@ -618,13 +618,13 @@ if(NOT WIN32)
 
     # Negative test: slow path must reject asymmetric MX.
     add_cpu_gemm_test(slow_f4_MX_A32_B64_Rejected
-        WILL_FAIL
+        EXPECTED_ERROR "asymmetric MX (mxBlockA=32 != mxBlockB=64) is only supported on the fast path"
         ARGS ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate
     )
 
     # Negative test: one-sided MX (only A or only B) must be rejected.
     add_cpu_gemm_test(f4_MX_OneSided_Rejected
-        WILL_FAIL
+        EXPECTED_ERROR "--mxBlockA and --mxBlockB must both be > 0"
         ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --validate
     )
 
@@ -718,13 +718,13 @@ if(NOT WIN32)
 
     # Negative test: non-power-of-2 mxBlock should be rejected
     add_cpu_gemm_test(slow_f4_MX6_BadPow2
-        WILL_FAIL
+        EXPECTED_ERROR "mxBlockA (6) must be a power of 2"
         ARGS -M 4 -N 4 -K 12 --type f4 --mxBlockA 6 --mxBlockB 6 --validate
     )
 
     # Negative test: mxBlock with non-FP4 types should be rejected
     add_cpu_gemm_test(slow_f32_MX32_Rejected
-        WILL_FAIL
+        EXPECTED_ERROR "mxBlockA/mxBlockB is only supported for type f4, not f32"
         ARGS -M 16 -N 16 -K 32 --type f32 --mxBlockA 32 --mxBlockB 32 --validate
     )
 endif()
@@ -991,11 +991,10 @@ if(NOT WIN32)
         endforeach()
 
         # A perturbed (here saturated) Float8 D element must fail validation.
-        add_test(
-            NAME "CPUGemm.${PATH}_F8_F8_S_InjectedFailure_Rejected"
-            COMMAND cpu-gemm-driver ${F16_SIZES} --type f8 --typeCD f8 --useScaleAB Scalar --validate --injectValidationFailure ${PATH_FLAGS}
+        add_cpu_gemm_test(${PATH}_F8_F8_S_InjectedFailure_Rejected
+            EXPECTED_ERROR "FAILED! (max diff:"
+            ARGS ${F16_SIZES} --type f8 --typeCD f8 --useScaleAB Scalar --validate --injectValidationFailure ${PATH_FLAGS}
         )
-        set_tests_properties("CPUGemm.${PATH}_F8_F8_S_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
     endforeach()
 endif()
 
@@ -1050,11 +1049,10 @@ foreach(PATH fast slow)
         )
     endforeach()
 
-    add_test(
-        NAME "CPUGemm.${PATH}_c_InjectedFailure_Rejected"
-        COMMAND cpu-gemm-driver ${F32_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
+    add_cpu_gemm_test(${PATH}_c_InjectedFailure_Rejected
+        EXPECTED_ERROR "FAILED! (max diff:"
+        ARGS ${F32_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
     )
-    set_tests_properties("CPUGemm.${PATH}_c_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
 endforeach()
 
 #################################################
