@@ -1181,7 +1181,105 @@ namespace
         problem.setBias(rocisa::DataType::Float, length, length, /*isOutput=*/true, src);
         return length;
     }
+
+    template <typename T>
+    void checkBiasGradientAccumulation(rocisa::DataType type,
+                                       rocisa::DataType scalarType,
+                                       size_t           N,
+                                       ConstantVariant  alpha,
+                                       ConstantVariant  beta,
+                                       bool             highPrecisionAccumulate,
+                                       float            expectedBias)
+    {
+        auto problem = makePackedProblem(type, type, type, 1, N, 1);
+        problem.setAlphaType(scalarType);
+        problem.setBetaType(scalarType);
+        problem.setHighPrecisionAccumulate(highPrecisionAccumulate);
+        problem.setUseGradient(true);
+        problem.setUseBias(1);
+        problem.setBias(type, 1, 1, /*isOutput=*/true, ContractionProblemGemm::D);
+
+        const std::vector<T> a(1, T(1.0f)), b(N, T(1.0f)), c(N, T(0.0f));
+        for(bool fast : {true, false})
+        {
+            SCOPED_TRACE(fast ? "fast requested" : "slow requested");
+            std::vector<T>    d(N, T(-1.0f)), bias(1, T(-1.0f));
+            ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), alpha, beta);
+            inputs.bias = bias.data();
+            SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/fast);
+
+            for(size_t i = 0; i < N; ++i)
+                EXPECT_EQ(static_cast<float>(d[i]), 1.0f) << "D element " << i;
+            EXPECT_EQ(static_cast<float>(bias[0]), expectedBias);
+        }
+        // Check eligibility after solving so the unfixed test exposes the numerical error.
+        EXPECT_EQ(isFastPathEligible(problem), highPrecisionAccumulate);
+    }
 } // namespace
+
+TEST(ReferenceFastPath, NonHpaBiasGradientKeepsNarrowAccumulation)
+{
+    using DT = rocisa::DataType;
+    // Repeated additions of one stop changing at 2048 in Half and 256 in BFloat16.
+    // The float reductions instead round once to 4096 and 512, respectively.
+    {
+        SCOPED_TRACE("Half");
+        checkBiasGradientAccumulation<Half>(
+            DT::Half, DT::Half, 4097, Half(1.0f), Half(0.0f), false, 2048.0f);
+    }
+    {
+        SCOPED_TRACE("BFloat16");
+        checkBiasGradientAccumulation<BFloat16>(
+            DT::BFloat16, DT::Float, 513, 1.0f, 0.0f, false, 256.0f);
+    }
+}
+
+TEST(ReferenceFastPath, HpaBiasGradientKeepsFloatAccumulation)
+{
+    using DT = rocisa::DataType;
+    {
+        SCOPED_TRACE("Half");
+        checkBiasGradientAccumulation<Half>(
+            DT::Half, DT::Half, 4097, Half(1.0f), Half(0.0f), true, 4096.0f);
+    }
+    {
+        SCOPED_TRACE("BFloat16");
+        checkBiasGradientAccumulation<BFloat16>(
+            DT::BFloat16, DT::Float, 513, 1.0f, 0.0f, true, 512.0f);
+    }
+}
+
+TEST(ReferenceFastPath, NarrowBiasGradientEligibilityRequiresHpa)
+{
+    using DT = rocisa::DataType;
+    for(auto [type, scalarType] :
+        {std::pair{DT::Half, DT::Half}, std::pair{DT::BFloat16, DT::Float}})
+    {
+        SCOPED_TRACE(TensileLite::ToString(type));
+        for(auto src :
+            {ContractionProblemGemm::A, ContractionProblemGemm::B, ContractionProblemGemm::D})
+        {
+            SCOPED_TRACE("bias source " + std::to_string(src));
+            auto problem = makePackedProblem(type, type, type, 4, 4, 4);
+            problem.setAlphaType(scalarType);
+            problem.setBetaType(scalarType);
+            problem.setUseGradient(true);
+            problem.setUseBias(1);
+            problem.setBias(type, 4, 4, /*isOutput=*/true, src);
+            problem.setHighPrecisionAccumulate(true);
+            EXPECT_TRUE(isFastPathEligible(problem));
+
+            problem.setHighPrecisionAccumulate(false);
+            EXPECT_FALSE(isFastPathEligible(problem));
+
+            problem.setUseBias(0);
+            EXPECT_TRUE(isFastPathEligible(problem));
+            problem.setUseBias(1);
+            problem.setUseGradient(false);
+            EXPECT_TRUE(isFastPathEligible(problem));
+        }
+    }
+}
 
 TEST(ReferenceFastPath, GradientEligibility)
 {

@@ -1423,6 +1423,15 @@ namespace TensileLite
 
             // After the useE check: with useE, getInputContractionInputsTypeId throws
             // if the alpha and beta types differ.
+            if(problem.useGradient() && problem.useBias() && !problem.highPrecisionAccumulate())
+            {
+                // These slow-path reductions accumulate in Half or BFloat16,
+                // rounding after each addition. The fast path accumulates in float.
+                const auto typeId = getInputContractionInputsTypeId(problem);
+                if(typeId == TypedGemm_H_H_H::TypeId() || typeId == TypedGemm_B_B_S::TypeId())
+                    return rejectFast("non_hpa_bias_reduction");
+            }
+
             if(isInt8Input && getInt8FastPathEpilogue(problem) == Int8FastPathEpilogue::None)
             {
                 return rejectFast("unsupported_int8_type_combination");
@@ -1665,6 +1674,8 @@ namespace TensileLite
         // The bias gradient (useGradient with useBias) on the fast path: the slow path's
         // ReductionCPU, in the epilogue type AccumT, of D (the workspace ws: the
         // epilogue values before gate residual, at D's offsets) or of A or B as stored.
+        // Non-HPA H_H_H and B_B_S bias gradients stay on the slow path to preserve
+        // their Half and BFloat16 accumulation rounding.
         template <typename AccumT>
         void reduceBiasGradient(ContractionProblemGemm const& problem,
                                 ContractionInputs const&      inputs,
