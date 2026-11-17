@@ -997,7 +997,6 @@ def writeSolutionsAndKernelsTCL(
         # run; results stay aligned with this list, and nothing downstream
         # depends on the order (code objects link sorted, kernel info is keyed
         # by kernel name).
-        uniqueAsmKernels = list(uniqueAsmKernels)
         random.Random(0x7E45).shuffle(uniqueAsmKernels)
         results = _mapKernels(
             compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
