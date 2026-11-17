@@ -887,6 +887,39 @@ namespace
                 EXPECT_NE(results[i], results[j]);
     }
 
+    template <typename T>
+    void checkComplexInPlaceCD(rocisa::DataType type)
+    {
+        using CT = std::complex<T>;
+        struct Case
+        {
+            CT a, b, c, alpha, beta, expected;
+        };
+        const std::vector<Case> cases = {
+            // Newling's counterexample: the original C contributes (5, 1).
+            {CT(2, 0), CT(3, 0), CT(5, 1), CT(1, 0), CT(1, 0), CT(11, 1)},
+            // Nonzero imaginary inputs and scalars: alpha * AB is (7, -9),
+            // beta * the original C is (9, 7), and the result is (16, -2).
+            {CT(2, 1), CT(3, -2), CT(5, 1), CT(1, -1), CT(2, 1), CT(16, -2)},
+        };
+        auto problem = makeComplexProblem(type, 1, 1, 1, false, false);
+        ASSERT_TRUE(isFastPathEligible(problem));
+
+        for(auto const& test : cases)
+        {
+            for(bool tryFastPath : {false, true})
+            {
+                SCOPED_TRACE(testing::Message() << "A " << test.a << ", B " << test.b << ", C "
+                                                << test.c << ", fast " << tryFastPath);
+                std::vector<CT>   cd = {test.c};
+                ContractionInputs inputs(
+                    &test.a, &test.b, cd.data(), cd.data(), test.alpha, test.beta);
+                SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, tryFastPath);
+                EXPECT_EQ(cd[0], test.expected);
+            }
+        }
+    }
+
     // Random (-1, 1) parts in A, B and C, complex alpha and beta, sizes that are not
     // multiples of the fast path's tiles: fast and slow D must be identical, for
     // each conjugation combination (both sum op(A) * op(B) in K order from zero and
@@ -991,6 +1024,18 @@ TEST(ReferenceFastPath, ComplexConjugatesTheRequestedOperands)
     {
         SCOPED_TRACE("ComplexDouble");
         checkComplexConjugation<double>(rocisa::DataType::ComplexDouble);
+    }
+}
+
+TEST(ReferenceFastPath, ComplexInPlaceCDPreservesBetaInput)
+{
+    {
+        SCOPED_TRACE("ComplexFloat");
+        checkComplexInPlaceCD<float>(rocisa::DataType::ComplexFloat);
+    }
+    {
+        SCOPED_TRACE("ComplexDouble");
+        checkComplexInPlaceCD<double>(rocisa::DataType::ComplexDouble);
     }
 }
 
