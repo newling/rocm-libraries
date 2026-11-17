@@ -669,6 +669,71 @@ TEST(ReferenceFastPath, Float8OutputScalarNarrowingFallsBack)
     }
 }
 
+TEST(ReferenceFastPath, ScalarNarrowingFallsBackForWideOutputEpilogues)
+{
+    auto check = [](auto f8Tag, auto outputTag, bool halfA) {
+        using F8       = decltype(f8Tag);
+        using Out      = decltype(outputTag);
+        const auto f8  = TypeInfo<F8>::Enum;
+        const auto out = TypeInfo<Out>::Enum;
+        SCOPED_TRACE(TensileLite::ToString(f8) + " -> " + TensileLite::ToString(out));
+        SCOPED_TRACE(halfA ? "Half A" : "Half B");
+        auto problem = makeFloat8OutputProblem(halfA ? rocisa::DataType::Half : f8,
+                                               halfA ? f8 : rocisa::DataType::Half,
+                                               out,
+                                               f8,
+                                               f8,
+                                               1,
+                                               1,
+                                               1);
+        problem.setUseScaleAB("Scalar");
+        problem.setScaleA(rocisa::DataType::Float, 1);
+        problem.setScaleB(rocisa::DataType::Float, 1);
+        problem.setUseE(true);
+        problem.setE(out, problem.d().sizes(), {}, true);
+        for(bool useAmax : {false, true})
+        {
+            SCOPED_TRACE(useAmax ? "E and AMAX-D" : "E");
+            problem.setOutputAmaxD(useAmax);
+            if(useAmax)
+                problem.setAmaxD(rocisa::DataType::Float, true);
+            EXPECT_FALSE(isFastPathEligible(problem));
+            for(bool tryFast : {false, true})
+            {
+                SCOPED_TRACE(tryFast ? "prefer fast" : "slow");
+                Half              h(0.9f);
+                F8                f(1.0f);
+                Out               c(0.0f), d(-1.0f), e(-1.0f);
+                float             halfScale = 3.0f, otherScale = 0.5f, amax = -1.0f;
+                ContractionInputs inputs(halfA ? static_cast<void const*>(&h) : &f,
+                                         halfA ? static_cast<void const*>(&f) : &h,
+                                         &c,
+                                         &d,
+                                         1.0f,
+                                         0.0f);
+                inputs.scaleA = halfA ? &halfScale : &otherScale;
+                inputs.scaleB = halfA ? &otherScale : &halfScale;
+                inputs.e      = &e;
+                inputs.amaxD  = &amax;
+                SolveGemmCPU(problem, inputs, -1, tryFast);
+                // Half(0.9) * 3 rounds to 2.75 in Float8, then * 0.5 gives 1.375.
+                // Narrowing first and applying both scales afterward gives 1.3125.
+                EXPECT_EQ(float(d), 1.375f);
+                EXPECT_EQ(float(e), 1.375f);
+                if(useAmax)
+                    EXPECT_EQ(amax, 1.375f);
+            }
+        }
+    };
+    for(bool halfA : {true, false})
+    {
+        check(Float8{}, float{}, halfA);
+        check(Float8{}, Half{}, halfA);
+        check(Float8_fnuz{}, float{}, halfA);
+        check(Float8_fnuz{}, Half{}, halfA);
+    }
+}
+
 TEST(ReferenceFastPath, Float8OutputVectorNarrowingRemainsEligible)
 {
     for(bool halfA : {true, false})
