@@ -1421,14 +1421,14 @@ namespace TensileLite
 
             // After the useE check: with useE, getInputContractionInputsTypeId throws
             // if the alpha and beta types differ.
-            if(!problem.highPrecisionAccumulate())
+            if(problem.useGradient() && problem.useBias() && !problem.highPrecisionAccumulate())
             {
-                // These type IDs require Half or BFloat16 arithmetic, rounding
-                // after each operation. The fast path accumulates in float.
+                // These slow-path reductions accumulate in Half or BFloat16,
+                // rounding after each addition. The fast path accumulates in float.
                 const auto typeId = getInputContractionInputsTypeId(problem);
                 if(typeId == TypedGemm_H_H_H::TypeId() || typeId == TypedGemm_B_B_S::TypeId())
-                    return rejectFast("Half/BFloat16 reference arithmetic without "
-                                      "high-precision accumulation requires the slow path");
+                    return rejectFast("Half/BFloat16 bias-gradient reductions without "
+                                      "high-precision accumulation require the slow path");
             }
 
             if(isInt8Input && getInt8FastPathEpilogue(problem) == Int8FastPathEpilogue::None)

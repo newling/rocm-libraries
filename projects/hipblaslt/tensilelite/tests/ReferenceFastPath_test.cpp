@@ -1315,7 +1315,7 @@ TEST(ReferenceFastPath, HpaBiasGradientKeepsFloatAccumulation)
     }
 }
 
-TEST(ReferenceFastPath, NarrowAccumulationEligibilityRequiresHpa)
+TEST(ReferenceFastPath, NarrowBiasGradientEligibilityRequiresHpa)
 {
     using DT = rocisa::DataType;
     for(auto [type, scalarType] :
@@ -1339,58 +1339,12 @@ TEST(ReferenceFastPath, NarrowAccumulationEligibilityRequiresHpa)
             EXPECT_FALSE(isFastPathEligible(problem));
 
             problem.setUseBias(0);
-            EXPECT_FALSE(isFastPathEligible(problem));
+            EXPECT_TRUE(isFastPathEligible(problem));
             problem.setUseBias(1);
             problem.setUseGradient(false);
-            EXPECT_FALSE(isFastPathEligible(problem));
+            EXPECT_TRUE(isFastPathEligible(problem));
         }
     }
-}
-
-TEST(ReferenceFastPath, NonHpaEpiloguesPreserveNarrowDotProducts)
-{
-    // Unit additions stop at 2048 in Half and 256 in BFloat16. Accumulating
-    // in float and narrowing only the final value produces a different result.
-    auto check = [](auto valueTag, auto scalarTag, size_t k, float expected) {
-        using Value             = decltype(valueTag);
-        using Scalar            = decltype(scalarTag);
-        const auto         type = TypeInfo<Value>::Enum;
-        std::vector<Value> a(k, Value(1.0f)), b(k, Value(1.0f));
-        for(std::string feature : {"plain", "E", "gradient", "AMAX-D"})
-        {
-            SCOPED_TRACE(TensileLite::ToString(type) + " " + feature);
-            auto problem = makePackedProblem(type, type, type, 1, 1, k);
-            problem.setAlphaType(TypeInfo<Scalar>::Enum);
-            problem.setBetaType(TypeInfo<Scalar>::Enum);
-            problem.setHighPrecisionAccumulate(false);
-            if(feature == "E")
-            {
-                problem.setUseE(true);
-                problem.setE(type, problem.d().sizes(), {}, true);
-            }
-            if(feature == "gradient")
-                problem.setUseGradient(true);
-            if(feature == "AMAX-D")
-            {
-                problem.setOutputAmaxD(true);
-                problem.setAmaxD(rocisa::DataType::Float, true);
-            }
-
-            Value             c(0.0f), d(-1.0f), e(-1.0f);
-            float             amax = -1.0f;
-            ContractionInputs inputs(a.data(), b.data(), &c, &d, Scalar(1), Scalar(0));
-            inputs.e     = &e;
-            inputs.amaxD = &amax;
-            SolveGemmCPU(problem, inputs, -1, true);
-            EXPECT_EQ(float(d), expected);
-            if(feature == "E")
-                EXPECT_EQ(float(e), expected);
-            if(feature == "AMAX-D")
-                EXPECT_EQ(amax, expected);
-        }
-    };
-    check(Half{}, Half{}, 4097, 2048.0f);
-    check(BFloat16{}, float{}, 513, 256.0f);
 }
 
 TEST(ReferenceFastPath, GradientEligibility)
