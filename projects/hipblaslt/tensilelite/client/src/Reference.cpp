@@ -1839,7 +1839,7 @@ namespace TensileLite
                                     size_t idxD      = global_m + (global_n * strideND);
                                     size_t idxC      = global_m + (global_n * strideNC);
                                     auto   startingC = curBatchC[idxC];
-                                    auto current = static_cast<AccumT>(cReg[mm * BLOCK_N + nn]);
+                                    auto   current   = static_cast<AccumT>(cReg[mm * BLOCK_N + nn]);
                                     // DeviceScalarAlpha replaces inline alpha. Apply the
                                     // independent A/B scales to the selected alpha value.
                                     AccumT alpha = effectiveAlpha;
