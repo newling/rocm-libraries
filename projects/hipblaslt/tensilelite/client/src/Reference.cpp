@@ -1356,6 +1356,18 @@ namespace TensileLite
                 return rejectFast("unsupported_float8_output_type_combination");
             }
 
+            // Scalar scaling precedes Half-to-Float8 narrowing in the GPU and
+            // slow reference. The fast shadow buffer narrows first, so use the
+            // slow path here. Vector scales apply after the dot product.
+            if(isFloat8Output && problem.useScaleAB() == "Scalar"
+               && ((problem.a().dataType() == rocisa::DataType::Half
+                    && isFloat8Type(problem.computeInputTypeA()))
+                   || (problem.b().dataType() == rocisa::DataType::Half
+                       && isFloat8Type(problem.computeInputTypeB()))))
+            {
+                return rejectFast("scalar_half_to_float8_input");
+            }
+
             if(problem.useScaleCD())
             {
                 return rejectFast("scaleCD");

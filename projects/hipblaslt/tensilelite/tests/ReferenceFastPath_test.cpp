@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -565,11 +566,17 @@ TEST(ReferenceFastPath, Float8OutputEligibilityFollowsReferenceTypeIds)
                    Types{H, F8N, F8N, H, H},           Types{F8N, H, F8N, H, H},
                    Types{H, F8N, F8N, F8N, F8N},       Types{F8N, H, F8N, F8N, F8N}})
     {
-        EXPECT_TRUE(isFastPathEligible(
-            makeFloat8OutputProblem(t.a, t.b, t.cd, t.computeA, t.computeB, 4, 4, 4)))
-            << TensileLite::ToString(t.a) << " x " << TensileLite::ToString(t.b) << " -> "
-            << TensileLite::ToString(t.cd) << ", MAC " << TensileLite::ToString(t.computeA)
-            << " x " << TensileLite::ToString(t.computeB);
+        for(auto mode : {"", "Scalar", "Vector"})
+        {
+            auto problem = makeFloat8OutputProblem(t.a, t.b, t.cd, t.computeA, t.computeB, 4, 4, 4);
+            problem.setUseScaleAB(mode);
+            const bool narrowsHalf = (t.a == H && t.computeA != H) || (t.b == H && t.computeB != H);
+            const bool expected    = std::string(mode) != "Scalar" || !narrowsHalf;
+            EXPECT_EQ(isFastPathEligible(problem), expected)
+                << TensileLite::ToString(t.a) << " x " << TensileLite::ToString(t.b) << " -> "
+                << TensileLite::ToString(t.cd) << ", MAC " << TensileLite::ToString(t.computeA)
+                << " x " << TensileLite::ToString(t.computeB) << ", ScaleAB=" << mode;
+        }
     }
 
     // Not a reference Float8-output id: Float or Half inputs, an output of the other
@@ -593,6 +600,85 @@ TEST(ReferenceFastPath, Float8OutputEligibilityFollowsReferenceTypeIds)
     halfAlpha.setAlphaType(DT::Half);
     halfAlpha.setBetaType(DT::Half);
     EXPECT_FALSE(isFastPathEligible(halfAlpha));
+}
+
+namespace
+{
+    template <typename F8>
+    void checkScaledHalfToFloat8Output(bool halfA, bool scalar)
+    {
+        constexpr auto f8      = TypeInfo<F8>::Enum;
+        auto           problem = makeFloat8OutputProblem(halfA ? rocisa::DataType::Half : f8,
+                                               halfA ? f8 : rocisa::DataType::Half,
+                                               f8,
+                                               f8,
+                                               f8,
+                                               2,
+                                               2,
+                                               1);
+        problem.setUseScaleAB(scalar ? "Scalar" : "Vector");
+        problem.setScaleA(rocisa::DataType::Float, scalar ? 1 : 2);
+        problem.setScaleB(rocisa::DataType::Float, scalar ? 1 : 2);
+        EXPECT_EQ(isFastPathEligible(problem), !scalar);
+
+        std::vector<Half>  h = {Half(0.9f), Half(-0.9f)};
+        std::vector<F8>    f = {F8(1.0f), F8(-1.0f)};
+        std::vector<F8>    c(4, F8(0.0f)), d(4, F8(0.0f));
+        std::vector<float> halfScale  = {3.0f, -2.0f};
+        std::vector<float> otherScale = {0.5f, 1.0f};
+        ContractionInputs  inputs(halfA ? static_cast<void const*>(h.data()) : f.data(),
+                                 halfA ? static_cast<void const*>(f.data()) : h.data(),
+                                 c.data(),
+                                 d.data(),
+                                 1.0f,
+                                 0.0f);
+        inputs.scaleA = halfA ? halfScale.data() : otherScale.data();
+        inputs.scaleB = halfA ? otherScale.data() : halfScale.data();
+        SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+
+        // Scalar: Half(0.9) * 3 narrows to 2.75, then the other scale gives
+        // 1.375. Narrowing first would instead give 1.25 after the final cast.
+        // Vector: Half(0.9) narrows to 0.875, then BOTH vectors apply; ties
+        // 1.3125 and -2.625 round to even F8 values 1.25 and -2.5.
+        const std::vector<float> expected
+            = scalar  ? std::vector<float>{1.375f, -1.375f, -1.375f, 1.375f}
+              : halfA ? std::vector<float>{1.25f, 0.875f, -2.5f, -1.75f}
+                      : std::vector<float>{1.25f, -2.5f, 0.875f, -1.75f};
+        for(size_t i = 0; i < d.size(); ++i)
+            EXPECT_EQ(float(d[i]), expected[i]) << "D[" << i << "]";
+    }
+}
+
+TEST(ReferenceFastPath, Float8OutputScalarNarrowingFallsBack)
+{
+    for(bool halfA : {true, false})
+    {
+        SCOPED_TRACE(halfA ? "Half A" : "Half B");
+        {
+            SCOPED_TRACE("OCP");
+            checkScaledHalfToFloat8Output<Float8>(halfA, true);
+        }
+        {
+            SCOPED_TRACE("fnuz");
+            checkScaledHalfToFloat8Output<Float8_fnuz>(halfA, true);
+        }
+    }
+}
+
+TEST(ReferenceFastPath, Float8OutputVectorNarrowingRemainsEligible)
+{
+    for(bool halfA : {true, false})
+    {
+        SCOPED_TRACE(halfA ? "Half A" : "Half B");
+        {
+            SCOPED_TRACE("OCP");
+            checkScaledHalfToFloat8Output<Float8>(halfA, false);
+        }
+        {
+            SCOPED_TRACE("fnuz");
+            checkScaledHalfToFloat8Output<Float8_fnuz>(halfA, false);
+        }
+    }
 }
 
 namespace

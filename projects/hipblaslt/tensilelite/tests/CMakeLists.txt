@@ -853,10 +853,11 @@ endforeach()
 # Test sets: "full" for the four ids with the same type in A, B and C/D;
 # "basic" for the cross-output and hybrid ids and Float8 x Half with a Half MAC;
 # "noscale" for Float8 x Half with a Float8 MAC (--computeInput f8 on the Half
-# operand). The slow path handles ScaleAB differently when the storage is wider
-# than the compute-input type (Scalar: scales the Half value before quantizing
-# it, Vector: drops that side's scale), for any output type, so ScaleAB is not
-# tested there.
+# operand). Scalar scaling precedes narrowing and is rejected by fast-path
+# eligibility. Vector scaling remains fast-eligible: the preceding correctness
+# PR makes both reference paths apply both vectors after the dot product.
+# These driver cases stay unscaled; ReferenceFastPath_test.cpp checks Scalar
+# fallback and Vector results with independent, quantization-aware expectations.
 if(NOT WIN32)
     foreach(PATH fast slow)
         if("${PATH}" STREQUAL "fast")
