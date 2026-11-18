@@ -520,3 +520,72 @@ TEST(ReferenceFastPath, Int8DotProductWrapsAtInt32Boundary)
         check(1.0f);
     }
 }
+
+TEST(ReferenceFastPath, Int8StridedCFollowsSlowReference)
+{
+    using DT = rocisa::DataType;
+    auto problem = ContractionProblemGemm::FromIndexSizes(
+        "Contraction_l_Ailk_Bljk_Cijk_Dijk", {2, 1, 1, 1},
+        DT::Int8, {}, DT::Int8, {}, DT::Int32, {2, 4, 4}, DT::Int32, {}, 1.0);
+    problem.setComputeInputTypeA(DT::Int8);
+    problem.setComputeInputTypeB(DT::Int8);
+    problem.setAlphaType(DT::Int32);
+    problem.setBetaType(DT::Int32);
+    const std::vector<int8_t> a = {2, 3}, b = {5};
+    const std::vector<int32_t> c = {7, 99, 11};
+    const std::vector<int32_t> expected = {17, 26};
+    for(bool tryFast : {false, true})
+    {
+        SCOPED_TRACE(tryFast);
+        std::vector<int32_t> d(2, -1);
+        ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), int32_t(1), int32_t(1));
+        SolveGemmCPU(problem, inputs, -1, tryFast);
+        EXPECT_EQ(d, expected);
+    }
+}
+
+TEST(ReferenceFastPath, Int8PermutedCIndicesFollowSlowReference)
+{
+    using DT = rocisa::DataType;
+    auto problem = ContractionProblemGemm::FromIndexSizes(
+        "Contraction_l_Ailk_Bljk_Cjik_Dijk", {2, 2, 1, 1},
+        DT::Int8, {}, DT::Int8, {}, DT::Int32, {}, DT::Int32, {}, 1.0);
+    problem.setComputeInputTypeA(DT::Int8);
+    problem.setComputeInputTypeB(DT::Int8);
+    problem.setAlphaType(DT::Int32);
+    problem.setBetaType(DT::Int32);
+    const std::vector<int8_t> a = {2, 3}, b = {5, 7};
+    const std::vector<int32_t> c = {11, 13, 17, 19};
+    const std::vector<int32_t> expected = {21, 32, 27, 40};
+    for(bool tryFast : {false, true})
+    {
+        SCOPED_TRACE(tryFast);
+        std::vector<int32_t> d(4, -1);
+        ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), int32_t(1), int32_t(1));
+        SolveGemmCPU(problem, inputs, -1, tryFast);
+        EXPECT_EQ(d, expected);
+    }
+}
+
+TEST(ReferenceFastPath, Int8PermutedCBatchIndexFollowsSlowReference)
+{
+    using DT = rocisa::DataType;
+    auto problem = ContractionProblemGemm::FromIndexSizes(
+        "Contraction_l_Ailk_Bljk_Ckij_Dijk", {2, 1, 2, 1},
+        DT::Int8, {}, DT::Int8, {}, DT::Int32, {}, DT::Int32, {}, 1.0);
+    problem.setComputeInputTypeA(DT::Int8);
+    problem.setComputeInputTypeB(DT::Int8);
+    problem.setAlphaType(DT::Int32);
+    problem.setBetaType(DT::Int32);
+    const std::vector<int8_t> a = {2, 3, 5, 7}, b = {11, 13};
+    const std::vector<int32_t> c = {17, 19, 23, 29};
+    const std::vector<int32_t> expected = {39, 56, 84, 120};
+    for(bool tryFast : {false, true})
+    {
+        SCOPED_TRACE(tryFast);
+        std::vector<int32_t> d(4, -1);
+        ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), int32_t(1), int32_t(1));
+        SolveGemmCPU(problem, inputs, -1, tryFast);
+        EXPECT_EQ(d, expected);
+    }
+}

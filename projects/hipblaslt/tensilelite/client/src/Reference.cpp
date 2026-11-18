@@ -1567,11 +1567,12 @@ namespace TensileLite
 
             size_t indexND  = problem.freeIndices()[1].d;
             size_t strideND = problem.d().strides()[indexND];
-            size_t strideNC = problem.c().strides()[indexND];
+            size_t strideMC = problem.c().strides()[problem.freeIndicesA()[0].c];
+            size_t strideNC = problem.c().strides()[problem.freeIndicesB()[0].c];
 
             size_t strideBatchA = problem.a().strides()[problem.batchIndices()[0].a];
             size_t strideBatchB = problem.b().strides()[problem.batchIndices()[0].b];
-            size_t strideBatchC = problem.c().strides()[problem.batchIndices()[0].d];
+            size_t strideBatchC = problem.c().strides()[problem.batchIndices()[0].c];
             size_t strideBatchD = problem.d().strides()[problem.batchIndices()[0].d];
 
             size_t sizeBatch = problem.batchSize(0);
@@ -1835,7 +1836,7 @@ namespace TensileLite
                                 if(global_n < sizeN && global_m < sizeM)
                                 {
                                     size_t idxD      = global_m + (global_n * strideND);
-                                    size_t idxC      = global_m + (global_n * strideNC);
+                                    size_t idxC      = global_m * strideMC + global_n * strideNC;
                                     auto   startingC = curBatchC[idxC];
                                     auto   current   = static_cast<AccumT>(cReg[mm * BLOCK_N + nn]);
                                     // DeviceScalarAlpha replaces inline alpha. Apply the
