@@ -575,7 +575,7 @@ TEST(ReferenceFastPath, Float8OutputEligibilityFollowsReferenceTypeIds)
             problem.setUseScaleAB(mode);
             const bool narrowsHalf = (t.a == H && t.computeA != H) || (t.b == H && t.computeB != H);
             const bool expected    = std::string(mode) != "Scalar" || !narrowsHalf;
-            EXPECT_EQ(isFastPathEligible(problem), expected)
+            EXPECT_EQ(static_cast<bool>(isFastPathEligible(problem)), expected)
                 << TensileLite::ToString(t.a) << " x " << TensileLite::ToString(t.b) << " -> "
                 << TensileLite::ToString(t.cd) << ", MAC " << TensileLite::ToString(t.computeA)
                 << " x " << TensileLite::ToString(t.computeB) << ", ScaleAB=" << mode;
@@ -622,7 +622,7 @@ namespace
         problem.setUseScaleAB(scalar ? "Scalar" : "Vector");
         problem.setScaleA(rocisa::DataType::Float, scalar ? 1 : 2);
         problem.setScaleB(rocisa::DataType::Float, scalar ? 1 : 2);
-        EXPECT_EQ(isFastPathEligible(problem), !scalar);
+        EXPECT_EQ(static_cast<bool>(isFastPathEligible(problem)), !scalar);
 
         std::vector<Half>  h = {Half(0.9f), Half(-0.9f)};
         std::vector<F8>    f = {F8(1.0f), F8(-1.0f)};
@@ -1213,7 +1213,7 @@ namespace
             EXPECT_EQ(static_cast<float>(bias[0]), expectedBias);
         }
         // Check eligibility after solving so the unfixed test exposes the numerical error.
-        EXPECT_EQ(isFastPathEligible(problem), highPrecisionAccumulate);
+        EXPECT_EQ(static_cast<bool>(isFastPathEligible(problem)), highPrecisionAccumulate);
     }
 } // namespace
 

@@ -41,6 +41,7 @@
 #include <omp.h>
 #include <optional>
 #include <type_traits>
+#include <utility>
 
 #if defined(_MSC_VER)
 #define TENSILELITE_CPU_REF_FORCE_INLINE __forceinline
@@ -1271,16 +1272,8 @@ namespace TensileLite
             }
         }
 
-        bool isFastPathEligible(ContractionProblemGemm const& problem, std::string* rejectionReason)
+        FastPathEligibility isFastPathEligible(ContractionProblemGemm const& problem)
         {
-            if(rejectionReason)
-                rejectionReason->clear();
-            auto rejectFast = [rejectionReason](const char* reason) {
-                if(rejectionReason)
-                    *rejectionReason = reason;
-                return false;
-            };
-
             auto isSupportedOutputType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Double
                        || t == rocisa::DataType::Half || t == rocisa::DataType::BFloat16;
@@ -1336,7 +1329,7 @@ namespace TensileLite
                                      + " B=" + TensileLite::ToString(problem.b().dataType())
                                      + " C=" + TensileLite::ToString(problem.c().dataType())
                                      + " D=" + TensileLite::ToString(problem.d().dataType());
-                return rejectFast(detail.c_str());
+                return FastPathEligibility{std::move(detail)};
             }
 
             constexpr size_t FAST_BLOCK_K = 8;
@@ -1345,27 +1338,29 @@ namespace TensileLite
 
 #ifndef _WIN32
             if(isMXFP4Problem(problem) && problem.a().dataType() != problem.b().dataType())
-                return rejectFast("MXFP4 requires matching A and B storage types");
+                return FastPathEligibility{"MXFP4 requires matching A and B storage types"};
 #endif
 
             if(mxBlockA > 0 || mxBlockB > 0)
             {
                 // MX block scaling needs a real floating-point MAC type (solveCPUFast).
                 if(isInt8Input)
-                    return rejectFast("MX scaling is not supported for Int8 inputs");
+                    return FastPathEligibility{"MX scaling is not supported for Int8 inputs"};
                 if(isComplex)
-                    return rejectFast("MX scaling is not supported for complex inputs");
+                    return FastPathEligibility{"MX scaling is not supported for complex inputs"};
 
                 // One-sided MX (only A or only B scaled) is not supported. The
                 // slow path's columnMajorGemm reference also rejects this case,
                 // so the two paths agree on what "MX" means.
                 if((mxBlockA > 0) != (mxBlockB > 0))
-                    return rejectFast("MX scaling must be enabled for both A and B");
+                    return FastPathEligibility{"MX scaling must be enabled for both A and B"};
 
                 if(mxBlockA > 0 && mxBlockA % FAST_BLOCK_K != 0)
-                    return rejectFast("mxBlockA must be a multiple of the 8-element K tile");
+                    return FastPathEligibility{
+                        "mxBlockA must be a multiple of the 8-element K tile"};
                 if(mxBlockB > 0 && mxBlockB % FAST_BLOCK_K != 0)
-                    return rejectFast("mxBlockB must be a multiple of the 8-element K tile");
+                    return FastPathEligibility{
+                        "mxBlockB must be a multiple of the 8-element K tile"};
 
                 // The fast path reinterprets the scale tensors as E8 (UE8M0)
                 // unconditionally (see solveGemmMXFastPath). Non-E8 scale
@@ -1373,20 +1368,20 @@ namespace TensileLite
                 // exponents (e.g. byte 0xFF -> NaN), so defer to the slow path,
                 // which decodes each scale via mxScaleElementAsFloat().
                 if(mxBlockA > 0 && problem.mxsa().dataType() != rocisa::DataType::E8)
-                    return rejectFast("MX scales for A must use E8 storage");
+                    return FastPathEligibility{"MX scales for A must use E8 storage"};
                 if(mxBlockB > 0 && problem.mxsb().dataType() != rocisa::DataType::E8)
-                    return rejectFast("MX scales for B must use E8 storage");
+                    return FastPathEligibility{"MX scales for B must use E8 storage"};
             }
 
             if(problem.boundIndices().size() >= 1)
             {
                 if(problem.boundIndices()[0].aMirror || problem.boundIndices()[0].bMirror)
-                    return rejectFast("mirrored bound indices are not supported");
+                    return FastPathEligibility{"mirrored bound indices are not supported"};
             }
 
             if(problem.batchIndices().empty())
             {
-                return rejectFast("a batch index is required");
+                return FastPathEligibility{"a batch index is required"};
             }
 
             // The bias gradient is reduced by ReductionCPU on both paths. For a source
@@ -1398,13 +1393,13 @@ namespace TensileLite
                 if((src == ContractionProblemGemm::A || src == ContractionProblemGemm::B
                     || src == ContractionProblemGemm::D)
                    && !isBiasReductionShapeSupported(problem.tensor(src)))
-                    return rejectFast(
-                        "bias-gradient reduction requires a 2-D tensor or a single batch");
+                    return FastPathEligibility{
+                        "bias-gradient reduction requires a 2-D tensor or a single batch"};
             }
 
             if(problem.outputAmaxD())
             {
-                return rejectFast("AMAX-D output is not supported by the fast path");
+                return FastPathEligibility{"AMAX-D output is not supported by the fast path"};
             }
 
             // With useE, the slow path requires equal alpha and beta types
@@ -1414,7 +1409,7 @@ namespace TensileLite
             {
                 auto [alphaType, betaType] = getAlphaBetaTypes(problem);
                 if(alphaType != betaType)
-                    return rejectFast("E output requires matching alpha and beta types");
+                    return FastPathEligibility{"E output requires matching alpha and beta types"};
             }
 
             // After the useE check: with useE, getInputContractionInputsTypeId throws
@@ -1425,20 +1420,20 @@ namespace TensileLite
                 // rounding after each addition. The fast path accumulates in float.
                 const auto typeId = getInputContractionInputsTypeId(problem);
                 if(typeId == TypedGemm_H_H_H::TypeId() || typeId == TypedGemm_B_B_S::TypeId())
-                    return rejectFast("Half/BFloat16 bias-gradient reductions without "
-                                      "high-precision accumulation require the slow path");
+                    return FastPathEligibility{"Half/BFloat16 bias-gradient reductions without "
+                                               "high-precision accumulation require the slow path"};
             }
 
             if(isInt8Input && getInt8FastPathEpilogue(problem) == Int8FastPathEpilogue::None)
             {
-                return rejectFast(
-                    "the Int8 storage, compute and epilogue type combination is not supported");
+                return FastPathEligibility{
+                    "the Int8 storage, compute and epilogue type combination is not supported"};
             }
 
             if(isFloat8Output && !isFloat8OutputFastPathTypeId(problem))
             {
-                return rejectFast(
-                    "the Float8 output and compute-input type combination is not supported");
+                return FastPathEligibility{
+                    "the Float8 output and compute-input type combination is not supported"};
             }
 
             // Scalar scaling precedes Half-to-Float8 narrowing in the GPU and
@@ -1450,14 +1445,14 @@ namespace TensileLite
                    || (problem.b().dataType() == rocisa::DataType::Half
                        && isFloat8Type(problem.computeInputTypeB()))))
             {
-                return rejectFast(
-                    "Scalar scaling before Half-to-Float8 input narrowing requires the slow path");
+                return FastPathEligibility{
+                    "Scalar scaling before Half-to-Float8 input narrowing requires the slow path"};
             }
 
             if(isComplex && !isComplexFastPathTypeId(problem))
             {
-                return rejectFast(
-                    "the complex storage and compute type combination is not supported");
+                return FastPathEligibility{
+                    "the complex storage and compute type combination is not supported"};
             }
 
             // The slow path reads complex bias, ScaleAB, scaleAlphaVec and gate
@@ -1470,20 +1465,21 @@ namespace TensileLite
                    || problem.activationType() != ActivationType::None
                    || problem.useGateResidual()))
             {
-                return rejectFast("complex bias, scaling, activation and gate-residual epilogues "
-                                  "are not supported");
+                return FastPathEligibility{
+                    "complex bias, scaling, activation and gate-residual epilogues "
+                    "are not supported"};
             }
 
             if(problem.useScaleCD())
             {
-                return rejectFast("ScaleCD is not supported by the fast path");
+                return FastPathEligibility{"ScaleCD is not supported by the fast path"};
             }
 
             if(problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1
                || problem.freeIndicesB().size() != 1)
             {
-                return rejectFast(
-                    "exactly one bound index and one free index per input are required");
+                return FastPathEligibility{
+                    "exactly one bound index and one free index per input are required"};
             }
 
             // Layout validation — index accesses are safe because the
@@ -1504,11 +1500,11 @@ namespace TensileLite
             bool isPackedD = (problem.d().strides()[indexMD] == 1);
             if(!isPackedA || !isPackedB || !isPackedD)
             {
-                return rejectFast(
-                    "A, B and D need unit stride along their fast-path packed dimensions");
+                return FastPathEligibility{
+                    "A, B and D need unit stride along their fast-path packed dimensions"};
             }
 
-            return true;
+            return {};
         }
 
         template <size_t BLOCK_M, size_t BLOCK_K, typename MacT>

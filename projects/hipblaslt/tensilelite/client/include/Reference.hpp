@@ -31,6 +31,7 @@
 #include <Tensile/DataTypes.hpp>
 
 #include <string>
+#include <utility>
 
 namespace TensileLite
 {
@@ -187,12 +188,35 @@ namespace TensileLite
                           size_t                        elementsToValidate,
                           bool                          tryFastPath = true);
 
+        // An empty rejection reason denotes an eligible problem.
+        struct FastPathEligibility
+        {
+            FastPathEligibility() = default;
+
+            explicit FastPathEligibility(std::string reason)
+                : m_reason(std::move(reason))
+            {
+            }
+
+            explicit operator bool() const noexcept
+            {
+                return m_reason.empty();
+            }
+
+            std::string const& reason() const noexcept
+            {
+                return m_reason;
+            }
+
+        private:
+            std::string m_reason;
+        };
+
         // Check whether a given contraction problem is eligible for the fast CPU GEMM path.
         // This inspects problem geometry, data types, and feature flags but does not
-        // look at runtime input buffers. When supplied, rejectionReason is cleared for
-        // an eligible problem or set to the first unsupported feature.
-        bool isFastPathEligible(ContractionProblemGemm const& problem,
-                                std::string*                  rejectionReason = nullptr);
+        // look at runtime input buffers. An ineligible result owns the reason for the
+        // first unsupported feature.
+        FastPathEligibility isFastPathEligible(ContractionProblemGemm const& problem);
 
     } // namespace Client
 } // namespace TensileLite
