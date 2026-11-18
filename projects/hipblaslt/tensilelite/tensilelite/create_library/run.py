@@ -109,9 +109,9 @@ def _parseLogicFileForLibrary(*args) -> LibraryIO.LibraryLogic:
     """
     logic = LibraryIO.LibraryLogic._make(LibraryIO.parseLibraryLogicFile(*args))
     if isinstance(logic.library, MasterSolutionLibrary):
-        # Every originalSolution becomes a CompactSolution: a few KB instead of a
-        # ~140 KB object graph once unpickled in the parent, which reads only a
-        # dozen of its keys. splitGSU is the third positional argument.
+        # Every originalSolution becomes a CompactSolution, about a third of the
+        # memory of the full object graph once unpickled in the parent, which
+        # reads only a dozen of its keys. splitGSU is the third positional argument.
         compactLibrarySolutions(logic.library, args[2], kernelObjectNameCallables())
     return logic._replace(solutions=None, exactLogic=None)
 
