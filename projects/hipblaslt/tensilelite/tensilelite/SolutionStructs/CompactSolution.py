@@ -5,9 +5,10 @@
 TensileCreateLibrary parses every logic file in worker processes and ships the
 resulting solutions back to one parent, which keeps all of them until the
 library files are written. A fully built ``Solution`` is a ``_state`` dict of
-some 500 entries plus a private ``ProblemType``: about 140 KB of resident
-memory each once unpickled, so a full architecture build (350k solutions)
-costs the parent 50 GiB. The parent reads a dozen of those keys. Everything
+some 500 entries plus a private ``ProblemType``: about 30 KB of objects each
+once unpickled in the parent, beyond what solutions share, or about 10 GiB
+for a full gfx942 build (356k solutions). A compact record holds about a
+third of that. The parent reads a dozen of those keys. Everything
 else is needed only inside a worker: kernel code generation hydrates the
 solution, and library writing hydrates it to compute names.
 
