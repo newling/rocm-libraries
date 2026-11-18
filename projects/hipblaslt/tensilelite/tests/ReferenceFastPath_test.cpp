@@ -589,3 +589,27 @@ TEST(ReferenceFastPath, Int8PermutedCBatchIndexFollowsSlowReference)
         EXPECT_EQ(d, expected);
     }
 }
+
+TEST(ReferenceFastPath, Int8MultipleBatchIndicesFollowSlowReference)
+{
+    using DT = rocisa::DataType;
+    auto problem = ContractionProblemGemm::FromIndexSizes(
+        "Contraction_m_Aimkl_Bmjkl_Cijkl_Dijkl", {1, 1, 2, 2, 1},
+        DT::Int8, {}, DT::Int8, {}, DT::Int32, {}, DT::Int32, {}, 0.0);
+    problem.setComputeInputTypeA(DT::Int8);
+    problem.setComputeInputTypeB(DT::Int8);
+    problem.setAlphaType(DT::Int32);
+    problem.setBetaType(DT::Int32);
+    EXPECT_FALSE(isFastPathEligible(problem));
+    const std::vector<int8_t> a = {2, 3, 5, 7}, b = {11, 13, 17, 19};
+    const std::vector<int32_t> c(4, 0);
+    const std::vector<int32_t> expected = {22, 39, 85, 133};
+    for(bool tryFast : {false, true})
+    {
+        SCOPED_TRACE(tryFast);
+        std::vector<int32_t> d(4, -1);
+        ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), int32_t(1), int32_t(0));
+        SolveGemmCPU(problem, inputs, -1, tryFast);
+        EXPECT_EQ(d, expected);
+    }
+}

@@ -1275,9 +1275,10 @@ namespace TensileLite
                     return rejectFast("mirror_indices");
             }
 
-            if(problem.batchIndices().empty())
+            // The tiled solver iterates only batchIndices()[0].
+            if(problem.batchIndices().size() != 1)
             {
-                return rejectFast("no_batch_indices");
+                return rejectFast("batch_index_count");
             }
 
             if(problem.useGradient())
