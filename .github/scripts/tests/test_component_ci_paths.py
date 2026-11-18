@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from component_ci import COMPONENTS, INFRA_PATHS
+from component_ci import COMPONENTS, HIPBLASLT_PYTHON_ALL_LANES_PATHS, INFRA_PATHS
 
 
 class ComponentCIPathsTest(unittest.TestCase):
@@ -18,6 +18,7 @@ class ComponentCIPathsTest(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[3]
         patterns = {path for group in COMPONENTS.values() for path in group}
         patterns.update(INFRA_PATHS)
+        patterns.update(HIPBLASLT_PYTHON_ALL_LANES_PATHS)
 
         # Git can list the complete tree even in component CI's sparse checkout.
         tracked = subprocess.run(
