@@ -113,7 +113,25 @@ def _parseLogicFileForLibrary(*args) -> LibraryIO.LibraryLogic:
         # memory of the full object graph once unpickled in the parent, which
         # reads only a dozen of its keys. splitGSU is the third positional argument.
         compactLibrarySolutions(logic.library, args[2], kernelObjectNameCallables())
+        _shareEqualSolutionParts(logic.library, {}, {})
     return logic._replace(solutions=None, exactLogic=None)
+
+
+def _shareEqualSolutionParts(library, problemTypes, problemPredicates) -> None:
+    """Let solutions with equal problem types or predicates share one object.
+
+    Every Contractions.Solution builds its own ProblemType and ProblemPredicate,
+    but a logic file has few distinct values of either. The parent keeps every
+    solution until the libraries are written and does not modify these objects,
+    so equal values are shared; pickling the result preserves the sharing.
+    """
+    for sol in library.solutions.values():
+        key = pickle.dumps(state(sol.problemType))
+        sol.problemType = problemTypes.setdefault(key, sol.problemType)
+        key = pickle.dumps(state(sol.problemPredicate))
+        sol.problemPredicate = problemPredicates.setdefault(key, sol.problemPredicate)
+    for lazy in library.lazyLibraries.values():
+        _shareEqualSolutionParts(lazy, problemTypes, problemPredicates)
 
 
 def libraryRoot(outputPath: Union[str, Path]) -> Path:
