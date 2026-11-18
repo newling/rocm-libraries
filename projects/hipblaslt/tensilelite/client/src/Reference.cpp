@@ -52,10 +52,8 @@ namespace TensileLite
     namespace
     {
 
-        // Helper to load data from various source types into an AccumT buffer.
-        // Sub-float types go through float first since they lack operator AccumT();
-        // integer types convert directly (exact for Int8 into int32_t, and the same
-        // conversion as the slow path's cast<> for Int32 into float).
+        // Narrow floating-point wrappers convert through float because they do not
+        // provide every accumulator conversion. Built-in arithmetic types convert directly.
         template <typename AccumT, typename SrcType>
         std::vector<AccumT> loadTo(void const* src, size_t N)
         {
@@ -63,7 +61,7 @@ namespace TensileLite
             const SrcType*      sPtr = static_cast<const SrcType*>(src);
             for(size_t i = 0; i < N; ++i)
             {
-                if constexpr(std::is_integral_v<SrcType>)
+                if constexpr(std::is_arithmetic_v<SrcType>)
                     buffer[i] = static_cast<AccumT>(sPtr[i]);
                 else
                     buffer[i] = static_cast<AccumT>(static_cast<float>(sPtr[i]));
