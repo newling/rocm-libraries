@@ -60,4 +60,6 @@ fi
 
 # Run from outside the source tree, so the tests import the installed package.
 cd "${work_dir}"
+# Check new status values in the checkout even when the pinned nightly predates them.
+export HIPBLASLT_PY_TEST_SOURCE_HEADERS=1
 "${vpy}" -m pytest "${package_dir}/tests" -ra -v
