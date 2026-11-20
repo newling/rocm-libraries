@@ -1023,6 +1023,8 @@ endif()
 # to A/B. A, B and C have +-1 real and imaginary parts, so a missing, misplaced or
 # extra conjugation changes D. Complex problems take no bias, ScaleAB,
 # scaleAlphaVec or activation (the fast path rejects them; the driver too).
+# Cross the 32x32 output tiles and multiple 8-element K tiles, including tails.
+set(COMPLEX_SIZES -M 35 -N 39 -K 17)
 foreach(PATH fast slow)
     if("${PATH}" STREQUAL "fast")
         set(PATH_FLAGS --tryFastPath)
@@ -1031,15 +1033,10 @@ foreach(PATH fast slow)
     endif()
 
     foreach(TYPE c z)
-        if("${TYPE}" STREQUAL "c")
-            set(SIZES ${F32_SIZES})
-        else()
-            set(SIZES ${F64_SIZES})
-        endif()
         foreach(TRANS NN TN NT TT)
             get_trans_flags(${TRANS} TFLAGS)
             add_cpu_gemm_test(${PATH}_${TYPE}_${TRANS}
-                ARGS ${SIZES} ${TFLAGS} --type ${TYPE} --validate ${PATH_FLAGS}
+                ARGS ${COMPLEX_SIZES} ${TFLAGS} --type ${TYPE} --validate ${PATH_FLAGS}
             )
         endforeach()
         # Each entry: NAME;transpose;conjugate flags.
@@ -1055,20 +1052,20 @@ foreach(PATH fast slow)
             separate_arguments(CONJ_FLAGS)
             get_trans_flags(${TRANS} TFLAGS)
             add_cpu_gemm_test(${PATH}_${TYPE}_${NAME}
-                ARGS ${SIZES} ${TFLAGS} ${CONJ_FLAGS} --type ${TYPE} --validate ${PATH_FLAGS}
+                ARGS ${COMPLEX_SIZES} ${TFLAGS} ${CONJ_FLAGS} --type ${TYPE} --validate ${PATH_FLAGS}
             )
         endforeach()
         add_cpu_gemm_test(${PATH}_${TYPE}_AlphaBeta
-            ARGS ${SIZES} --type ${TYPE} --alpha 0.3 --beta 0.5 --validate ${PATH_FLAGS}
+            ARGS ${COMPLEX_SIZES} --type ${TYPE} --alpha 0.3 --beta 0.5 --validate ${PATH_FLAGS}
         )
         add_cpu_gemm_test(${PATH}_${TYPE}_Batched_ConjA_TN
-            ARGS ${SIZES} --transA --conjA --type ${TYPE} --beta 1.0 --batchCount 3 --validate ${PATH_FLAGS}
+            ARGS ${COMPLEX_SIZES} --transA --conjA --type ${TYPE} --beta 1.0 --batchCount 3 --validate ${PATH_FLAGS}
         )
     endforeach()
 
     add_cpu_gemm_test(${PATH}_c_InjectedFailure_Rejected
         EXPECTED_ERROR "Mismatch at 0:"
-        ARGS ${F32_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
+        ARGS ${COMPLEX_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
     )
 endforeach()
 
