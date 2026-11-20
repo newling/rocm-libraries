@@ -7,6 +7,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
 
+#include <initializer_list>
 #include <type_traits>
 
 using namespace TensileLite;
@@ -79,15 +80,15 @@ namespace
         inputs.scaleA = &scaleA;
         inputs.scaleB = &scaleB;
 
-        // Slow execution is the prerequisite for the Scalar fallback in the
-        // following scaling PR. Unit scales isolate missing dispatch from
-        // rounding order. The scaled profile exercises the float epilogue:
+        // Force slow execution to exercise every dispatch case. Unit scales
+        // isolate missing dispatch from rounding order. The scaled profile
+        // exercises the float epilogue:
         // Half(0.9)*3 narrows to 2.75 in F8 and 2.5 in B8, then
         // D = narrowed*0.5*1.5 + 2*0.25. These literals are exactly
         // representable in every output type; the fast route is not an oracle.
-        const bool  isB8     = halfA
-                                   ? (std::is_same_v<F8A, BFloat8> || std::is_same_v<F8A, BFloat8_fnuz>)
-                                   : (std::is_same_v<F8B, BFloat8> || std::is_same_v<F8B, BFloat8_fnuz>);
+        const bool isB8 = halfA
+                              ? (std::is_same_v<F8A, BFloat8> || std::is_same_v<F8A, BFloat8_fnuz>)
+                              : (std::is_same_v<F8B, BFloat8> || std::is_same_v<F8B, BFloat8_fnuz>);
         const float expected = scaled ? (isB8 ? 2.375f : 2.5625f) : 1.0f;
         ASSERT_NO_THROW(
             SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/false));
