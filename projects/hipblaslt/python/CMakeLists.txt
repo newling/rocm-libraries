@@ -91,7 +91,7 @@ else()
         BUILD_WITH_INSTALL_RPATH ON)
 endif()
 
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/_build_info.py.in"
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/_build_info.py.in"
                "${CMAKE_CURRENT_BINARY_DIR}/_build_info.py" @ONLY)
 
 install(TARGETS _core DESTINATION hipblaslt)
