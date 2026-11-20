@@ -9,8 +9,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
 #include <limits>
 #include <string>
 #include <utility>
@@ -811,19 +813,19 @@ TEST(ReferenceFastPath, Float8OutputEligibilityFollowsReferenceTypeIds)
 
     // The reference's Float8-output ids with float alpha/beta (TypedGemm_*_S).
     const DT F8 = DT::Float8, B8 = DT::BFloat8, F8N = DT::Float8_fnuz, B8N = DT::BFloat8_fnuz,
-             H  = DT::Half;
-    for(Types t : {Types{F8, F8, F8, F8, F8},          Types{F8, F8, B8, F8, F8},
-                   Types{B8, B8, F8, B8, B8},          Types{B8, B8, B8, B8, B8},
-                   Types{F8, B8, F8, F8, B8},          Types{F8, B8, B8, F8, B8},
-                   Types{B8, F8, F8, B8, F8},          Types{B8, F8, B8, B8, F8},
-                   Types{H, F8, F8, H, H},             Types{F8, H, F8, H, H},
-                   Types{H, F8, F8, F8, F8},           Types{F8, H, F8, F8, F8},
-                   Types{F8N, F8N, F8N, F8N, F8N},     Types{F8N, F8N, B8N, F8N, F8N},
-                   Types{B8N, B8N, F8N, B8N, B8N},     Types{B8N, B8N, B8N, B8N, B8N},
-                   Types{F8N, B8N, F8N, F8N, B8N},     Types{F8N, B8N, B8N, F8N, B8N},
-                   Types{B8N, F8N, F8N, B8N, F8N},     Types{B8N, F8N, B8N, B8N, F8N},
-                   Types{H, F8N, F8N, H, H},           Types{F8N, H, F8N, H, H},
-                   Types{H, F8N, F8N, F8N, F8N},       Types{F8N, H, F8N, F8N, F8N}})
+             H = DT::Half;
+    for(Types t : {Types{F8, F8, F8, F8, F8},      Types{F8, F8, B8, F8, F8},
+                   Types{B8, B8, F8, B8, B8},      Types{B8, B8, B8, B8, B8},
+                   Types{F8, B8, F8, F8, B8},      Types{F8, B8, B8, F8, B8},
+                   Types{B8, F8, F8, B8, F8},      Types{B8, F8, B8, B8, F8},
+                   Types{H, F8, F8, H, H},         Types{F8, H, F8, H, H},
+                   Types{H, F8, F8, F8, F8},       Types{F8, H, F8, F8, F8},
+                   Types{F8N, F8N, F8N, F8N, F8N}, Types{F8N, F8N, B8N, F8N, F8N},
+                   Types{B8N, B8N, F8N, B8N, B8N}, Types{B8N, B8N, B8N, B8N, B8N},
+                   Types{F8N, B8N, F8N, F8N, B8N}, Types{F8N, B8N, B8N, F8N, B8N},
+                   Types{B8N, F8N, F8N, B8N, F8N}, Types{B8N, F8N, B8N, B8N, F8N},
+                   Types{H, F8N, F8N, H, H},       Types{F8N, H, F8N, H, H},
+                   Types{H, F8N, F8N, F8N, F8N},   Types{F8N, H, F8N, F8N, F8N}})
     {
         for(auto mode : {"", "Scalar", "Vector"})
         {
@@ -852,8 +854,8 @@ TEST(ReferenceFastPath, Float8OutputEligibilityFollowsReferenceTypeIds)
         EXPECT_FALSE(isFastPathEligible(
             makeFloat8OutputProblem(t.a, t.b, t.cd, t.computeA, t.computeB, 4, 4, 4)))
             << TensileLite::ToString(t.a) << " x " << TensileLite::ToString(t.b) << " -> "
-            << TensileLite::ToString(t.cd) << ", MAC " << TensileLite::ToString(t.computeA)
-            << " x " << TensileLite::ToString(t.computeB);
+            << TensileLite::ToString(t.cd) << ", MAC " << TensileLite::ToString(t.computeA) << " x "
+            << TensileLite::ToString(t.computeB);
     }
     auto halfAlpha = makeFloat8OutputProblem(F8, F8, F8, F8, F8, 4, 4, 4);
     halfAlpha.setAlphaType(DT::Half);
@@ -868,13 +870,13 @@ namespace
     {
         constexpr auto f8      = TypeInfo<F8>::Enum;
         auto           problem = makeFloat8OutputProblem(halfA ? rocisa::DataType::Half : f8,
-                                               halfA ? f8 : rocisa::DataType::Half,
-                                               f8,
-                                               f8,
-                                               f8,
-                                               2,
-                                               2,
-                                               1);
+                                                         halfA ? f8 : rocisa::DataType::Half,
+                                                         f8,
+                                                         f8,
+                                                         f8,
+                                                         2,
+                                                         2,
+                                                         1);
         problem.setUseScaleAB(scalar ? "Scalar" : "Vector");
         problem.setScaleA(rocisa::DataType::Float, scalar ? 1 : 2);
         problem.setScaleB(rocisa::DataType::Float, scalar ? 1 : 2);
@@ -886,11 +888,11 @@ namespace
         std::vector<float> halfScale  = {3.0f, -2.0f};
         std::vector<float> otherScale = {0.5f, 1.0f};
         ContractionInputs  inputs(halfA ? static_cast<void const*>(h.data()) : f.data(),
-                                 halfA ? static_cast<void const*>(f.data()) : h.data(),
-                                 c.data(),
-                                 d.data(),
-                                 1.0f,
-                                 0.0f);
+                                  halfA ? static_cast<void const*>(f.data()) : h.data(),
+                                  c.data(),
+                                  d.data(),
+                                  1.0f,
+                                  0.0f);
         inputs.scaleA = halfA ? halfScale.data() : otherScale.data();
         inputs.scaleB = halfA ? otherScale.data() : halfScale.data();
         SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
@@ -947,7 +949,7 @@ namespace
     // that the Float8/BFloat8 output is cases[m].second on both paths, including
     // non-finite results from SaturateCast.
     template <typename OutT>
-    void checkFloat8OutputCast(rocisa::DataType                           type,
+    void checkFloat8OutputCast(rocisa::DataType                            type,
                                std::vector<std::pair<float, float>> const& cases)
     {
         const size_t M       = cases.size();
