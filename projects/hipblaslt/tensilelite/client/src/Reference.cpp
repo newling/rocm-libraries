@@ -1785,22 +1785,7 @@ namespace TensileLite
 
             std::vector<AccumT> shadowD;
             AccumT*             ptrD = nullptr;
-            if(problem.d().dataType() == rocisa::DataType::Float
-               && std::is_same_v<AccumT, float>)
-            {
-                ptrD = static_cast<AccumT*>(inputs.d);
-            }
-            else if(problem.d().dataType() == rocisa::DataType::Double
-                    && std::is_same_v<AccumT, double>)
-            {
-                ptrD = static_cast<AccumT*>(inputs.d);
-            }
-            else if(problem.d().dataType() == rocisa::DataType::Int32
-                    && std::is_same_v<AccumT, int32_t>)
-            {
-                ptrD = static_cast<AccumT*>(inputs.d);
-            }
-            else if(TypeInfo<AccumT>::IsComplex && problem.d().dataType() == TypeInfo<AccumT>::Enum)
+            if(problem.d().dataType() == TypeInfo<AccumT>::Enum)
             {
                 ptrD = static_cast<AccumT*>(inputs.d);
             }
