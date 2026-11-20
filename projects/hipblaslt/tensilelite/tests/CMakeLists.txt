@@ -1082,6 +1082,8 @@ endforeach()
 # the same casts and tolerance as D. With relu, D and E differ wherever the
 # value is negative, so E written after activation (or not at all) fails.
 # Bias is not combined with --batchCount (the driver's bias is one M vector).
+# Cross full 32 x 32 tiles and 8-element K blocks, including each remainder.
+set(EPILOGUE_SIZES -M 37 -N 35 -K 19)
 foreach(PATH fast slow)
     if("${PATH}" STREQUAL "fast")
         set(PATH_FLAGS --tryFastPath)
@@ -1090,38 +1092,37 @@ foreach(PATH fast slow)
     endif()
 
     foreach(TYPE f32 f16 bf16)
-        get_test_sizes(${TYPE} SIZES)
         add_cpu_gemm_test(${PATH}_${TYPE}_UseE_BiasRelu
-            ARGS ${SIZES} --type ${TYPE} --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
+            ARGS ${EPILOGUE_SIZES} --type ${TYPE} --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
         )
     endforeach()
     add_cpu_gemm_test(${PATH}_f32_UseE
-        ARGS ${F32_SIZES} --type f32 --useE --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type f32 --useE --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_f32_UseE_TN_AllFeatures
-        ARGS ${F32_SIZES} --transA --type f32 --beta 0.5 --bias --activation relu --scaleAlphaVec --useScaleAB Vector --useE --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --transA --type f32 --beta 0.5 --bias --activation relu --scaleAlphaVec --useScaleAB Vector --useE --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_f32_UseE_Relu_Batched
-        ARGS ${F32_SIZES} --type f32 --beta 1.0 --activation relu --batchCount 3 --useE --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type f32 --beta 1.0 --activation relu --batchCount 3 --useE --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_f64_UseE_BiasRelu
-        ARGS ${F64_SIZES} --type f64 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type f64 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_tf32_UseE_BiasRelu
-        ARGS ${F32_SIZES} --type tf32 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type tf32 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
     )
     # Int8 inputs: Int8 E from a float epilogue (round half to even, saturate) and
     # Int32 E from an int32 epilogue, compared exactly (alphas as in the Int8 tests).
     add_cpu_gemm_test(${PATH}_I8_I8_S_UseE_BiasRelu
-        ARGS ${F16_SIZES} --type i8 --typeCD i8 --typeAlpha f32 --alpha 0.001953125 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type i8 --typeCD i8 --typeAlpha f32 --alpha 0.001953125 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_I8_I32_I32_UseE_BiasRelu
-        ARGS ${F16_SIZES} --type i8 --typeCD i32 --typeAlpha i32 --alpha 1 --beta 2 --bias --activation relu --useE --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type i8 --typeCD i32 --typeAlpha i32 --alpha 1 --beta 2 --bias --activation relu --useE --validate ${PATH_FLAGS}
     )
     if(NOT WIN32)
         # Float8 E, compared exactly (see the Float8 output tests).
         add_cpu_gemm_test(${PATH}_F8_F8_S_UseE_BiasRelu
-            ARGS ${F16_SIZES} --type f8 --typeCD f8 --alpha 0.3 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
+            ARGS ${EPILOGUE_SIZES} --type f8 --typeCD f8 --alpha 0.3 --beta 0.5 --bias --activation relu --useE --validate ${PATH_FLAGS}
         )
         add_cpu_gemm_test(${PATH}_f4_MX32_UseE_Relu
             ARGS -M 133 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --activation relu --useE --validate ${PATH_FLAGS}
@@ -1147,9 +1148,8 @@ foreach(PATH fast slow)
     endif()
 
     foreach(TYPE f32 f16 bf16)
-        get_test_sizes(${TYPE} SIZES)
         add_cpu_gemm_test(${PATH}_${TYPE}_Gradient_ReluE_BiasD
-            ARGS ${SIZES} --type ${TYPE} --beta 0.5 --gradient --activation relu --useE --bias --validate ${PATH_FLAGS}
+            ARGS ${EPILOGUE_SIZES} --type ${TYPE} --beta 0.5 --gradient --activation relu --useE --bias --validate ${PATH_FLAGS}
         )
     endforeach()
     foreach(SRC a b)
@@ -1157,36 +1157,36 @@ foreach(PATH fast slow)
         foreach(TRANS NN TN NT TT)
             get_trans_flags(${TRANS} TFLAGS)
             add_cpu_gemm_test(${PATH}_f16_Gradient_Bias${SRC_NAME}_${TRANS}
-                ARGS ${F16_SIZES} ${TFLAGS} --type f16 --beta 0.5 --gradient --bias --biasSrc ${SRC} --validate ${PATH_FLAGS}
+                ARGS ${EPILOGUE_SIZES} ${TFLAGS} --type f16 --beta 0.5 --gradient --bias --biasSrc ${SRC} --validate ${PATH_FLAGS}
             )
         endforeach()
     endforeach()
     add_cpu_gemm_test(${PATH}_f32_Gradient_ReluE_BiasD_TT_AllFeatures
-        ARGS ${F32_SIZES} --transA --transB --type f32 --beta 0.5 --gradient --activation relu --useE --bias --scaleAlphaVec --useScaleAB Vector --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --transA --transB --type f32 --beta 0.5 --gradient --activation relu --useE --bias --scaleAlphaVec --useScaleAB Vector --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_f32_Gradient_Relu_NoE
-        ARGS ${F32_SIZES} --type f32 --beta 0.5 --gradient --activation relu --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type f32 --beta 0.5 --gradient --activation relu --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_f32_Gradient_ReluE_Batched
-        ARGS ${F32_SIZES} --type f32 --beta 1.0 --gradient --activation relu --useE --batchCount 3 --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type f32 --beta 1.0 --gradient --activation relu --useE --batchCount 3 --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_f64_Gradient_ReluE_BiasD
-        ARGS ${F64_SIZES} --type f64 --beta 0.5 --gradient --activation relu --useE --bias --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type f64 --beta 0.5 --gradient --activation relu --useE --bias --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_tf32_Gradient_ReluE_BiasA
-        ARGS ${F32_SIZES} --transA --type tf32 --beta 0.5 --gradient --activation relu --useE --bias --biasSrc a --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --transA --type tf32 --beta 0.5 --gradient --activation relu --useE --bias --biasSrc a --validate ${PATH_FLAGS}
     )
     # Int8 inputs: float epilogue with Int8 C/D/E, and int32 epilogue (int32 bias
     # gradient) with Int32 C/D/E; compared exactly.
     add_cpu_gemm_test(${PATH}_I8_I8_S_Gradient_ReluE_BiasD
-        ARGS ${F16_SIZES} --type i8 --typeCD i8 --typeAlpha f32 --alpha 0.001953125 --beta 0.5 --gradient --activation relu --useE --bias --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type i8 --typeCD i8 --typeAlpha f32 --alpha 0.001953125 --beta 0.5 --gradient --activation relu --useE --bias --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_I8_I32_I32_Gradient_ReluE_BiasA
-        ARGS ${F16_SIZES} --type i8 --typeCD i32 --typeAlpha i32 --alpha 1 --beta 2 --gradient --activation relu --useE --bias --biasSrc a --validate ${PATH_FLAGS}
+        ARGS ${EPILOGUE_SIZES} --type i8 --typeCD i32 --typeAlpha i32 --alpha 1 --beta 2 --gradient --activation relu --useE --bias --biasSrc a --validate ${PATH_FLAGS}
     )
     if(NOT WIN32)
         add_cpu_gemm_test(${PATH}_F8_F8_S_Gradient_ReluE_BiasB
-            ARGS ${F16_SIZES} --type f8 --typeCD f8 --alpha 0.3 --beta 0.5 --gradient --activation relu --useE --bias --biasSrc b --validate ${PATH_FLAGS}
+            ARGS ${EPILOGUE_SIZES} --type f8 --typeCD f8 --alpha 0.3 --beta 0.5 --gradient --activation relu --useE --bias --biasSrc b --validate ${PATH_FLAGS}
         )
         add_cpu_gemm_test(${PATH}_f4_MX32_Gradient_ReluE_BiasD
             ARGS -M 133 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --gradient --activation relu --useE --bias --validate ${PATH_FLAGS}
