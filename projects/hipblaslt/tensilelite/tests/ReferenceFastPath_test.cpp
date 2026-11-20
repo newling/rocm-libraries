@@ -15,7 +15,9 @@
 #include <cstring>
 #include <limits>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -1532,11 +1534,73 @@ TEST(ReferenceFastPath, NarrowBiasGradientEligibilityRequiresHpa)
             EXPECT_FALSE(isFastPathEligible(problem));
 
             problem.setUseBias(0);
-            EXPECT_TRUE(isFastPathEligible(problem));
+            EXPECT_FALSE(isFastPathEligible(problem));
             problem.setUseBias(1);
             problem.setUseGradient(false);
-            EXPECT_TRUE(isFastPathEligible(problem));
+            EXPECT_FALSE(isFastPathEligible(problem));
         }
+    }
+}
+
+namespace
+{
+    template <typename T>
+    void checkNarrowGemmAccumulation(rocisa::DataType type,
+                                     rocisa::DataType scalarType,
+                                     ConstantVariant  alpha,
+                                     ConstantVariant  beta,
+                                     float            boundary)
+    {
+        // At this boundary, narrow accumulation loses the middle 1, giving 0;
+        // float accumulation preserves it, giving 1. Every product is exact.
+        const std::vector<T> a = {T(boundary), T(1.0f), T(-boundary)};
+        const std::vector<T> b(3, T(1.0f));
+        for(bool hpa : {false, true})
+        {
+            for(auto [useE, gradient] :
+                {std::pair{false, false}, std::pair{true, false}, std::pair{true, true}})
+            {
+                SCOPED_TRACE("hpa=" + std::to_string(hpa) + " useE=" + std::to_string(useE)
+                             + " gradient=" + std::to_string(gradient));
+                auto problem = makePackedProblem(type, type, type, 1, 1, 3);
+                problem.setAlphaType(scalarType);
+                problem.setBetaType(scalarType);
+                problem.setHighPrecisionAccumulate(hpa);
+                problem.setUseE(useE);
+                if(useE)
+                    problem.setE(type, problem.d().sizes(), {}, /*isOutput=*/!gradient);
+                problem.setUseGradient(gradient);
+                if(gradient)
+                {
+                    problem.setActivationType(ActivationType::All);
+                    problem.setParams().setActivationEnum(ActivationType::DRelu);
+                }
+                for(bool fast : {false, true})
+                {
+                    SCOPED_TRACE(fast ? "fast requested" : "slow requested");
+                    T                 c(0.0f), d(-99.0f), e(1.0f);
+                    ContractionInputs inputs(a.data(), b.data(), &c, &d, alpha, beta);
+                    inputs.e = &e;
+                    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, fast);
+                    EXPECT_EQ(static_cast<float>(d), hpa ? 1.0f : 0.0f);
+                    EXPECT_EQ(static_cast<float>(e), useE && !gradient ? float(hpa) : 1.0f);
+                }
+                EXPECT_EQ(isFastPathEligible(problem), hpa);
+            }
+        }
+    }
+} // namespace
+
+TEST(ReferenceFastPath, NarrowGemmRespectsAccumulationPrecision)
+{
+    using DT = rocisa::DataType;
+    {
+        SCOPED_TRACE("Half");
+        checkNarrowGemmAccumulation<Half>(DT::Half, DT::Half, Half(1.0f), Half(0.0f), 2048.0f);
+    }
+    {
+        SCOPED_TRACE("BFloat16");
+        checkNarrowGemmAccumulation<BFloat16>(DT::BFloat16, DT::Float, 1.0f, 0.0f, 256.0f);
     }
 }
 

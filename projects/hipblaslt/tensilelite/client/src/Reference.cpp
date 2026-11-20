@@ -1427,13 +1427,13 @@ namespace TensileLite
                 return rejectFast("amaxD");
             }
 
-            if(problem.useGradient() && problem.useBias() && !problem.highPrecisionAccumulate())
+            if(!problem.highPrecisionAccumulate())
             {
-                // These slow-path reductions accumulate in Half or BFloat16,
-                // rounding after each addition. The fast path accumulates in float.
+                // These GEMMs and their epilogues accumulate in Half or BFloat16,
+                // rounding after each operation. The fast path accumulates in float.
                 const auto typeId = getInputContractionInputsTypeId(problem);
                 if(typeId == TypedGemm_H_H_H::TypeId() || typeId == TypedGemm_B_B_S::TypeId())
-                    return rejectFast("non_hpa_bias_reduction");
+                    return rejectFast("non_hpa_narrow_accumulation");
             }
 
             if(isFloat8Output && !isFloat8OutputFastPathTypeId(problem))
