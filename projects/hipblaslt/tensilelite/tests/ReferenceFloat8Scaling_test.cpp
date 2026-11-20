@@ -8,6 +8,8 @@
 #include <Tensile/DataTypes.hpp>
 
 #include <array>
+#include <cstddef>
+#include <initializer_list>
 #include <string>
 #include <type_traits>
 
@@ -22,8 +24,8 @@ namespace
                       bool               narrow     = true,
                       bool               unitScales = false)
     {
-        constexpr auto f8      = TypeInfo<F8>::Enum;
-        auto           problem = ContractionProblemGemm::GEMM_Strides(false,
+        constexpr auto f8 = TypeInfo<F8>::Enum;
+        auto problem = ContractionProblemGemm::GEMM_Strides(false,
                                                             false,
                                                             halfA ? rocisa::DataType::Half : f8,
                                                             halfA ? f8 : rocisa::DataType::Half,
@@ -56,11 +58,11 @@ namespace
         std::array<float, 2>  narrowedScale = {3.0f, -2.0f};
         std::array<float, 2>  otherScale    = {1.0f, 0.5f};
         ContractionInputs     inputs(halfA ? static_cast<void const*>(h.data()) : f.data(),
-                                 halfA ? static_cast<void const*>(f.data()) : h.data(),
-                                 c.data(),
-                                 d.data(),
-                                 1.0f,
-                                 0.0f);
+                                     halfA ? static_cast<void const*>(f.data()) : h.data(),
+                                     c.data(),
+                                     d.data(),
+                                     1.0f,
+                                     0.0f);
         if(unitScales)
         {
             narrowedScale.fill(1.0f);

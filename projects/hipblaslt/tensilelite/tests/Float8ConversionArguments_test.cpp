@@ -6,7 +6,10 @@
 #include <Tensile/ContractionSolution.hpp>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
