@@ -995,11 +995,10 @@ if(NOT WIN32)
         endforeach()
 
         # A perturbed (here saturated) Float8 D element must fail validation.
-        add_test(
-            NAME "CPUGemm.${PATH}_F8_F8_S_InjectedFailure_Rejected"
-            COMMAND cpu-gemm-driver ${F16_SIZES} --type f8 --typeCD f8 --useScaleAB Scalar --validate --injectValidationFailure ${PATH_FLAGS}
+        add_cpu_gemm_test(${PATH}_F8_F8_S_InjectedFailure_Rejected
+            EXPECTED_ERROR "Mismatch at 0:"
+            ARGS ${F16_SIZES} --type f8 --typeCD f8 --useScaleAB Scalar --validate --injectValidationFailure ${PATH_FLAGS}
         )
-        set_tests_properties("CPUGemm.${PATH}_F8_F8_S_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
 
         # Alpha overflows float to infinity; the Float8 output is NaN.
         # Matching NaNs pass, but replacing one with finite 16 must fail.
