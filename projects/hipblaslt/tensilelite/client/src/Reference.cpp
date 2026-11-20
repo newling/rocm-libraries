@@ -1425,19 +1425,14 @@ namespace TensileLite
                         "bias-gradient reduction requires a 2-D tensor or a single batch");
             }
 
-            if(!problem.highPrecisionAccumulate()
-               && (problem.outputAmaxD() || (problem.useGradient() && problem.useBias())))
+            if(!problem.highPrecisionAccumulate())
             {
+                // These GEMMs and their epilogues accumulate in Half or BFloat16,
+                // rounding after each operation. The fast path accumulates in float.
                 const auto typeId = getInputContractionInputsTypeId(problem);
                 if(typeId == TypedGemm_H_H_H::TypeId() || typeId == TypedGemm_B_B_S::TypeId())
-                {
-                    // The slow epilogue rounds to Half or BFloat16; the fast epilogue uses float.
-                    if(problem.outputAmaxD())
-                        return rejectFast("Half/BFloat16 AMAX-D without high-precision "
-                                          "accumulation requires the slow path");
-                    return rejectFast("Half/BFloat16 bias-gradient reductions without "
-                                      "high-precision accumulation require the slow path");
-                }
+                    return rejectFast("Half/BFloat16 without high-precision accumulation "
+                                      "requires the slow path");
             }
 
             if(isFloat8Output && !isFloat8OutputFastPathTypeId(problem))
