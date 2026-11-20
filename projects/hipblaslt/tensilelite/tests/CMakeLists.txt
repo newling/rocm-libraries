@@ -1066,11 +1066,10 @@ foreach(PATH fast slow)
         )
     endforeach()
 
-    add_test(
-        NAME "CPUGemm.${PATH}_c_InjectedFailure_Rejected"
-        COMMAND cpu-gemm-driver ${F32_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
+    add_cpu_gemm_test(${PATH}_c_InjectedFailure_Rejected
+        EXPECTED_ERROR "Mismatch at 0:"
+        ARGS ${F32_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
     )
-    set_tests_properties("CPUGemm.${PATH}_c_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
 endforeach()
 
 # Option checks: these must be rejected.
