@@ -48,6 +48,10 @@ fi
 if command -v cygpath >/dev/null 2>&1; then
     work_dir="$(cygpath -u "${work_dir}")"
 fi
+# Keep paths valid after the test and cleanup steps change directory.
+if [[ "${work_dir}" != /* ]]; then
+    work_dir="${PWD}/${work_dir}"
+fi
 venv="${work_dir}/venv"
 
 # The venv's own tools, which live in bin/ on Linux and Scripts/ on Windows.
